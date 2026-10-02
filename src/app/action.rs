@@ -18,7 +18,7 @@ pub enum Action {
     ChangeColumn,
     ChangeToken,
     Sort,
-    FilterTypes,
+    Filter,
     Toggle,
     NextTab,
     PrevTab,
@@ -32,7 +32,7 @@ pub const HELP: [Action; 15] = [
     Action::NextTab,
     Action::Confirm,
     Action::Sort,
-    Action::FilterTypes,
+    Action::Filter,
     Action::ChangeColumn,
     Action::AssignToMe,
     Action::Unassign,
@@ -63,7 +63,7 @@ impl Action {
             (KeyCode::Char('u'), _) => Some(Self::Unassign),
             (KeyCode::Char('s'), _) => Some(Self::ChangeColumn),
             (KeyCode::Char('S'), _) => Some(Self::Sort),
-            (KeyCode::Char('f'), _) => Some(Self::FilterTypes),
+            (KeyCode::Char('f'), _) => Some(Self::Filter),
             (KeyCode::Char(' '), _) => Some(Self::Toggle),
             (KeyCode::Tab, _) => Some(Self::NextTab),
             (KeyCode::BackTab, _) => Some(Self::PrevTab),
@@ -91,7 +91,7 @@ impl Action {
             Self::ChangeColumn => "s",
             Self::ChangeToken => "t",
             Self::Sort => "S",
-            Self::FilterTypes => "f",
+            Self::Filter => "f",
             Self::Toggle => "space",
             Self::NextTab => "tab",
             Self::PrevTab => "shift+tab",
@@ -117,7 +117,7 @@ impl Action {
             Self::ChangeColumn => "change status",
             Self::ChangeToken => "set PAT",
             Self::Sort => "sort",
-            Self::FilterTypes => "work item types",
+            Self::Filter => "filter",
             Self::Toggle => "toggle",
             Self::NextTab => "next tab",
             Self::PrevTab => "previous tab",
@@ -196,7 +196,7 @@ mod tests {
             Some(Action::Help)
         );
         assert_eq!(plain(KeyCode::Char(' ')), Some(Action::Toggle));
-        assert_eq!(plain(KeyCode::Char('f')), Some(Action::FilterTypes));
+        assert_eq!(plain(KeyCode::Char('f')), Some(Action::Filter));
     }
 
     #[test]

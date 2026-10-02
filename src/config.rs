@@ -86,6 +86,8 @@ pub enum AuthMethod {
 pub struct OtherPrsFilter {
     pub reviewers: Vec<String>,
     pub creators: Vec<String>,
+    pub show_approved: bool,
+    pub show_drafts: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]

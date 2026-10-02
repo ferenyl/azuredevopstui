@@ -61,7 +61,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             };
             popup::render_picker(frame, app, title, selection, main);
         }
-        Some(Popup::Types { selection, checked }) => {
+        Some(Popup::Types { selection, checked } | Popup::PrFilter { selection, checked }) => {
             let items = selection
                 .items
                 .iter()
@@ -72,7 +72,12 @@ pub fn render(frame: &mut Frame, app: &App) {
                 items,
                 selected: selection.selected,
             };
-            popup::render_picker(frame, app, " Work item types ", &selection, main);
+            let title = if matches!(app.popup, Some(Popup::PrFilter { .. })) {
+                " Filter others' PRs "
+            } else {
+                " Work item types "
+            };
+            popup::render_picker(frame, app, title, &selection, main);
         }
         None => {}
     }
@@ -422,9 +427,8 @@ fn panel_items(app: &App, panel: Panel) -> Option<Vec<Line<'static>>> {
             .as_ref()
             .map(|prs| prs.iter().map(|pr| pr_line(app, pr, false)).collect()),
         Panel::OtherPrs => data
-            .other_prs
-            .as_ref()
-            .map(|prs| prs.iter().map(|pr| pr_line(app, pr, true)).collect()),
+            .shown_other_prs()
+            .map(|prs| prs.into_iter().map(|pr| pr_line(app, pr, true)).collect()),
         Panel::MyWorkItems => data
             .my_work_items
             .as_ref()

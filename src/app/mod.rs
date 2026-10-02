@@ -131,12 +131,19 @@ impl App {
             }
             Screen::Setup(_) => &[Action::Quit],
             Screen::Main if self.show_help => &[Action::Cancel],
-            Screen::Main if matches!(self.popup, Some(Popup::Types { .. })) => &[
-                Action::Down,
-                Action::Toggle,
-                Action::Confirm,
-                Action::Cancel,
-            ],
+            Screen::Main
+                if matches!(
+                    self.popup,
+                    Some(Popup::Types { .. } | Popup::PrFilter { .. })
+                ) =>
+            {
+                &[
+                    Action::Down,
+                    Action::Toggle,
+                    Action::Confirm,
+                    Action::Cancel,
+                ]
+            }
             Screen::Main if self.popup.is_some() => {
                 &[Action::Down, Action::Confirm, Action::Cancel]
             }
@@ -148,6 +155,7 @@ impl App {
                     Action::Confirm,
                     Action::OpenInBrowser,
                     Action::Sort,
+                    Action::Filter,
                     Action::Reload,
                     Action::Help,
                     Action::Quit,
@@ -161,7 +169,7 @@ impl App {
                     Action::Unassign,
                     Action::OpenInBrowser,
                     Action::Sort,
-                    Action::FilterTypes,
+                    Action::Filter,
                     Action::Reload,
                     Action::Help,
                     Action::Quit,
@@ -175,7 +183,7 @@ impl App {
                     Action::AssignToMe,
                     Action::OpenInBrowser,
                     Action::Sort,
-                    Action::FilterTypes,
+                    Action::Filter,
                     Action::Reload,
                     Action::Help,
                     Action::Quit,
@@ -363,6 +371,7 @@ impl App {
             Some(Popup::Column(picker)) => self.confirm_column(picker),
             Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
             Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
+            Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
             None => {}
         }
     }
@@ -411,6 +420,33 @@ impl App {
         self.data.my_work_items = None;
         self.data.ready_work_items = None;
         self.refresh();
+    }
+
+    fn open_pr_filter(&mut self) {
+        let Some(config) = &self.config else {
+            return;
+        };
+        let filter = &config.other_prs_filter;
+        self.popup = Some(Popup::PrFilter {
+            selection: Selection::new(vec!["Show approved".into(), "Show drafts".into()]),
+            checked: vec![filter.show_approved, filter.show_drafts],
+        });
+    }
+
+    fn confirm_pr_filter(&mut self, checked: &[bool]) {
+        let Some(config) = &mut self.config else {
+            return;
+        };
+        let filter = &mut config.other_prs_filter;
+        filter.show_approved = checked[0];
+        filter.show_drafts = checked[1];
+        self.data.show_approved = filter.show_approved;
+        self.data.show_drafts = filter.show_drafts;
+        let result = config.save();
+        self.clamp_selections();
+        if let Err(err) = result {
+            self.report_error(err);
+        }
     }
 
     fn confirm_sort(&mut self, kind: SortKind, index: usize) {
@@ -532,6 +568,8 @@ impl App {
         };
         self.error = None;
         self.last_refresh = Instant::now();
+        self.data.show_approved = config.other_prs_filter.show_approved;
+        self.data.show_drafts = config.other_prs_filter.show_drafts;
 
         let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
         self.spawn(async move {
@@ -1025,11 +1063,14 @@ impl App {
         if let Some(popup) = &mut self.popup {
             let selection = match popup {
                 Popup::Column(picker) => &mut picker.selection,
-                Popup::Sort { selection, .. } | Popup::Types { selection, .. } => selection,
+                Popup::Sort { selection, .. }
+                | Popup::Types { selection, .. }
+                | Popup::PrFilter { selection, .. } => selection,
             };
             match action {
                 Action::Toggle => {
-                    if let Popup::Types { selection, checked } = popup
+                    if let Popup::Types { selection, checked }
+                    | Popup::PrFilter { selection, checked } = popup
                         && let Some(checked) = checked.get_mut(selection.selected)
                     {
                         *checked = !*checked;
@@ -1094,14 +1135,17 @@ impl App {
             | Action::Unassign
             | Action::ChangeColumn
             | Action::Sort
-            | Action::FilterTypes
+            | Action::Filter
             | Action::Toggle
             | Action::NextTab
             | Action::PrevTab
                 if !matches!(self.screen, Screen::Main) => {}
             Action::OpenInBrowser => self.open_in_browser(),
             Action::Sort => self.open_sort_picker(),
-            Action::FilterTypes => self.load_work_item_types(),
+            Action::Filter => match self.current_item() {
+                Some(Detail::PullRequest(_)) => self.open_pr_filter(),
+                _ => self.load_work_item_types(),
+            },
             Action::Toggle => {}
             Action::NextTab | Action::PrevTab => self.switch_tab(action == Action::NextTab),
             Action::AssignToMe => self.assign_to_me(),

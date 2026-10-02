@@ -74,6 +74,10 @@ pub enum Popup {
         selection: Selection,
         checked: Vec<bool>,
     },
+    PrFilter {
+        selection: Selection,
+        checked: Vec<bool>,
+    },
 }
 
 pub struct ColumnPicker {
@@ -94,6 +98,10 @@ pub enum DetailInfo {
 pub struct Data {
     pub my_prs: Option<Vec<PullRequest>>,
     pub other_prs: Option<Vec<PullRequest>>,
+    /// Also list others' PRs that are already approved.
+    pub show_approved: bool,
+    /// Also list others' draft PRs.
+    pub show_drafts: bool,
     pub my_work_items: Option<Vec<WorkItem>>,
     pub ready_work_items: Option<Vec<WorkItem>>,
     pub sprint_name: Option<String>,
@@ -155,11 +163,22 @@ impl Data {
     pub fn len(&self, panel: Panel) -> usize {
         match panel {
             Panel::MyPrs => self.my_prs.as_ref().map_or(0, Vec::len),
-            Panel::OtherPrs => self.other_prs.as_ref().map_or(0, Vec::len),
+            Panel::OtherPrs => self.shown_other_prs().map_or(0, |prs| prs.len()),
             Panel::MyWorkItems => self.my_work_items.as_ref().map_or(0, Vec::len),
             Panel::ReadyWorkItems => self.ready_work_items.as_ref().map_or(0, Vec::len),
             Panel::Detail => 0,
         }
+    }
+
+    /// Others' PRs as listed, without approved and draft ones unless shown.
+    pub fn shown_other_prs(&self) -> Option<Vec<&PullRequest>> {
+        self.other_prs.as_ref().map(|prs| {
+            prs.iter()
+                .filter(|pr| {
+                    (self.show_approved || !pr.approved) && (self.show_drafts || !pr.is_draft)
+                })
+                .collect()
+        })
     }
 
     /// The freshly loaded version of a shown detail, if it is still listed.
@@ -208,7 +227,10 @@ impl Data {
         };
         match panel {
             Panel::MyPrs => pr(&self.my_prs),
-            Panel::OtherPrs => pr(&self.other_prs),
+            Panel::OtherPrs => self
+                .shown_other_prs()?
+                .get(index)
+                .map(|pr| Detail::PullRequest(Box::new((*pr).clone()))),
             Panel::MyWorkItems => item(&self.my_work_items),
             Panel::ReadyWorkItems => item(&self.ready_work_items),
             Panel::Detail => None,

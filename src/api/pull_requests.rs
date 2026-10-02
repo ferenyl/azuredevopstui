@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
+use futures::{StreamExt, TryStreamExt, stream};
 
 use super::AdoClient;
 use super::models::{
@@ -11,6 +12,7 @@ use crate::config::OtherPrsFilter;
 use crate::images::markdown_images;
 
 const POLICY_API_VERSION: &str = "7.1-preview";
+const REVIEWER_POLICIES: [&str; 2] = ["Minimum number of reviewers", "Required reviewers"];
 
 impl AdoClient {
     pub async fn my_pull_requests(
@@ -59,7 +61,15 @@ impl AdoClient {
                 );
             }
         }
-        Ok(without_own(pull_requests, user_id))
+        stream::iter(without_own(pull_requests, user_id))
+            .map(|mut pr| async move {
+                let policies = self.policy_evaluations(organization, project, &pr).await?;
+                pr.approved = is_approved(&pr, &policies);
+                Ok::<_, anyhow::Error>(pr)
+            })
+            .buffered(8)
+            .try_collect()
+            .await
     }
 
     pub async fn pull_request_details(
@@ -81,32 +91,42 @@ impl AdoClient {
         ];
         let threads_path = [&pr_path[..], &["threads"]].concat();
         let statuses_path = [&pr_path[..], &["statuses"]].concat();
-        let artifact_id = format!(
-            "vstfs:///CodeReview/CodeReviewId/{}/{id}",
-            pr.repository.project.id
-        );
-        let policies_path = [organization, project, "_apis", "policy", "evaluations"];
-        let policies_query = [("artifactId", artifact_id.as_str())];
         let (threads, statuses, policies): (
             ListResponse<Thread>,
             ListResponse<PullRequestStatus>,
-            ListResponse<PolicyEvaluation>,
+            _,
         ) = tokio::try_join!(
             self.get(&self.urls.dev_azure, &threads_path, &[]),
             self.get(&self.urls.dev_azure, &statuses_path, &[]),
-            self.get_versioned(
-                &self.urls.dev_azure,
-                &policies_path,
-                &policies_query,
-                POLICY_API_VERSION,
-            ),
+            self.policy_evaluations(organization, project, pr),
         )?;
 
         Ok(PullRequestDetails {
             threads: visible_threads(threads.value),
             statuses: latest_statuses(statuses.value),
-            policies: policies.value,
+            policies,
         })
+    }
+
+    async fn policy_evaluations(
+        &self,
+        organization: &str,
+        project: &str,
+        pr: &PullRequest,
+    ) -> Result<Vec<PolicyEvaluation>> {
+        let artifact_id = format!(
+            "vstfs:///CodeReview/CodeReviewId/{}/{}",
+            pr.repository.project.id, pr.pull_request_id
+        );
+        let response: ListResponse<PolicyEvaluation> = self
+            .get_versioned(
+                &self.urls.dev_azure,
+                &[organization, project, "_apis", "policy", "evaluations"],
+                &[("artifactId", artifact_id.as_str())],
+                POLICY_API_VERSION,
+            )
+            .await?;
+        Ok(response.value)
     }
 
     async fn active_pull_requests(
@@ -154,6 +174,21 @@ fn without_own(mut pull_requests: Vec<PullRequest>, user_id: &str) -> Vec<PullRe
     let mut seen = HashSet::new();
     pull_requests.retain(|pr| seen.insert(pr.pull_request_id) && pr.created_by.id != user_id);
     pull_requests
+}
+
+/// Blocking reviewer policies are all approved, or without such policies, someone approved.
+fn is_approved(pr: &PullRequest, policies: &[PolicyEvaluation]) -> bool {
+    let mut reviewer_policies = policies
+        .iter()
+        .filter(|policy| {
+            policy.configuration.is_blocking
+                && REVIEWER_POLICIES.contains(&policy.configuration.kind.display_name.as_str())
+        })
+        .peekable();
+    if reviewer_policies.peek().is_none() {
+        return pr.reviewers.iter().any(|reviewer| reviewer.vote >= 5);
+    }
+    reviewer_policies.all(|policy| policy.status == "approved")
 }
 
 /// Threads with their deleted and system comments removed; empty threads are dropped.

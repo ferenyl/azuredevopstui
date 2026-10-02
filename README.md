@@ -322,6 +322,8 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `auth.azure_config_dir` | not set | Azure CLI config directory for the DevOps login, for example `"~/.azure-devops"`. Use it when the DevOps account differs from your Azure portal account. When not set, the default `~/.azure` is used. See [Separate account for Azure DevOps](#separate-account-for-azure-devops-azure_config_dir). |
 | `other_prs_filter.reviewers` | `[]` | Show PRs where any of these users or groups is a reviewer. |
 | `other_prs_filter.creators` | `[]` | Show PRs created by any of these users or groups. |
+| `other_prs_filter.show_approved` | `false` | Also show PRs whose reviewer policies are approved (set with `f`). |
+| `other_prs_filter.show_drafts` | `false` | Also show draft PRs (set with `f`). |
 | `ready_column` | set by setup | The board column treated as *ready*. |
 | `work_item_types` | `[]` | Work item types shown in *My work items* and *Ready*, for example `["User Story", "Bug"]`. An empty array shows all types. |
 | `show_images` | `true` | Draw images in the detail panel when the terminal supports graphics. Set it to `false` to skip the terminal graphics query at startup. |
@@ -357,6 +359,8 @@ Press `S` on a list to choose the order. PR lists and work item lists each have 
 ### Work item types
 
 Press `f` to open a list of all work item types used in the project. Hidden types such as test plans and code reviews are left out. Use `space` to tick or untick a type, and `enter` to save the choice to `work_item_types` and reload the lists. The filter applies to both work item lists. All types are shown by default, and ticking every type (or none) also shows all of them.
+
+On a PR, `f` instead opens the filter for others' PRs: tick *Show approved* and *Show drafts* to list those too. Both are hidden by default. A PR counts as approved when all its blocking reviewer policies are approved, or, without such policies, when someone has approved it. Your own PRs are always all shown.
 
 ### Colors
 
@@ -396,7 +400,7 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `enter` | Open the selected item in the detail panel |
 | `tab` / `shift+tab` | Next or previous detail tab |
 | `S` | Choose the sort order for the focused list |
-| `f` | Choose which work item types are shown |
+| `f` | Choose which work item types are shown, or on a PR, filter others' PRs |
 | `space` | Tick or untick an item in the type list |
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
