@@ -254,9 +254,10 @@ fn visible_types(categories: Vec<WorkItemTypeCategory>) -> Vec<String> {
     types
 }
 
+/// Plain text with `<img>` tags turned into image marker lines.
 fn html_to_text(html: &str) -> String {
-    let text =
-        html2text::from_read(html.as_bytes(), HTML_TEXT_WIDTH).unwrap_or_else(|_| html.into());
+    let html = crate::images::extract_html_images(html);
+    let text = html2text::from_read(html.as_bytes(), HTML_TEXT_WIDTH).unwrap_or(html);
     text.lines()
         .map(str::trim_end)
         .collect::<Vec<_>>()

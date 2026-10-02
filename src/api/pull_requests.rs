@@ -8,6 +8,7 @@ use super::models::{
     Thread,
 };
 use crate::config::OtherPrsFilter;
+use crate::images::markdown_images;
 
 const POLICY_API_VERSION: &str = "7.1-preview";
 
@@ -123,7 +124,11 @@ impl AdoClient {
                 &query,
             )
             .await?;
-        Ok(response.value)
+        let mut pull_requests = response.value;
+        for pr in &mut pull_requests {
+            pr.description = pr.description.as_deref().map(markdown_images);
+        }
+        Ok(pull_requests)
     }
 
     async fn identity_id(&self, organization: &str, name: &str) -> Result<String> {
@@ -160,6 +165,9 @@ fn visible_threads(threads: Vec<Thread>) -> Vec<Thread> {
             thread.comments.retain(|comment| {
                 !comment.is_deleted && comment.comment_type.as_deref() != Some("system")
             });
+            for comment in &mut thread.comments {
+                comment.content = comment.content.as_deref().map(markdown_images);
+            }
             thread
         })
         .filter(|thread| !thread.comments.is_empty())

@@ -11,10 +11,14 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListState, Padding, Paragraph, Tabs, Wrap};
 
+use ratatui_image::StatefulImage;
+
 use crate::api::{PullRequest, WorkItem};
 use crate::app::{
-    App, Detail, DetailInfo, DetailTab, LEFT_PANELS, Panel, Popup, Screen, Selection, SortKind,
+    App, Detail, DetailInfo, DetailTab, LEFT_PANELS, Panel, Popup, Screen, Selection, Signals,
+    SortKind,
 };
+use crate::images::{ImageState, file_name, image_marker};
 
 const LABEL_WIDTH: usize = 13;
 
@@ -42,13 +46,14 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     render_panel(frame, app, Panel::Detail, right);
     match &app.popup {
-        Some(Popup::Column(picker)) => popup::render_picker(
-            frame,
-            app,
-            &format!(" Move #{} ", picker.work_item_id),
-            &picker.selection,
-            main,
-        ),
+        Some(Popup::Column(picker)) => {
+            let title = if picker.unassign {
+                format!(" Unassign #{} – new status ", picker.work_item_id)
+            } else {
+                format!(" Move #{} ", picker.work_item_id)
+            };
+            popup::render_picker(frame, app, &title, &picker.selection, main);
+        }
         Some(Popup::Sort { kind, selection }) => {
             let title = match kind {
                 SortKind::PullRequests => " Sort PRs ",
@@ -195,12 +200,86 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
             workitem_detail::lines(app, item, None, app.detail_tab, width)
         }
     };
+    let (lines, slots) = place_images(app, lines, width);
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .scroll((app.detail_scroll, 0)),
         content,
     );
+    for slot in slots {
+        let top = i32::from(slot.row) - i32::from(app.detail_scroll);
+        let fits = top >= 0 && top + i32::from(slot.rows) <= i32::from(content.height);
+        if !fits || slot.indent >= content.width {
+            continue;
+        }
+        let area = Rect::new(
+            content.x + slot.indent,
+            content.y + top as u16,
+            slot.cols.min(content.width - slot.indent),
+            slot.rows,
+        );
+        app.images.with(&slot.url, |state| {
+            if let Some(ImageState::Ready { protocol, .. }) = state {
+                frame.render_stateful_widget(StatefulImage::default(), area, &mut **protocol);
+                app.images.drawn_at(area);
+            }
+        });
+    }
+}
+
+/// Where a loaded image is drawn, in content rows.
+struct ImageSlot {
+    url: String,
+    row: u16,
+    indent: u16,
+    cols: u16,
+    rows: u16,
+}
+
+/// Swaps image marker lines for blank space (loaded images) or a placeholder line.
+fn place_images(
+    app: &App,
+    lines: Vec<Line<'static>>,
+    width: u16,
+) -> (Vec<Line<'static>>, Vec<ImageSlot>) {
+    let muted = Style::new().fg(app.theme.muted);
+    let mut out: Vec<Line<'static>> = Vec::with_capacity(lines.len());
+    let mut slots = Vec::new();
+    for line in lines {
+        let text = line.to_string();
+        let Some(url) = image_marker(&text).map(String::from) else {
+            out.push(line);
+            continue;
+        };
+        let prefix = line.spans[..line.spans.len().saturating_sub(1)].to_vec();
+        let size = app.images.with(&url, |state| match state {
+            Some(ImageState::Ready { cols, rows, .. }) => Ok((*cols, *rows)),
+            Some(ImageState::Loading) => Err("⟳ loading image…".to_string()),
+            _ => Err(format!("[image: {}]", file_name(&url))),
+        });
+        match size {
+            Ok((cols, rows)) => {
+                let row = Paragraph::new(out.clone())
+                    .wrap(Wrap { trim: false })
+                    .line_count(width);
+                slots.push(ImageSlot {
+                    url,
+                    row: u16::try_from(row).unwrap_or(u16::MAX),
+                    indent: Line::from(prefix.clone()).width() as u16,
+                    cols,
+                    rows,
+                });
+                out.extend((0..rows).map(|_| Line::from(prefix.clone())));
+            }
+            Err(placeholder) => {
+                let mut spans = prefix;
+                spans.push(Span::styled(placeholder, muted));
+                out.push(Line::from(spans));
+            }
+        }
+    }
+    (out, slots)
 }
 
 fn tab_title(app: &App, tab: DetailTab) -> String {
@@ -265,6 +344,10 @@ fn wrap(text: &str, width: u16, prefix: Span<'static>) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let mut push = |text: String| lines.push(Line::from(vec![prefix.clone(), Span::raw(text)]));
     for source in text.lines() {
+        if image_marker(source).is_some() {
+            push(source.trim().to_string());
+            continue;
+        }
         let indent = source.chars().take_while(|c| c.is_whitespace()).count();
         let padding = " ".repeat(indent.min(available / 2));
         let mut current = padding.clone();
@@ -356,10 +439,11 @@ fn panel_items(app: &App, panel: Panel) -> Option<Vec<Line<'static>>> {
 
 fn pr_line(app: &App, pr: &PullRequest, show_author: bool) -> Line<'static> {
     let muted = Style::new().fg(app.theme.muted);
-    let mut spans = vec![
-        Span::styled(format!("!{} ", pr.pull_request_id), muted),
-        Span::raw(pr.title.clone()),
-    ];
+    let mut spans = vec![Span::styled(format!("!{} ", pr.pull_request_id), muted)];
+    if let Some(signals) = app.data.pr_signals.get(&pr.pull_request_id) {
+        spans.extend(signal_spans(app, signals));
+    }
+    spans.push(Span::raw(pr.title.clone()));
     if pr.is_draft {
         spans.push(Span::styled(" [draft]", muted));
     }
@@ -369,6 +453,34 @@ fn pr_line(app: &App, pr: &PullRequest, show_author: bool) -> Line<'static> {
     }
     spans.push(Span::styled(format!("  {details}"), muted));
     Line::from(spans)
+}
+
+/// Compact markers for what needs attention, each followed by a space.
+fn signal_spans(app: &App, signals: &Signals) -> Vec<Span<'static>> {
+    let theme = &app.theme;
+    let mut spans = Vec::new();
+    let mut push = |text: String, color: Color| {
+        spans.push(Span::styled(
+            format!("{text} "),
+            Style::new().fg(color).add_modifier(Modifier::BOLD),
+        ));
+    };
+    if signals.unresolved > 0 {
+        push(format!("✎{}", signals.unresolved), theme.pr_waiting);
+    }
+    if signals.waiting {
+        push("◔".into(), theme.pr_waiting);
+    }
+    if signals.rejected {
+        push("⊘".into(), theme.pr_rejected);
+    }
+    if signals.failed_checks {
+        push("✖".into(), theme.build_failed);
+    }
+    if signals.conflicts {
+        push("⇄".into(), theme.error);
+    }
+    spans
 }
 
 fn work_item_line(app: &App, item: &WorkItem) -> Line<'static> {
@@ -420,7 +532,7 @@ mod tests {
     }
 
     fn main_app() -> App {
-        let mut app = App::new(Some(config()));
+        let mut app = App::new(Some(config()), None);
         app.screen = Screen::Main;
         app.data = crate::app::Data {
             my_prs: Some(vec![pull_request(
@@ -433,6 +545,7 @@ mod tests {
             my_work_items: Some(vec![work_item(10, "Order list", "User Story", "Active")]),
             ready_work_items: None,
             sprint_name: Some("Sprint 41".into()),
+            ..Default::default()
         };
         app
     }
@@ -659,7 +772,7 @@ mod tests {
 
     #[test]
     fn pat_input_is_masked() {
-        let mut app = App::new(None);
+        let mut app = App::new(None, None);
         app.screen = Screen::Setup(SetupStep::EnterPat {
             input: "secret".into(),
             error: Some("The saved token was rejected.".into()),
@@ -675,7 +788,7 @@ mod tests {
 
     #[test]
     fn failed_setup_shows_error_and_retry() {
-        let mut app = App::new(None);
+        let mut app = App::new(None, None);
         app.screen = Screen::Setup(SetupStep::Failed {
             error: "az login required".into(),
             retry: Retry::Authenticate,
@@ -686,5 +799,62 @@ mod tests {
         assert!(screen.contains("Setup failed"));
         assert!(screen.contains("az login required"));
         assert!(screen.contains("[r] reload"));
+    }
+
+    #[test]
+    fn wrap_keeps_image_markers_whole() {
+        let text = "before\n  [[image:https://dev.azure.com/very/long/url/image.png]]\nafter";
+
+        let lines = wrap(text, 12, Span::raw("│ "));
+
+        assert_eq!(
+            text_of(&lines),
+            [
+                "│ before",
+                "│ [[image:https://dev.azure.com/very/long/url/image.png]]",
+                "│ after"
+            ]
+        );
+    }
+
+    fn text_of(lines: &[Line]) -> Vec<String> {
+        text(lines)
+    }
+
+    #[test]
+    fn my_pull_requests_show_signals() {
+        let mut app = main_app();
+        app.data.pr_signals.insert(
+            1,
+            Signals {
+                unresolved: 2,
+                waiting: true,
+                rejected: true,
+                failed_checks: true,
+                conflicts: true,
+            },
+        );
+
+        let screen = screen(&app);
+
+        assert!(screen.contains("!1 ✎2 ◔ ⊘ ✖ ⇄ Add order filter"));
+    }
+
+    #[test]
+    fn image_without_graphics_shows_file_name() {
+        let mut app = main_app();
+        let mut pr = pull_request(1, "PR", "me", "2026-10-01T10:00:00Z");
+        pr.description = Some(format!(
+            "Look:\n{}",
+            crate::images::marker(
+                "https://dev.azure.com/o/p/_apis/wit/attachments/1?fileName=shot.png"
+            )
+        ));
+        app.detail = Some(Detail::PullRequest(Box::new(pr)));
+
+        let screen = screen(&app);
+
+        assert!(screen.contains("[image: shot.png]"));
+        assert!(!screen.contains("[[image:"));
     }
 }

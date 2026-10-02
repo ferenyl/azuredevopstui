@@ -23,6 +23,7 @@ const API_VERSION: &str = "7.1";
 const DEV_AZURE: &str = "https://dev.azure.com";
 const VSSPS: &str = "https://app.vssps.visualstudio.com";
 const VSSPS_DEV_AZURE: &str = "https://vssps.dev.azure.com";
+const MAX_DOWNLOAD_BYTES: u64 = 20 * 1024 * 1024;
 
 /// Service roots, replaceable so tests can point them at a mock server.
 #[derive(Clone)]
@@ -88,6 +89,43 @@ impl AdoClient {
 
     pub fn auth(&self) -> &Auth {
         &self.auth
+    }
+
+    /// Downloads an attachment such as an inline image. Credentials are only sent to Azure DevOps.
+    pub async fn download(&self, url: &str) -> Result<Vec<u8>> {
+        let url = Url::parse(url)?;
+        if !self.is_trusted(&url) {
+            bail!(
+                "not an Azure DevOps url: {}",
+                url.host_str().unwrap_or_default()
+            );
+        }
+        let response = self
+            .auth
+            .authorize(self.http.get(url.clone()))
+            .await?
+            .send()
+            .await
+            .with_context(|| format!("request failed: {}", url.path()))?;
+        let status = response.status();
+        if !status.is_success() {
+            bail!("{status}: {}", url.path());
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_DOWNLOAD_BYTES)
+        {
+            bail!("attachment too large: {}", url.path());
+        }
+        Ok(response.bytes().await?.to_vec())
+    }
+
+    fn is_trusted(&self, url: &Url) -> bool {
+        let azure = url.scheme() == "https"
+            && url
+                .host_str()
+                .is_some_and(|host| host == "dev.azure.com" || host.ends_with(".visualstudio.com"));
+        azure || Url::parse(&self.urls.dev_azure).is_ok_and(|base| base.origin() == url.origin())
     }
 
     async fn get<T: DeserializeOwned>(
@@ -322,5 +360,55 @@ mod tests {
         let names = sorted_names(["beta", "Alpha", "gamma"].into_iter().map(String::from));
 
         assert_eq!(names, ["Alpha", "beta", "gamma"]);
+    }
+
+    #[tokio::test]
+    async fn download_sends_credentials_to_azure_devops() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/_apis/wit/attachments/abc"))
+            .and(header("authorization", "Basic OnBhdA=="))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1, 2, 3]))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+
+        let bytes = client
+            .download(&format!(
+                "{}/contoso/_apis/wit/attachments/abc",
+                server.uri()
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(bytes, [1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn download_refuses_other_hosts() {
+        let client = AdoClient::new(Auth::from_pat("pat"));
+
+        let err = client
+            .download("https://evil.example.com/image.png")
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "not an Azure DevOps url: evil.example.com");
+    }
+
+    #[test]
+    fn trusted_hosts_are_azure_devops_over_https() {
+        let client = AdoClient::new(Auth::from_pat("pat"));
+        let trusted = |url: &str| client.is_trusted(&Url::parse(url).unwrap());
+
+        assert!(trusted("https://dev.azure.com/o/_apis/wit/attachments/1"));
+        assert!(trusted("https://contoso.visualstudio.com/_apis/x"));
+        assert!(!trusted("http://dev.azure.com/o/x"));
+        assert!(!trusted("https://dev.azure.com.evil.com/x"));
+        assert!(!trusted("https://example.com/x"));
     }
 }

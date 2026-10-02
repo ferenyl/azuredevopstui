@@ -33,7 +33,16 @@ pub enum Message {
     },
     Board {
         item: WorkItem,
+        unassign: bool,
         result: Result<Board>,
+    },
+    PullRequestSignals {
+        id: u32,
+        result: Result<PullRequestDetails>,
+    },
+    Image {
+        url: String,
+        result: Result<image::DynamicImage>,
     },
     WorkItemUpdated {
         id: u32,

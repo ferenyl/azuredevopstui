@@ -14,6 +14,7 @@ pub enum Action {
     FocusDown,
     OpenInBrowser,
     AssignToMe,
+    Unassign,
     ChangeColumn,
     ChangeToken,
     Sort,
@@ -25,7 +26,7 @@ pub enum Action {
 }
 
 /// Actions listed in the help popup.
-pub const HELP: [Action; 14] = [
+pub const HELP: [Action; 15] = [
     Action::Down,
     Action::FocusRight,
     Action::NextTab,
@@ -34,6 +35,7 @@ pub const HELP: [Action; 14] = [
     Action::FilterTypes,
     Action::ChangeColumn,
     Action::AssignToMe,
+    Action::Unassign,
     Action::OpenInBrowser,
     Action::Reload,
     Action::ChangeToken,
@@ -58,6 +60,7 @@ impl Action {
             (KeyCode::Char('r'), _) => Some(Self::Reload),
             (KeyCode::Char('o'), _) => Some(Self::OpenInBrowser),
             (KeyCode::Char('a'), _) => Some(Self::AssignToMe),
+            (KeyCode::Char('u'), _) => Some(Self::Unassign),
             (KeyCode::Char('s'), _) => Some(Self::ChangeColumn),
             (KeyCode::Char('S'), _) => Some(Self::Sort),
             (KeyCode::Char('f'), _) => Some(Self::FilterTypes),
@@ -84,6 +87,7 @@ impl Action {
             Self::FocusDown => "ctrl+j/↓",
             Self::OpenInBrowser => "o",
             Self::AssignToMe => "a",
+            Self::Unassign => "u",
             Self::ChangeColumn => "s",
             Self::ChangeToken => "t",
             Self::Sort => "S",
@@ -109,6 +113,7 @@ impl Action {
             Self::FocusDown => "box down",
             Self::OpenInBrowser => "open in browser",
             Self::AssignToMe => "assign to me",
+            Self::Unassign => "unassign",
             Self::ChangeColumn => "change status",
             Self::ChangeToken => "set PAT",
             Self::Sort => "sort",

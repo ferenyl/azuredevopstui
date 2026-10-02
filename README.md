@@ -24,7 +24,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 ## Features
 
 - **Four lists** on the left:
-  - **My PRs**: active pull requests you created, across all repositories in the project.
+  - **My PRs**: active pull requests you created, across all repositories in the project, marked with what needs your attention. See [PR markers](#pr-markers).
   - **My work items**: open items assigned to you in the current sprint, limited to the chosen work item types.
   - **Others' PRs**: active pull requests created by someone else. You can filter them by reviewer or creator.
   - **Ready**: items in the current sprint that sit in your *ready* board column and are not assigned to you.
@@ -37,10 +37,12 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
     - **Overview** shows type, state, board column, priority, assignee, sprint, tags, description, repro steps and acceptance criteria.
     - **Children** shows child items grouped by type (Task, Release Task, User Story, …), each with state and assignee.
     - **Comments** shows the 10 newest comments.
+  - **Images** in descriptions and comments are drawn inline when the terminal supports graphics. See [Images](#images).
 - **Actions**:
   - Open a PR or work item in the browser.
   - Move a work item to another board column. The columns come from your team's board, and split columns (for example *Active → Doing / Done*) are supported.
   - Assign a work item to yourself.
+  - Unassign yourself from a work item and pick its new board column in the same step.
 - **Sorting** per list type. The choice is saved to the config.
 - **Work item type filter**: pick which types (User Story, Bug, Feature, …) the work item lists show. The list of types comes from the project, and the choice is saved to the config.
 - **Auto refresh** at a configurable interval. The open detail view refreshes too.
@@ -297,6 +299,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
   },
   "ready_column": "Ready",
   "work_item_types": [],
+  "show_images": true,
   "sort": {
     "pull_requests": "newest",
     "work_items": "priority"
@@ -318,6 +321,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `other_prs_filter.creators` | `[]` | Show PRs created by any of these users or groups. |
 | `ready_column` | set by setup | The board column treated as *ready*. |
 | `work_item_types` | `[]` | Work item types shown in *My work items* and *Ready*, for example `["User Story", "Bug"]`. An empty array shows all types. |
+| `show_images` | `true` | Draw images in the detail panel when the terminal supports graphics. Set it to `false` to skip the terminal graphics query at startup. |
 | `sort.pull_requests` | `"newest"` | Sort order for both PR lists. |
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
 | `colors` | Catppuccin Mocha | Theme colors. See [Colors](#colors). |
@@ -393,6 +397,7 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `space` | Tick or untick an item in the type list |
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
+| `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
 | `o` | Open the PR or work item in the browser |
 | `r` | Reload everything |
 | `t` | Enter a new PAT |
@@ -401,6 +406,39 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `q`, `ctrl+c` | Quit |
 
 Actions apply to the selected row in the focused list. When the detail panel has focus, they apply to the item shown there. The toolbar always shows the keys that work in the current context.
+
+## PR markers
+
+Each pull request in *My PRs* shows markers right after its ID when something needs your attention:
+
+| Marker | Meaning |
+|---|---|
+| `✎2` | Unresolved comment threads (status *active* or *pending*), here 2 |
+| `◔` | A reviewer voted *waiting for author* |
+| `⊘` | A reviewer *rejected* the PR |
+| `✖` | A blocking policy failed, for example the build, or a status check failed |
+| `⇄` | Merge conflicts |
+
+No marker means nothing is waiting on you. The markers are refreshed together with the lists.
+
+## Images
+
+Images in work item descriptions, repro steps, acceptance criteria and comments, and in PR descriptions and comments, are shown inline in the detail panel. This needs a terminal with a graphics protocol:
+
+| Protocol | Terminals |
+|---|---|
+| Kitty graphics | kitty, Ghostty, WezTerm, Konsole |
+| Sixel | Windows Terminal 1.22+, foot, xterm (`-ti vt340`), mlterm |
+| iTerm2 | iTerm2, WezTerm |
+
+The app detects the protocol at startup. Without one, an image is shown as a placeholder line such as `[image: screenshot.png]`. Open the item in the browser with `o` to see it.
+
+- **Loading:** images download in the background and show `⟳ loading image…` until they are ready.
+- **Size:** they are drawn at most 20 rows tall and never wider than the panel.
+- **Scrolling:** an image that is only partly scrolled into view is left blank until it fits on screen.
+- **Credentials:** images are only downloaded from Azure DevOps hosts (`dev.azure.com`, `*.visualstudio.com`), so your token is never sent anywhere else.
+
+If startup hangs for a moment or the first key press is lost, the terminal does not answer the graphics query. Set `"show_images": false` to turn detection off.
 
 ## What the lists contain
 
@@ -435,6 +473,8 @@ At `debug` level every API request is logged.
 | *team has no current sprint* | Set the current iteration for the team in *Project settings → Team configuration → Iterations*. |
 | *X items are not on the board* | The work item type has no column on the team's board, so it cannot be moved. |
 | `ctrl+h` / `ctrl+j` do nothing | Your terminal does not support the kitty keyboard protocol. Use `ctrl+←` / `ctrl+↓`. |
+| Images show as `[image: …]` | The terminal has no graphics protocol, or `show_images` is `false`. See [Images](#images). |
+| Startup pauses for about 2 seconds, or the first key is ignored | The terminal does not answer the graphics query. Set `"show_images": false`. |
 | Wrong organization, project or team | Edit the config file, or delete it to run the setup again. |
 
 ## Project structure
@@ -456,5 +496,6 @@ src/
     pr_detail.rs       PR tabs
     workitem_detail.rs work item tabs
     popup.rs           help, column, sort and type pickers
+  images.rs            image markers, download cache and terminal graphics
     toolbar.rs         key hints and status
 ```

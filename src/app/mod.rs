@@ -6,7 +6,7 @@ mod state;
 pub use action::{Action, HELP};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
-    ColumnPicker, Data, Detail, DetailInfo, DetailTab, LEFT_PANELS, Panel, Popup, SortKind,
+    ColumnPicker, Data, Detail, DetailInfo, DetailTab, LEFT_PANELS, Panel, Popup, Signals, SortKind,
 };
 
 use std::time::{Duration, Instant};
@@ -14,11 +14,15 @@ use std::time::{Duration, Instant};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
+use ratatui::backend::Backend;
+use ratatui::buffer::{Buffer, Cell, CellDiffOption};
+use ratatui::layout::Rect;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::api::{self, AdoClient, Board, CurrentUser, WorkItem};
+use crate::api::{self, AdoClient, Board, CurrentUser, PullRequest, WorkItem};
 use crate::auth::Auth;
 use crate::config::{Config, PrSort, WorkItemSort};
+use crate::images::{Images, image_urls};
 use crate::theme::Theme;
 use message::Message;
 
@@ -47,6 +51,7 @@ pub struct App {
     board: Option<Board>,
     last_left: Panel,
     pub error: Option<String>,
+    pub images: Images,
     client: Option<AdoClient>,
     tx: UnboundedSender<Message>,
     rx: UnboundedReceiver<Message>,
@@ -54,7 +59,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: Option<Config>) -> Self {
+    pub fn new(config: Option<Config>, picker: Option<ratatui_image::picker::Picker>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         Self {
             theme: config
@@ -78,6 +83,7 @@ impl App {
             board: None,
             last_left: Panel::MyPrs,
             error: None,
+            images: Images::new(picker),
             client: None,
             tx,
             rx,
@@ -90,7 +96,13 @@ impl App {
         let mut events = EventStream::new();
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
         while !self.should_quit {
-            terminal.draw(|frame| crate::ui::render(frame, &self))?;
+            let frame = terminal.draw(|frame| crate::ui::render(frame, &self))?;
+            let stale = stale_cells(frame.buffer, &self.images.stale_areas());
+            if !stale.is_empty() {
+                let backend = terminal.backend_mut();
+                backend.draw(stale.iter().map(|(x, y, cell)| (*x, *y, cell)))?;
+                backend.flush()?;
+            }
             tokio::select! {
                 event = events.next() => match event {
                     Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => self.handle_key(key),
@@ -131,6 +143,20 @@ impl App {
                     Action::Confirm,
                     Action::OpenInBrowser,
                     Action::Sort,
+                    Action::Reload,
+                    Action::Help,
+                    Action::Quit,
+                ],
+                Some(Detail::WorkItem(item)) if self.is_assigned_to_me(&item) => &[
+                    Action::Down,
+                    Action::FocusRight,
+                    Action::NextTab,
+                    Action::Confirm,
+                    Action::ChangeColumn,
+                    Action::Unassign,
+                    Action::OpenInBrowser,
+                    Action::Sort,
+                    Action::FilterTypes,
                     Action::Reload,
                     Action::Help,
                     Action::Quit,
@@ -232,13 +258,32 @@ impl App {
         });
     }
 
-    fn change_column(&mut self) {
+    fn is_assigned_to_me(&self, item: &WorkItem) -> bool {
+        let assignee = item.fields.assigned_to.as_ref().map(|a| a.id.as_str());
+        self.user
+            .as_ref()
+            .is_some_and(|user| assignee == Some(user.id.as_str()))
+    }
+
+    /// Asks for the new column first; nothing changes until it is confirmed.
+    fn unassign(&mut self) {
+        let Some(item) = self.current_work_item() else {
+            return;
+        };
+        if self.is_assigned_to_me(&item) {
+            self.change_column(true);
+        } else {
+            self.error = Some(format!("#{} is not assigned to you", item.id));
+        }
+    }
+
+    fn change_column(&mut self, unassign: bool) {
         let Some(item) = self.current_work_item() else {
             return;
         };
         if let Some(board) = &self.board {
             let board = board.clone();
-            self.open_column_picker(item, &board);
+            self.open_column_picker(item, &board, unassign);
             return;
         }
         let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
@@ -248,11 +293,15 @@ impl App {
             let result = client
                 .board(&config.organization, &config.project, &config.team)
                 .await;
-            Message::Board { item, result }
+            Message::Board {
+                item,
+                unassign,
+                result,
+            }
         });
     }
 
-    fn open_column_picker(&mut self, item: WorkItem, board: &Board) {
+    fn open_column_picker(&mut self, item: WorkItem, board: &Board, unassign: bool) {
         let Some(targets) = board.targets(&item.fields.work_item_type) else {
             self.error = Some(format!(
                 "{} items are not on the board",
@@ -277,6 +326,7 @@ impl App {
             work_item_id: item.id,
             targets,
             selection,
+            unassign,
         }));
     }
 
@@ -391,11 +441,18 @@ impl App {
         let Some(target) = picker.targets.get(picker.selection.selected).cloned() else {
             return;
         };
-        let id = picker.work_item_id;
+        let (id, unassign) = (picker.work_item_id, picker.unassign);
         self.spawn(async move {
-            let result = client
-                .move_work_item(&config.organization, &config.project, id, &board, &target)
-                .await;
+            let (organization, project) = (&config.organization, &config.project);
+            let result = if unassign {
+                client
+                    .unassign_work_item(organization, project, id, &board, &target)
+                    .await
+            } else {
+                client
+                    .move_work_item(organization, project, id, &board, &target)
+                    .await
+            };
             Message::WorkItemUpdated { id, result }
         });
     }
@@ -659,6 +716,10 @@ impl App {
             }
             Message::MyPullRequests(result) => match result {
                 Ok(prs) => {
+                    self.load_signals(&prs);
+                    self.data
+                        .pr_signals
+                        .retain(|id, _| prs.iter().any(|pr| pr.pull_request_id == *id));
                     self.data.my_prs = Some(prs);
                     self.last_updated = Some(Instant::now());
                 }
@@ -684,18 +745,42 @@ impl App {
             Message::PullRequestDetails { id, result } => {
                 if self.detail.as_ref().is_some_and(|d| d.is_pull_request(id)) {
                     match result {
-                        Ok(info) => self.detail_info = Some(DetailInfo::PullRequest(info)),
+                        Ok(info) => {
+                            self.detail_info = Some(DetailInfo::PullRequest(info));
+                            self.load_images();
+                        }
                         Err(err) => self.report_error(err),
                     }
                 }
             }
-            Message::Board { item, result } => match result {
+            Message::Board {
+                item,
+                unassign,
+                result,
+            } => match result {
                 Ok(board) => {
-                    self.open_column_picker(item, &board);
+                    self.open_column_picker(item, &board, unassign);
                     self.board = Some(board);
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::PullRequestSignals { id, result } => {
+                let pr = self
+                    .data
+                    .my_prs
+                    .iter()
+                    .flatten()
+                    .find(|pr| pr.pull_request_id == id);
+                match (pr, result) {
+                    (Some(pr), Ok(details)) => {
+                        let signals = Signals::new(pr, &details);
+                        self.data.pr_signals.insert(id, signals);
+                    }
+                    (_, Err(err)) => tracing::warn!(id, "failed to load PR signals: {err:#}"),
+                    (None, _) => {}
+                }
+            }
+            Message::Image { url, result } => self.images.insert(url, result),
             Message::WorkItemUpdated { id, result } => match result {
                 Ok(()) => {
                     tracing::info!(id, "work item updated");
@@ -706,7 +791,10 @@ impl App {
             Message::WorkItemDetails { id, result } => {
                 if self.detail.as_ref().is_some_and(|d| d.is_work_item(id)) {
                     match result {
-                        Ok(info) => self.detail_info = Some(DetailInfo::WorkItem(info)),
+                        Ok(info) => {
+                            self.detail_info = Some(DetailInfo::WorkItem(info));
+                            self.load_images();
+                        }
                         Err(err) => self.report_error(err),
                     }
                 }
@@ -789,9 +877,76 @@ impl App {
         };
         self.load_detail(&detail);
         self.detail = Some(detail);
+        self.load_images();
         self.detail_info = None;
         self.detail_scroll = 0;
         self.detail_tab = DetailTab::Overview;
+    }
+
+    /// Starts downloading images in the shown detail that are not cached yet.
+    fn load_images(&self) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let mut texts: Vec<&str> = Vec::new();
+        if let Some(Detail::PullRequest(pr)) = &self.detail {
+            texts.extend(pr.description.as_deref());
+        }
+        match &self.detail_info {
+            Some(DetailInfo::PullRequest(info)) => texts.extend(
+                info.threads
+                    .iter()
+                    .flat_map(|thread| &thread.comments)
+                    .filter_map(|comment| comment.content.as_deref()),
+            ),
+            Some(DetailInfo::WorkItem(info)) => {
+                texts.extend(
+                    [
+                        &info.description,
+                        &info.repro_steps,
+                        &info.acceptance_criteria,
+                    ]
+                    .into_iter()
+                    .filter_map(|text| text.as_deref()),
+                );
+                texts.extend(info.comments.iter().map(|comment| comment.text.as_str()));
+            }
+            None => {}
+        }
+        let urls = texts.into_iter().flat_map(image_urls).collect();
+        for url in self.images.start_loading(urls) {
+            let client = client.clone();
+            self.spawn(async move {
+                let result = match client.download(&url).await {
+                    Ok(bytes) => tokio::task::spawn_blocking(move || {
+                        image::load_from_memory(&bytes).map_err(anyhow::Error::from)
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .and_then(|result| result),
+                    Err(err) => Err(err),
+                };
+                Message::Image { url, result }
+            });
+        }
+    }
+
+    fn load_signals(&self, prs: &[PullRequest]) {
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        for pr in prs {
+            let (client, config, pr) = (client.clone(), config.clone(), pr.clone());
+            self.spawn(async move {
+                let result = client
+                    .pull_request_details(&config.organization, &config.project, &pr)
+                    .await;
+                Message::PullRequestSignals {
+                    id: pr.pull_request_id,
+                    result,
+                }
+            });
+        }
     }
 
     fn load_detail(&self, detail: &Detail) {
@@ -918,6 +1073,7 @@ impl App {
             },
             Action::OpenInBrowser
             | Action::AssignToMe
+            | Action::Unassign
             | Action::ChangeColumn
             | Action::Sort
             | Action::FilterTypes
@@ -931,7 +1087,8 @@ impl App {
             Action::Toggle => {}
             Action::NextTab | Action::PrevTab => self.switch_tab(action == Action::NextTab),
             Action::AssignToMe => self.assign_to_me(),
-            Action::ChangeColumn => self.change_column(),
+            Action::ChangeColumn => self.change_column(false),
+            Action::Unassign => self.unassign(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);
@@ -1022,14 +1179,38 @@ fn checked_types(items: Vec<String>, checked: &[bool]) -> Vec<String> {
         .collect()
 }
 
+/// Cells over areas where images were drawn, rewritten so the terminal drops their old pixels.
+fn stale_cells(buffer: &Buffer, areas: &[Rect]) -> Vec<(u16, u16, Cell)> {
+    areas
+        .iter()
+        .map(|area| area.intersection(buffer.area))
+        .flat_map(|area| area.positions())
+        .map(|position| (position.x, position.y, buffer[position].clone()))
+        .filter(|(_, _, cell)| cell.diff_option != CellDiffOption::Skip)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::api::PullRequestDetails;
     use crate::test_support::{config, ids_of_prs, pull_request, work_item};
 
+    #[test]
+    fn stale_cells_skip_cells_covered_by_images() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 3, 2));
+        buffer[(1, 0)].set_symbol("x");
+        buffer[(2, 0)].set_diff_option(CellDiffOption::Skip);
+
+        let cells = stale_cells(&buffer, &[Rect::new(1, 0, 5, 1)]);
+
+        let positions: Vec<_> = cells.iter().map(|(x, y, _)| (*x, *y)).collect();
+        assert_eq!(positions, [(1, 0)]);
+        assert_eq!(cells[0].2.symbol(), "x");
+    }
+
     fn app() -> App {
-        let mut app = App::new(Some(config()));
+        let mut app = App::new(Some(config()), None);
         app.screen = Screen::Main;
         app.data = Data {
             my_prs: Some(vec![
@@ -1044,6 +1225,7 @@ mod tests {
             ]),
             ready_work_items: Some(vec![work_item(12, "Ready", "User Story", "Ready")]),
             sprint_name: Some("Sprint 1".into()),
+            ..Default::default()
         };
         app
     }
@@ -1328,7 +1510,7 @@ mod tests {
 
     #[test]
     fn esc_in_setup_quits() {
-        let mut app = App::new(None);
+        let mut app = App::new(None, None);
 
         press(&mut app, KeyCode::Esc);
 
@@ -1386,5 +1568,137 @@ mod tests {
 
         press(&mut app, KeyCode::Char('?'));
         assert_eq!(app.actions(), [Action::Cancel]);
+    }
+
+    fn me() -> CurrentUser {
+        serde_json::from_value(serde_json::json!({ "id": "me-id", "providerDisplayName": "Me" }))
+            .unwrap()
+    }
+
+    fn board() -> Board {
+        Board {
+            column_field: "Column".into(),
+            done_field: "Column.Done".into(),
+            columns: serde_json::from_value(serde_json::json!([
+                { "name": "Ready", "stateMappings": { "User Story": "New", "Bug": "New" } },
+                { "name": "Active", "isSplit": true, "stateMappings": { "User Story": "Active", "Bug": "Active" } }
+            ]))
+            .unwrap(),
+        }
+    }
+
+    fn assign_first_item_to(app: &mut App, id: &str) {
+        let item = &mut app.data.my_work_items.as_mut().unwrap()[0];
+        item.fields.assigned_to = Some(
+            serde_json::from_value(serde_json::json!({ "id": id, "displayName": "Someone" }))
+                .unwrap(),
+        );
+    }
+
+    #[test]
+    fn unassign_asks_for_new_status_first() {
+        let mut app = app();
+        app.user = Some(me());
+        app.board = Some(board());
+        assign_first_item_to(&mut app, "me-id");
+        ctrl(&mut app, 'j');
+
+        press(&mut app, KeyCode::Char('u'));
+
+        let Some(Popup::Column(picker)) = &app.popup else {
+            panic!("column picker not open");
+        };
+        assert!(picker.unassign);
+        assert_eq!(picker.work_item_id, 10);
+        assert_eq!(picker.selection.current(), Some("Active (Doing)"));
+    }
+
+    #[test]
+    fn esc_cancels_unassign() {
+        let mut app = app();
+        app.user = Some(me());
+        app.board = Some(board());
+        assign_first_item_to(&mut app, "me-id");
+        ctrl(&mut app, 'j');
+        press(&mut app, KeyCode::Char('u'));
+
+        press(&mut app, KeyCode::Esc);
+
+        assert!(app.popup.is_none());
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn unassign_needs_item_assigned_to_me() {
+        let mut app = app();
+        app.user = Some(me());
+        app.board = Some(board());
+        assign_first_item_to(&mut app, "someone-else");
+        ctrl(&mut app, 'j');
+
+        press(&mut app, KeyCode::Char('u'));
+
+        assert!(app.popup.is_none());
+        assert_eq!(app.error.as_deref(), Some("#10 is not assigned to you"));
+    }
+
+    #[test]
+    fn change_status_does_not_unassign() {
+        let mut app = app();
+        app.board = Some(board());
+        ctrl(&mut app, 'j');
+
+        press(&mut app, KeyCode::Char('s'));
+
+        assert!(matches!(&app.popup, Some(Popup::Column(picker)) if !picker.unassign));
+    }
+
+    #[test]
+    fn toolbar_offers_unassign_only_for_my_items() {
+        let mut app = app();
+        app.user = Some(me());
+        assign_first_item_to(&mut app, "me-id");
+        ctrl(&mut app, 'j');
+        assert!(app.actions().contains(&Action::Unassign));
+
+        press(&mut app, KeyCode::Char('j'));
+
+        assert!(!app.actions().contains(&Action::Unassign));
+        assert!(app.actions().contains(&Action::AssignToMe));
+    }
+
+    #[test]
+    fn signals_are_stored_for_my_pull_requests() {
+        let mut app = app();
+        let details = PullRequestDetails {
+            threads: serde_json::from_value(serde_json::json!([
+                { "status": "active", "comments": [] }
+            ]))
+            .unwrap(),
+            statuses: Vec::new(),
+            policies: Vec::new(),
+        };
+
+        app.handle_message(Message::PullRequestSignals {
+            id: 2,
+            result: Ok(details),
+        });
+
+        assert_eq!(app.data.pr_signals[&2].unresolved, 1);
+    }
+
+    #[test]
+    fn signals_for_removed_pull_requests_are_dropped() {
+        let mut app = app();
+        app.data.pr_signals.insert(3, Signals::default());
+
+        app.handle_message(Message::MyPullRequests(Ok(vec![pull_request(
+            1,
+            "Only",
+            "me",
+            "2026-10-01T10:00:00Z",
+        )])));
+
+        assert!(!app.data.pr_signals.contains_key(&3));
     }
 }
