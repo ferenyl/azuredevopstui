@@ -269,6 +269,8 @@ pub struct WorkItemFields {
     pub changed_date: String,
     #[serde(rename = "System.CreatedDate", default)]
     pub created_date: String,
+    #[serde(rename = "System.AssignedTo")]
+    pub assigned_to: Option<IdentityRef>,
 }
 
 pub struct SprintWorkItems {
@@ -280,6 +282,21 @@ pub struct SprintWorkItems {
 #[derive(Deserialize)]
 pub struct WorkItemResponse {
     pub fields: WorkItemDetailFields,
+    #[serde(default)]
+    pub relations: Vec<Relation>,
+}
+
+#[derive(Deserialize)]
+pub struct Relation {
+    pub rel: String,
+    pub url: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkItemTypeCategory {
+    pub reference_name: String,
+    pub work_item_types: Vec<Named>,
 }
 
 #[derive(Deserialize)]
@@ -332,6 +349,7 @@ pub struct WorkItemDetails {
     pub repro_steps: Option<String>,
     pub comment_count: u32,
     pub comments: Vec<DetailComment>,
+    pub children: Vec<WorkItem>,
 }
 
 pub struct DetailComment {

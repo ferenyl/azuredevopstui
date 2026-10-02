@@ -12,7 +12,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListState, Padding, Paragraph, Tabs, Wrap};
 
 use crate::api::{PullRequest, WorkItem};
-use crate::app::{App, Detail, DetailInfo, DetailTab, LEFT_PANELS, Panel, Popup, Screen, SortKind};
+use crate::app::{
+    App, Detail, DetailInfo, DetailTab, LEFT_PANELS, Panel, Popup, Screen, Selection, SortKind,
+};
 
 const LABEL_WIDTH: usize = 13;
 
@@ -53,6 +55,19 @@ pub fn render(frame: &mut Frame, app: &App) {
                 SortKind::WorkItems => " Sort work items ",
             };
             popup::render_picker(frame, app, title, selection, main);
+        }
+        Some(Popup::Types { selection, checked }) => {
+            let items = selection
+                .items
+                .iter()
+                .zip(checked)
+                .map(|(kind, checked)| format!("[{}] {kind}", if *checked { "x" } else { " " }))
+                .collect();
+            let selection = Selection {
+                items,
+                selected: selection.selected,
+            };
+            popup::render_picker(frame, app, " Work item types ", &selection, main);
         }
         None => {}
     }
@@ -198,6 +213,7 @@ fn tab_title(app: &App, tab: DetailTab) -> String {
             (info.policies.len() + info.statuses.len()).to_string()
         }
         (DetailTab::Comments, Some(DetailInfo::WorkItem(info))) => info.comment_count.to_string(),
+        (DetailTab::Children, Some(DetailInfo::WorkItem(info))) => info.children.len().to_string(),
         _ => "…".into(),
     };
     format!("{} ({count})", tab.title())

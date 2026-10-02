@@ -14,6 +14,9 @@ pub fn lines(
 ) -> Vec<Line<'static>> {
     match tab {
         DetailTab::Overview => overview(app, item, details, width),
+        DetailTab::Children => {
+            details.map_or_else(|| loading(app), |details| children(app, details, width))
+        }
         _ => details.map_or_else(|| loading(app), |details| comments(app, details, width)),
     }
 }
@@ -100,6 +103,49 @@ fn overview(
             lines.push(Line::default());
             lines.push(heading(app, title, width));
             lines.extend(wrap(text, width, Span::raw("  ")));
+        }
+    }
+    lines
+}
+
+fn children(app: &App, details: &WorkItemDetails, width: u16) -> Vec<Line<'static>> {
+    let muted = Style::new().fg(app.theme.muted);
+    if details.children.is_empty() {
+        return empty(app, "No children");
+    }
+    let mut types: Vec<&str> = details
+        .children
+        .iter()
+        .map(|child| child.fields.work_item_type.as_str())
+        .collect();
+    types.sort();
+    types.dedup();
+    let mut lines = Vec::new();
+    for kind in types {
+        let children: Vec<_> = details
+            .children
+            .iter()
+            .filter(|child| child.fields.work_item_type == kind)
+            .collect();
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        lines.push(heading(app, &format!("{kind} ({})", children.len()), width));
+        for child in children {
+            let fields = &child.fields;
+            let mut spans = vec![
+                Span::styled(
+                    format!("  #{} ", child.id),
+                    Style::new().fg(type_color(app, kind)),
+                ),
+                Span::raw(fields.title.clone()),
+                Span::raw("  "),
+                badge(&fields.state, state_color(app, &fields.state)),
+            ];
+            if let Some(assignee) = &fields.assigned_to {
+                spans.push(Span::styled(format!(" · {}", assignee.display_name), muted));
+            }
+            lines.push(Line::from(spans));
         }
     }
     lines

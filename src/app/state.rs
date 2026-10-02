@@ -27,7 +27,11 @@ impl Detail {
     pub fn tabs(&self) -> &'static [DetailTab] {
         match self {
             Self::PullRequest(_) => &[DetailTab::Overview, DetailTab::Comments, DetailTab::Checks],
-            Self::WorkItem(_) => &[DetailTab::Overview, DetailTab::Comments],
+            Self::WorkItem(_) => &[
+                DetailTab::Overview,
+                DetailTab::Children,
+                DetailTab::Comments,
+            ],
         }
     }
 }
@@ -36,6 +40,7 @@ impl Detail {
 pub enum DetailTab {
     #[default]
     Overview,
+    Children,
     Comments,
     Checks,
 }
@@ -44,6 +49,7 @@ impl DetailTab {
     pub fn title(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
+            Self::Children => "Children",
             Self::Comments => "Comments",
             Self::Checks => "Checks",
         }
@@ -61,6 +67,10 @@ pub enum Popup {
     Sort {
         kind: SortKind,
         selection: Selection,
+    },
+    Types {
+        selection: Selection,
+        checked: Vec<bool>,
     },
 }
 

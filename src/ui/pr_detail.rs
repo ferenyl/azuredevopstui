@@ -16,7 +16,7 @@ pub fn lines(
         (DetailTab::Overview, _) => overview(app, pr, width),
         (_, None) => loading(app),
         (DetailTab::Comments, Some(details)) => comments(app, details, width),
-        (DetailTab::Checks, Some(details)) => checks(app, details, width),
+        (_, Some(details)) => checks(app, details, width),
     }
 }
 

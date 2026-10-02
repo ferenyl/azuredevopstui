@@ -114,6 +114,12 @@ impl App {
             }
             Screen::Setup(_) => &[Action::Quit],
             Screen::Main if self.show_help => &[Action::Cancel],
+            Screen::Main if matches!(self.popup, Some(Popup::Types { .. })) => &[
+                Action::Down,
+                Action::Toggle,
+                Action::Confirm,
+                Action::Cancel,
+            ],
             Screen::Main if self.popup.is_some() => {
                 &[Action::Down, Action::Confirm, Action::Cancel]
             }
@@ -138,6 +144,7 @@ impl App {
                     Action::AssignToMe,
                     Action::OpenInBrowser,
                     Action::Sort,
+                    Action::FilterTypes,
                     Action::Reload,
                     Action::Help,
                     Action::Quit,
@@ -300,8 +307,64 @@ impl App {
         match self.popup.take() {
             Some(Popup::Column(picker)) => self.confirm_column(picker),
             Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
+            Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
             None => {}
         }
+    }
+
+    fn load_work_item_types(&mut self) {
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        self.spawn(async move {
+            Message::WorkItemTypes(
+                client
+                    .work_item_types(&config.organization, &config.project)
+                    .await,
+            )
+        });
+    }
+
+    fn open_types_picker(&mut self, mut types: Vec<String>) {
+        let Some(config) = &self.config else {
+            return;
+        };
+        for kind in &config.work_item_types {
+            if !types.contains(kind) {
+                types.push(kind.clone());
+            }
+        }
+        let checked = types
+            .iter()
+            .map(|kind| config.work_item_types.is_empty() || config.work_item_types.contains(kind))
+            .collect();
+        self.popup = Some(Popup::Types {
+            selection: Selection::new(types),
+            checked,
+        });
+    }
+
+    fn confirm_types(&mut self, selection: Selection, checked: Vec<bool>) {
+        let Some(config) = &mut self.config else {
+            return;
+        };
+        config.work_item_types = if checked.iter().all(|checked| *checked) {
+            Vec::new()
+        } else {
+            selection
+                .items
+                .into_iter()
+                .zip(checked)
+                .filter_map(|(kind, checked)| checked.then_some(kind))
+                .collect()
+        };
+        if let Err(err) = config.save() {
+            self.report_error(err);
+            return;
+        }
+        self.data.my_work_items = None;
+        self.data.ready_work_items = None;
+        self.refresh();
     }
 
     fn confirm_sort(&mut self, kind: SortKind, index: usize) {
@@ -451,6 +514,7 @@ impl App {
                             &config.project,
                             &config.team,
                             &ready_column,
+                            &config.work_item_types,
                         )
                         .await,
                 )
@@ -595,6 +659,8 @@ impl App {
                 self.set_step(SetupStep::SelectReadyColumn(Selection::new(columns)));
             }
             Message::BoardColumns(Err(err)) => self.fail(err, Retry::Continue),
+            Message::WorkItemTypes(Ok(types)) => self.open_types_picker(types),
+            Message::WorkItemTypes(Err(err)) => self.report_error(err),
             Message::Connected(Ok(user)) => {
                 self.user = Some(user);
                 self.screen = Screen::Main;
@@ -802,9 +868,16 @@ impl App {
         if let Some(popup) = &mut self.popup {
             let selection = match popup {
                 Popup::Column(picker) => &mut picker.selection,
-                Popup::Sort { selection, .. } => selection,
+                Popup::Sort { selection, .. } | Popup::Types { selection, .. } => selection,
             };
             match action {
+                Action::Toggle => {
+                    if let Popup::Types { selection, checked } = popup
+                        && let Some(checked) = checked.get_mut(selection.selected)
+                    {
+                        *checked = !*checked;
+                    }
+                }
                 Action::Up => selection.previous(),
                 Action::Down => selection.next(),
                 Action::Confirm => self.confirm_popup(),
@@ -856,11 +929,15 @@ impl App {
             | Action::AssignToMe
             | Action::ChangeColumn
             | Action::Sort
+            | Action::FilterTypes
+            | Action::Toggle
             | Action::NextTab
             | Action::PrevTab
                 if !matches!(self.screen, Screen::Main) => {}
             Action::OpenInBrowser => self.open_in_browser(),
             Action::Sort => self.open_sort_picker(),
+            Action::FilterTypes => self.load_work_item_types(),
+            Action::Toggle => {}
             Action::NextTab | Action::PrevTab => self.switch_tab(action == Action::NextTab),
             Action::AssignToMe => self.assign_to_me(),
             Action::ChangeColumn => self.change_column(),

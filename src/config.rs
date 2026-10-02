@@ -26,6 +26,9 @@ pub struct Config {
     pub other_prs_filter: OtherPrsFilter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready_column: Option<String>,
+    /// Empty shows all types.
+    #[serde(default)]
+    pub work_item_types: Vec<String>,
     #[serde(default)]
     pub sort: SortConfig,
     #[serde(default)]
@@ -130,6 +133,7 @@ impl Config {
             auth: AuthConfig::default(),
             other_prs_filter: OtherPrsFilter::default(),
             ready_column: None,
+            work_item_types: Vec::new(),
             sort: SortConfig::default(),
             colors: Theme::default(),
         }

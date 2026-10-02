@@ -25,7 +25,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 
 - **Four lists** on the left:
   - **My PRs**: active pull requests you created, across all repositories in the project.
-  - **My work items**: open items assigned to you in the current sprint.
+  - **My work items**: open items assigned to you in the current sprint, limited to the chosen work item types.
   - **Others' PRs**: active pull requests created by someone else. You can filter them by reviewer or creator.
   - **Ready**: items in the current sprint that sit in your *ready* board column and are not assigned to you.
 - **Detail panel** with tabs:
@@ -35,12 +35,14 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
     - **Checks** shows the branch policies and statuses, with a summary of passed, failed and pending.
   - **Work item**:
     - **Overview** shows type, state, board column, priority, assignee, sprint, tags, description, repro steps and acceptance criteria.
+    - **Children** shows child items grouped by type (Task, Release Task, User Story, …), each with state and assignee.
     - **Comments** shows the 10 newest comments.
 - **Actions**:
   - Open a PR or work item in the browser.
   - Move a work item to another board column. The columns come from your team's board, and split columns (for example *Active → Doing / Done*) are supported.
   - Assign a work item to yourself.
 - **Sorting** per list type. The choice is saved to the config.
+- **Work item type filter**: pick which types (User Story, Bug, Feature, …) the work item lists show. The list of types comes from the project, and the choice is saved to the config.
 - **Auto refresh** at a configurable interval. The open detail view refreshes too.
 - **Setup wizard** on first start. Organization, project, team and the ready column are picked from lists fetched from Azure DevOps.
 - **Authentication** uses the Azure CLI first and falls back to a Personal Access Token stored in the OS keyring.
@@ -127,6 +129,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
     "creators": []
   },
   "ready_column": "Ready",
+  "work_item_types": [],
   "sort": {
     "pull_requests": "newest",
     "work_items": "priority"
@@ -146,6 +149,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `other_prs_filter.reviewers` | `[]` | Show PRs where any of these users or groups is a reviewer. |
 | `other_prs_filter.creators` | `[]` | Show PRs created by any of these users or groups. |
 | `ready_column` | set by setup | The board column treated as *ready*. |
+| `work_item_types` | `[]` | Work item types shown in *My work items* and *Ready*, for example `["User Story", "Bug"]`. An empty array shows all types. |
 | `sort.pull_requests` | `"newest"` | Sort order for both PR lists. |
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
 | `colors` | Catppuccin Mocha | Theme colors. See [Colors](#colors). |
@@ -174,6 +178,10 @@ Press `S` on a list to choose the order. PR lists and work item lists each have 
 | `created` | Most recently created first |
 | `state` | State A–Z, then most recently changed |
 | `id` | ID ascending |
+
+### Work item types
+
+Press `f` to open a list of all work item types used in the project. Hidden types such as test plans and code reviews are left out. Use `space` to tick or untick a type, and `enter` to save the choice to `work_item_types` and reload the lists. The filter applies to both work item lists. All types are shown by default, and ticking every type (or none) also shows all of them.
 
 ### Colors
 
@@ -213,6 +221,8 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `enter` | Open the selected item in the detail panel |
 | `tab` / `shift+tab` | Next or previous detail tab |
 | `S` | Choose the sort order for the focused list |
+| `f` | Choose which work item types are shown |
+| `space` | Tick or untick an item in the type list |
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
 | `o` | Open the PR or work item in the browser |
@@ -228,8 +238,8 @@ Actions apply to the selected row in the focused list. When the detail panel has
 
 - **My PRs**: `status=active` with you as the creator, across all repositories in the project.
 - **Others' PRs**: `status=active`, filtered by `other_prs_filter` and with your own PRs excluded.
-- **My work items**: `AssignedTo = @Me`, a state other than *Closed* or *Removed*, and the team's current sprint.
-- **Ready**: `BoardColumn = <ready_column>`, `AssignedTo <> @Me`, and the team's current sprint.
+- **My work items**: `AssignedTo = @Me`, a state other than *Closed* or *Removed*, a type in `work_item_types` (all types when it is empty), and the team's current sprint.
+- **Ready**: `BoardColumn = <ready_column>`, `AssignedTo <> @Me`, a type in `work_item_types` (all types when it is empty), and the team's current sprint.
 
 Moving a work item sets the board column field, the column's *Done* field (for split columns) and the matching `System.State`.
 
@@ -273,6 +283,6 @@ src/
   ui/                  rendering
     pr_detail.rs       PR tabs
     workitem_detail.rs work item tabs
-    popup.rs           help, column and sort pickers
+    popup.rs           help, column, sort and type pickers
     toolbar.rs         key hints and status
 ```

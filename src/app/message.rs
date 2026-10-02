@@ -18,6 +18,7 @@ pub enum Message {
         result: Result<Vec<String>>,
     },
     BoardColumns(Result<Vec<String>>),
+    WorkItemTypes(Result<Vec<String>>),
     Connected(Result<CurrentUser>),
     MyPullRequests(Result<Vec<PullRequest>>),
     OtherPullRequests(Result<Vec<PullRequest>>),
