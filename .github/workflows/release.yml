@@ -66,6 +66,17 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Set version from tag
+        shell: bash
+        run: |
+          version="${TAG#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag $TAG is not a version like v1.2.3"
+            exit 1
+          fi
+          sed -i "0,/^version = .*/s//version = \"$version\"/" Cargo.toml
+          cargo update --workspace
+
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
@@ -91,3 +102,28 @@ jobs:
       - name: Upload to release
         shell: bash
         run: gh release upload "$TAG" "$ASSET" --clobber
+
+  publish:
+    name: Publish to crates.io
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set version from tag
+        shell: bash
+        run: |
+          version="${TAG#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag $TAG is not a version like v1.2.3"
+            exit 1
+          fi
+          sed -i "0,/^version = .*/s//version = \"$version\"/" Cargo.toml
+          cargo update --workspace
+
+      - name: Publish
+        run: cargo publish --locked --allow-dirty
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

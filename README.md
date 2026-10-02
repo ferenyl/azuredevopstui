@@ -82,6 +82,14 @@ Copy-Item azuredevopstui-<version>-x86_64-pc-windows-msvc\azuredevopstui.exe "$e
 
 Then add `%LOCALAPPDATA%\Programs\azuredevopstui` to your user `PATH`.
 
+### Install from crates.io
+
+```sh
+cargo install azuredevopstui --locked
+```
+
+This downloads the source from [crates.io](https://crates.io/crates/azuredevopstui) and builds it on your machine. On Windows that needs the Visual Studio Build Tools; see [Windows](#windows). Upgrade by running the same command again.
+
 ### Install from source
 
 `cargo install` builds in release mode and puts the binary in `~/.cargo/bin` (`%USERPROFILE%\.cargo\bin` on Windows), which rustup has already added to your `PATH`:
@@ -120,8 +128,18 @@ To build the Windows binary from WSL or Linux, see [Windows](#windows).
    - `azuredevopstui-<tag>-x86_64-pc-windows-msvc.zip`
 
    Each archive contains the binary and this README.
+4. When both builds succeed, it publishes the crate to crates.io with `cargo publish --locked`.
 
-Re-running the workflow replaces the assets and the changes list; it does not duplicate them.
+Re-running the workflow replaces the assets and the changes list; it does not duplicate them. A crates.io version can only be published once, so the publish step fails on a re-run of the same version.
+
+Before you create a release, make sure that:
+
+- **The tag is a version.** The workflow takes the version from the tag, so you don't need to change `Cargo.toml` yourself. Before it builds and publishes, it writes the tag without the leading `v` into `version` in `Cargo.toml` and `Cargo.lock`, so tag `v0.2.0` gives version `0.2.0`. The tag must look like `v1.2.3` or `1.2.3`, optionally with a pre-release suffix such as `v1.2.3-beta.1`; otherwise the workflow stops. The change is only made inside the workflow and is never committed, so `version` in the repo can stay at its old value.
+- **The crates.io token is set up.** You only do this once:
+  1. Log in to [crates.io](https://crates.io) with GitHub.
+  2. Verify your email address under *Account Settings*.
+  3. Create a token under *Account Settings → API Tokens* with the scopes `publish-new` and `publish-update`.
+  4. Add the token as the repository secret `CARGO_REGISTRY_TOKEN` (*Settings → Secrets and variables → Actions → New repository secret*), or run `gh secret set CARGO_REGISTRY_TOKEN`.
 
 ## Windows
 

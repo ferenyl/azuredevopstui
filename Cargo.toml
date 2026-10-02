@@ -2,6 +2,13 @@
 name = "azuredevopstui"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Terminal UI for your Azure DevOps pull requests, work items and sprint board"
+repository = "https://github.com/ferenyl/azuredevopstui"
+readme = "README.md"
+keywords = ["azure-devops", "tui", "ratatui", "pull-requests", "work-items"]
+categories = ["command-line-utilities"]
+exclude = [".github", "projectdescription.md"]
 
 [dependencies]
 anyhow = "1.0.104"
