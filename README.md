@@ -51,8 +51,10 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 
 - **Rust**: a toolchain with edition 2024 support (Rust 1.88 or newer).
 - **Azure CLI** (recommended): you must be logged in with `az login`.
-- **For PAT authentication**: a Secret Service compatible keyring, such as GNOME Keyring, KeePassXC or KWallet.
-  - **On WSL** you need one running inside the distro, for example `gnome-keyring-daemon`. Otherwise the PAT cannot be stored.
+- **For PAT authentication**: an OS keyring.
+  - **Linux**: a Secret Service compatible keyring, such as GNOME Keyring, KeePassXC or KWallet.
+  - **WSL**: one running inside the distro, for example `gnome-keyring-daemon`. Otherwise the PAT cannot be stored.
+  - **Windows**: Windows Credential Manager, which is built in.
 - **Terminal**: one with true color support. A terminal that supports the kitty keyboard protocol gives you `ctrl+h`/`ctrl+j`. In other terminals, use `ctrl+arrow` instead.
 
 ## Install
@@ -69,6 +71,25 @@ Or build without installing:
 cargo build --release
 ./target/release/azuredevopstui
 ```
+
+## Windows
+
+The app runs natively on Windows. Use Windows Terminal; the old console host lacks some of the symbols.
+
+- **Build on Windows**: install Rust with the MSVC toolchain and the Visual Studio Build Tools (C++ workload), then run `cargo install --path .` in PowerShell. Clone the repo on the Windows file system, not under `\\wsl$`.
+- **Cross-compile from WSL or Linux**: install the MinGW compiler (`mingw-w64-gcc` on Arch), then run:
+  ```sh
+  rustup target add x86_64-pc-windows-gnu
+  cargo build --release --target x86_64-pc-windows-gnu
+  ```
+  The binary ends up in `target/x86_64-pc-windows-gnu/release/azuredevopstui.exe`.
+- **Azure CLI**: use the Windows version of Azure CLI. It has its own login, separate from WSL, so run `az login` in PowerShell.
+- **Run it from Windows**: start the `.exe` from PowerShell or cmd in Windows Terminal, not from a WSL shell.
+- **Paths**:
+  - Config: `%APPDATA%\azuredevopstui\config.json`
+  - Log: `%LOCALAPPDATA%\azuredevopstui\log`
+  - PAT: Credential Manager → *Windows Credentials*, as the entry `azuredevopstui`.
+- **Keys**: `ctrl+h/j/k/l` work directly in Windows Terminal. No kitty keyboard protocol is needed.
 
 ## First start
 
@@ -114,7 +135,7 @@ The token is stored in the OS keyring under the service `azuredevopstui`. If Azu
 
 ## Configuration
 
-The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usually `~/.config/azuredevopstui/config.json`.
+The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usually `~/.config/azuredevopstui/config.json`. On Windows it is `%APPDATA%\azuredevopstui\config.json`.
 
 ```json
 {
@@ -144,7 +165,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `project` | set by setup | Project name. |
 | `team` | set by setup | Team. Used for the current sprint and the board. |
 | `refresh_interval_secs` | `120` | Auto refresh interval in seconds. Set it to `0` to turn auto refresh off. Auto refresh pauses while a popup is open. |
-| `browser_command` | `null` | Command used to open URLs, with the URL appended as the last argument, for example `"wslview"` or `"firefox --new-tab"`. When `null`, the system default is used. |
+| `browser_command` | `null` | Command used to open URLs, with the URL appended as the last argument, for example `"wslview"` or `"firefox --new-tab"`. The command is split on spaces, so it must be on `PATH` (use `"chrome"`, not `"C:\\Program Files\\…"`). When `null`, the system default is used. |
 | `auth.method` | `"auto"` | `auto`, `azcli` or `pat`. See [Authentication](#authentication). |
 | `other_prs_filter.reviewers` | `[]` | Show PRs where any of these users or groups is a reviewer. |
 | `other_prs_filter.creators` | `[]` | Show PRs created by any of these users or groups. |
@@ -245,7 +266,7 @@ Moving a work item sets the board column field, the column's *Done* field (for s
 
 ## Logging
 
-Logs are written to `$XDG_STATE_HOME/azuredevopstui/log`, which is usually `~/.local/state/azuredevopstui/log`. The default level is `info`. Set it with `RUST_LOG`:
+Logs are written to `$XDG_STATE_HOME/azuredevopstui/log`, which is usually `~/.local/state/azuredevopstui/log`. On Windows the log is `%LOCALAPPDATA%\azuredevopstui\log`. The default level is `info`. Set it with `RUST_LOG`:
 
 ```sh
 RUST_LOG=azuredevopstui=debug azuredevopstui
@@ -259,7 +280,9 @@ At `debug` level every API request is logged.
 |---|---|
 | The Azure CLI token fails with *refresh token has expired* | Run `az login` again. Add `--allow-no-subscriptions` if the tenant has no subscriptions. |
 | *unauthorized* (401 or 203) with a PAT | The PAT has expired or lacks a scope. The app asks for a new one; you can also press `t`. |
-| The PAT cannot be saved | No Secret Service keyring is running. Start one (on WSL, `gnome-keyring-daemon`), or use the Azure CLI. |
+| The PAT cannot be saved | No Secret Service keyring is running. Start one (on WSL, `gnome-keyring-daemon`), or use the Azure CLI. On Windows, Credential Manager is always available. |
+| *failed to run az* | Azure CLI is not installed or not on `PATH`. On Windows the app runs `az.cmd`. |
+| `$env:RUST_LOG` on Windows | In PowerShell, set it with `$env:RUST_LOG="azuredevopstui=debug"` before you start the app. |
 | *team has no current sprint* | Set the current iteration for the team in *Project settings → Team configuration → Iterations*. |
 | *X items are not on the board* | The work item type has no column on the team's board, so it cannot be moved. |
 | `ctrl+h` / `ctrl+j` do nothing | Your terminal does not support the kitty keyboard protocol. Use `ctrl+←` / `ctrl+↓`. |

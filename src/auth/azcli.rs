@@ -6,6 +6,10 @@ use tokio::process::Command;
 
 const ADO_RESOURCE: &str = "499b84ac-1321-427f-aa17-267ca6975798";
 const EXPIRY_MARGIN_SECS: u64 = 60;
+#[cfg(windows)]
+const AZ: &str = "az.cmd";
+#[cfg(not(windows))]
+const AZ: &str = "az";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,7 +30,7 @@ impl Token {
 }
 
 pub async fn fetch_token() -> Result<Token> {
-    let output = Command::new("az")
+    let output = Command::new(AZ)
         .args([
             "account",
             "get-access-token",
@@ -37,7 +41,7 @@ pub async fn fetch_token() -> Result<Token> {
         ])
         .output()
         .await
-        .context("failed to run az")?;
+        .context("failed to run az, is Azure CLI installed and on PATH?")?;
     if !output.status.success() {
         bail!(
             "az login required: {}",

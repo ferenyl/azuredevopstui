@@ -39,9 +39,12 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-/// Logs to `$XDG_STATE_HOME/azuredevopstui/log`; level from `RUST_LOG`, default `info`.
+/// Logs to `$XDG_STATE_HOME/azuredevopstui/log` (`%LOCALAPPDATA%` on Windows); level from `RUST_LOG`, default `info`.
 fn init_logging() -> anyhow::Result<()> {
-    let Some(dir) = dirs::state_dir().map(|dir| dir.join("azuredevopstui")) else {
+    let Some(dir) = dirs::state_dir()
+        .or_else(dirs::data_local_dir)
+        .map(|dir| dir.join("azuredevopstui"))
+    else {
         return Ok(());
     };
     fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;

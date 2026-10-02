@@ -251,7 +251,7 @@ fn vote(app: &App, vote: i32) -> (&'static str, &'static str, Color) {
     match vote {
         10 => ("✔", "approved", theme.pr_approved),
         5 => ("✔", "approved with suggestions", theme.pr_approved),
-        -5 => ("⏳", "waiting for author", theme.pr_waiting),
+        -5 => ("◔", "waiting for author", theme.pr_waiting),
         -10 => ("✖", "rejected", theme.pr_rejected),
         _ => ("○", "no vote", theme.muted),
     }
