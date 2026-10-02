@@ -389,3 +389,302 @@ fn work_item_line(app: &App, item: &WorkItem) -> Line<'static> {
         ),
     ])
 }
+
+#[cfg(test)]
+mod tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use serde_json::json;
+
+    use super::*;
+    use crate::api::{PullRequestDetails, WorkItemDetails};
+    use crate::app::{Retry, SetupStep};
+    use crate::test_support::{config, pull_request, work_item};
+
+    fn text(lines: &[Line]) -> Vec<String> {
+        lines.iter().map(ToString::to_string).collect()
+    }
+
+    fn screen(app: &App) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(160, 45)).unwrap();
+        terminal.draw(|frame| render(frame, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn main_app() -> App {
+        let mut app = App::new(Some(config()));
+        app.screen = Screen::Main;
+        app.data = crate::app::Data {
+            my_prs: Some(vec![pull_request(
+                1,
+                "Add order filter",
+                "me",
+                "2026-10-01T10:00:00Z",
+            )]),
+            other_prs: Some(Vec::new()),
+            my_work_items: Some(vec![work_item(10, "Order list", "User Story", "Active")]),
+            ready_work_items: None,
+            sprint_name: Some("Sprint 41".into()),
+        };
+        app
+    }
+
+    fn pr_details() -> PullRequestDetails {
+        PullRequestDetails {
+            threads: vec![
+                serde_json::from_value(json!({
+                    "status": "active",
+                    "threadContext": { "filePath": "/src/main.rs" },
+                    "comments": [{
+                        "author": { "id": "u", "displayName": "Anna" },
+                        "content": "Please rename this",
+                        "publishedDate": "2026-10-01T10:00:00Z"
+                    }]
+                }))
+                .unwrap(),
+            ],
+            statuses: vec![
+                serde_json::from_value(json!({
+                    "id": 1,
+                    "state": "failed",
+                    "context": { "name": "coverage", "genre": "ci" }
+                }))
+                .unwrap(),
+            ],
+            policies: vec![
+                serde_json::from_value(json!({
+                    "status": "approved",
+                    "configuration": {
+                        "isBlocking": true,
+                        "type": { "displayName": "Build" },
+                        "settings": { "displayName": "CI build" }
+                    }
+                }))
+                .unwrap(),
+            ],
+        }
+    }
+
+    fn work_item_details() -> WorkItemDetails {
+        WorkItemDetails {
+            state: "Active".into(),
+            board_column: Some("Active".into()),
+            board_column_done: true,
+            assigned_to: Some("Anna".into()),
+            iteration_path: Some("MyProject\\Sprint 41".into()),
+            tags: Some("backend; urgent".into()),
+            description: Some("Show the orders".into()),
+            acceptance_criteria: None,
+            repro_steps: None,
+            comment_count: 0,
+            comments: Vec::new(),
+            children: vec![
+                work_item(20, "Write API", "Task", "Active"),
+                work_item(21, "Deploy", "Release Task", "New"),
+                work_item(22, "Write UI", "Task", "Closed"),
+            ],
+        }
+    }
+
+    #[test]
+    fn wrap_breaks_on_words() {
+        let lines = wrap("one two three four five", 10, Span::raw(""));
+
+        assert_eq!(text(&lines), ["one two", "three four", "five"]);
+    }
+
+    #[test]
+    fn wrap_never_goes_below_minimum_width() {
+        let lines = wrap("three four", 3, Span::raw(""));
+
+        assert_eq!(text(&lines), ["three four"]);
+    }
+
+    #[test]
+    fn wrap_keeps_indent_on_continuation_lines() {
+        let lines = wrap("  - alpha beta gamma", 14, Span::raw(""));
+
+        assert_eq!(text(&lines), ["  - alpha beta", "  gamma"]);
+    }
+
+    #[test]
+    fn wrap_splits_words_longer_than_the_width() {
+        let lines = wrap("abcdefghijklmnop", 10, Span::raw(""));
+
+        assert_eq!(text(&lines), ["abcdefghij", "klmnop"]);
+    }
+
+    #[test]
+    fn wrap_keeps_blank_lines_and_prefix() {
+        let lines = wrap("first\n\nsecond", 20, Span::raw("│ "));
+
+        assert_eq!(text(&lines), ["│ first", "│ ", "│ second"]);
+    }
+
+    #[test]
+    fn short_date_uses_local_time() {
+        let date = "2026-10-01T14:49:33Z";
+        let expected = DateTime::parse_from_rfc3339(date)
+            .unwrap()
+            .with_timezone(&Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string();
+
+        assert_eq!(short_date(date), expected);
+    }
+
+    #[test]
+    fn short_date_falls_back_for_unparsable_dates() {
+        assert_eq!(short_date("2026-10-01T14:49:33"), "2026-10-01 14:49");
+        assert_eq!(short_date("soon"), "soon");
+    }
+
+    #[test]
+    fn tab_titles_show_counts_once_loaded() {
+        let mut app = main_app();
+
+        assert_eq!(tab_title(&app, DetailTab::Overview), "Overview");
+        assert_eq!(tab_title(&app, DetailTab::Comments), "Comments (…)");
+        app.detail_info = Some(DetailInfo::PullRequest(pr_details()));
+        assert_eq!(tab_title(&app, DetailTab::Comments), "Comments (1)");
+        assert_eq!(tab_title(&app, DetailTab::Checks), "Checks (2)");
+    }
+
+    #[test]
+    fn main_view_shows_lists_with_counts_and_sort() {
+        let screen = screen(&main_app());
+
+        assert!(screen.contains("My PRs (1) · newest"));
+        assert!(screen.contains("My work items (1) · priority"));
+        assert!(screen.contains("Others' PRs (0)"));
+        assert!(screen.contains("Ready – Sprint 41"));
+        assert!(screen.contains("!1 Add order filter"));
+        assert!(screen.contains("#10 Order list"));
+        assert!(screen.contains("Loading…"));
+        assert!(screen.contains("Select an item and press enter"));
+    }
+
+    #[test]
+    fn pull_request_overview_shows_fields_and_reviewers() {
+        let mut app = main_app();
+        app.detail = app.data.detail(Panel::MyPrs, 0);
+
+        let screen = screen(&app);
+
+        assert!(screen.contains("Overview │ Comments (…) │ Checks (…)"));
+        assert!(screen.contains("● active"));
+        assert!(screen.contains("feature/x → main"));
+        assert!(screen.contains("Anna  approved  required"));
+    }
+
+    #[test]
+    fn checks_tab_shows_summary_and_sections() {
+        let mut app = main_app();
+        app.detail = app.data.detail(Panel::MyPrs, 0);
+        app.detail_info = Some(DetailInfo::PullRequest(pr_details()));
+        app.detail_tab = DetailTab::Checks;
+
+        let screen = screen(&app);
+
+        assert!(screen.contains("✔ 1 passed   ✖ 1 failed"));
+        assert!(screen.contains("▍Policies"));
+        assert!(screen.contains("✔ CI build"));
+        assert!(screen.contains("✖ ci/coverage"));
+    }
+
+    #[test]
+    fn comments_tab_shows_threads() {
+        let mut app = main_app();
+        app.detail = app.data.detail(Panel::MyPrs, 0);
+        app.detail_info = Some(DetailInfo::PullRequest(pr_details()));
+        app.detail_tab = DetailTab::Comments;
+
+        let screen = screen(&app);
+
+        assert!(screen.contains("● active  /src/main.rs"));
+        assert!(screen.contains("│ Please rename this"));
+    }
+
+    #[test]
+    fn work_item_overview_shows_fields() {
+        let mut app = main_app();
+        app.detail = app.data.detail(Panel::MyWorkItems, 0);
+        app.detail_info = Some(DetailInfo::WorkItem(work_item_details()));
+
+        let screen = screen(&app);
+
+        assert!(screen.contains("Overview │ Children (3) │ Comments (0)"));
+        assert!(screen.contains("Active · Done"));
+        assert!(screen.contains("Assigned to  Anna"));
+        assert!(screen.contains(" backend "));
+        assert!(screen.contains(" urgent "));
+        assert!(screen.contains("Show the orders"));
+    }
+
+    #[test]
+    fn children_tab_groups_by_type() {
+        let mut app = main_app();
+        app.detail = app.data.detail(Panel::MyWorkItems, 0);
+        app.detail_info = Some(DetailInfo::WorkItem(work_item_details()));
+        app.detail_tab = DetailTab::Children;
+
+        let screen = screen(&app);
+
+        let release = screen.find("▍Release Task (1)").unwrap();
+        let task = screen.find("▍Task (2)").unwrap();
+        assert!(release < task);
+        assert!(screen.contains("#20 Write API  ● Active"));
+        assert!(screen.contains("#22 Write UI  ● Closed"));
+    }
+
+    #[test]
+    fn help_popup_lists_keys() {
+        let mut app = main_app();
+        app.show_help = true;
+
+        let screen = screen(&app);
+
+        assert!(screen.contains(" Keys "));
+        assert!(screen.contains("change box/column"));
+        assert!(screen.contains("work item types"));
+    }
+
+    #[test]
+    fn pat_input_is_masked() {
+        let mut app = App::new(None);
+        app.screen = Screen::Setup(SetupStep::EnterPat {
+            input: "secret".into(),
+            error: Some("The saved token was rejected.".into()),
+            cancelable: false,
+        });
+
+        let screen = screen(&app);
+
+        assert!(screen.contains("******"));
+        assert!(!screen.contains("secret"));
+        assert!(screen.contains("The saved token was rejected."));
+    }
+
+    #[test]
+    fn failed_setup_shows_error_and_retry() {
+        let mut app = App::new(None);
+        app.screen = Screen::Setup(SetupStep::Failed {
+            error: "az login required".into(),
+            retry: Retry::Authenticate,
+        });
+
+        let screen = screen(&app);
+
+        assert!(screen.contains("Setup failed"));
+        assert!(screen.contains("az login required"));
+        assert!(screen.contains("[r] reload"));
+    }
+}

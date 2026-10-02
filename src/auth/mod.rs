@@ -55,6 +55,11 @@ impl Auth {
         Ok(credential.map(Self::new))
     }
 
+    #[cfg(test)]
+    pub fn from_pat(pat: &str) -> Self {
+        Self::new(Credential::Pat(pat.into()))
+    }
+
     pub async fn with_new_pat(pat: String) -> Result<Self> {
         pat::save(pat.clone()).await?;
         Ok(Self::new(Credential::Pat(pat)))

@@ -104,3 +104,74 @@ impl Selection {
         self.items.get(self.selected).map(String::as_str)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn selection(items: &[&str]) -> Selection {
+        Selection::new(items.iter().map(|item| item.to_string()).collect())
+    }
+
+    #[test]
+    fn selection_stops_at_the_ends() {
+        let mut selection = selection(&["a", "b"]);
+
+        selection.previous();
+        assert_eq!(selection.current(), Some("a"));
+        selection.next();
+        selection.next();
+        assert_eq!(selection.current(), Some("b"));
+    }
+
+    #[test]
+    fn empty_selection_has_no_current() {
+        let mut selection = selection(&[]);
+
+        selection.next();
+
+        assert_eq!(selection.selected, 0);
+        assert_eq!(selection.current(), None);
+    }
+
+    #[test]
+    fn input_steps() {
+        let mut pat = SetupStep::EnterPat {
+            input: String::new(),
+            error: None,
+            cancelable: false,
+        };
+        let mut organization = SetupStep::EnterOrganization(String::new());
+
+        assert!(pat.is_input());
+        assert!(organization.is_input());
+        pat.input_mut().unwrap().push('x');
+        assert!(matches!(pat, SetupStep::EnterPat { input, .. } if input == "x"));
+        assert!(organization.input_mut().is_some());
+        assert!(!SetupStep::Loading("Signing in…").is_input());
+    }
+
+    #[test]
+    fn selection_steps() {
+        let mut steps = [
+            SetupStep::SelectOrganization(selection(&["o"])),
+            SetupStep::SelectProject {
+                organization: "o".into(),
+                selection: selection(&["p"]),
+            },
+            SetupStep::SelectTeam {
+                organization: "o".into(),
+                project: "p".into(),
+                selection: selection(&["t"]),
+            },
+            SetupStep::SelectReadyColumn(selection(&["Ready"])),
+        ];
+
+        for step in &mut steps {
+            assert!(step.selection().is_some(), "{}", step.title());
+            assert!(step.selection_mut().is_some());
+            assert!(!step.is_input());
+        }
+        assert!(SetupStep::Loading("…").selection().is_none());
+    }
+}

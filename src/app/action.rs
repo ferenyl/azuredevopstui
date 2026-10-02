@@ -120,3 +120,91 @@ impl Action {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> Option<Action> {
+        Action::from_key(KeyEvent::new(code, modifiers))
+    }
+
+    fn plain(code: KeyCode) -> Option<Action> {
+        key(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn hjkl_and_arrows_move() {
+        assert_eq!(plain(KeyCode::Char('j')), Some(Action::Down));
+        assert_eq!(plain(KeyCode::Down), Some(Action::Down));
+        assert_eq!(plain(KeyCode::Char('k')), Some(Action::Up));
+        assert_eq!(plain(KeyCode::Up), Some(Action::Up));
+    }
+
+    #[test]
+    fn ctrl_direction_changes_focus() {
+        let ctrl = KeyModifiers::CONTROL;
+
+        assert_eq!(key(KeyCode::Char('h'), ctrl), Some(Action::FocusLeft));
+        assert_eq!(key(KeyCode::Char('l'), ctrl), Some(Action::FocusRight));
+        assert_eq!(key(KeyCode::Char('k'), ctrl), Some(Action::FocusUp));
+        assert_eq!(key(KeyCode::Char('j'), ctrl), Some(Action::FocusDown));
+        assert_eq!(key(KeyCode::Left, ctrl), Some(Action::FocusLeft));
+        assert_eq!(key(KeyCode::Right, ctrl), Some(Action::FocusRight));
+        assert_eq!(key(KeyCode::Up, ctrl), Some(Action::FocusUp));
+        assert_eq!(key(KeyCode::Down, ctrl), Some(Action::FocusDown));
+    }
+
+    #[test]
+    fn lowercase_and_uppercase_s_differ() {
+        assert_eq!(plain(KeyCode::Char('s')), Some(Action::ChangeColumn));
+        assert_eq!(
+            key(KeyCode::Char('S'), KeyModifiers::SHIFT),
+            Some(Action::Sort)
+        );
+    }
+
+    #[test]
+    fn tab_and_back_tab_switch_tabs() {
+        assert_eq!(plain(KeyCode::Tab), Some(Action::NextTab));
+        assert_eq!(
+            key(KeyCode::BackTab, KeyModifiers::SHIFT),
+            Some(Action::PrevTab)
+        );
+    }
+
+    #[test]
+    fn quit_keys() {
+        assert_eq!(plain(KeyCode::Char('q')), Some(Action::Quit));
+        assert_eq!(
+            key(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            Some(Action::Quit)
+        );
+    }
+
+    #[test]
+    fn other_keys() {
+        assert_eq!(plain(KeyCode::Esc), Some(Action::Cancel));
+        assert_eq!(plain(KeyCode::Enter), Some(Action::Confirm));
+        assert_eq!(
+            key(KeyCode::Char('?'), KeyModifiers::SHIFT),
+            Some(Action::Help)
+        );
+        assert_eq!(plain(KeyCode::Char(' ')), Some(Action::Toggle));
+        assert_eq!(plain(KeyCode::Char('f')), Some(Action::FilterTypes));
+    }
+
+    #[test]
+    fn unbound_key_is_ignored() {
+        assert_eq!(plain(KeyCode::Char('x')), None);
+        assert_eq!(plain(KeyCode::F(1)), None);
+    }
+
+    #[test]
+    fn help_entries_have_labels() {
+        for action in HELP {
+            assert!(!action.key_label().is_empty(), "{action:?}");
+            assert!(!action.label().is_empty(), "{action:?}");
+        }
+    }
+}

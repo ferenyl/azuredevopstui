@@ -348,16 +348,7 @@ impl App {
         let Some(config) = &mut self.config else {
             return;
         };
-        config.work_item_types = if checked.iter().all(|checked| *checked) {
-            Vec::new()
-        } else {
-            selection
-                .items
-                .into_iter()
-                .zip(checked)
-                .filter_map(|(kind, checked)| checked.then_some(kind))
-                .collect()
-        };
+        config.work_item_types = checked_types(selection.items, &checked);
         if let Err(err) = config.save() {
             self.report_error(err);
             return;
@@ -1016,5 +1007,384 @@ impl App {
             }
             step => self.set_step(step),
         }
+    }
+}
+
+/// The ticked types; empty (meaning all) when every type is ticked.
+fn checked_types(items: Vec<String>, checked: &[bool]) -> Vec<String> {
+    if checked.iter().all(|checked| *checked) {
+        return Vec::new();
+    }
+    items
+        .into_iter()
+        .zip(checked)
+        .filter_map(|(kind, checked)| checked.then_some(kind))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::PullRequestDetails;
+    use crate::test_support::{config, ids_of_prs, pull_request, work_item};
+
+    fn app() -> App {
+        let mut app = App::new(Some(config()));
+        app.screen = Screen::Main;
+        app.data = Data {
+            my_prs: Some(vec![
+                pull_request(1, "First", "me", "2026-10-03T10:00:00Z"),
+                pull_request(2, "Second", "me", "2026-10-02T10:00:00Z"),
+                pull_request(3, "Third", "me", "2026-10-01T10:00:00Z"),
+            ]),
+            other_prs: Some(vec![pull_request(4, "Theirs", "u", "2026-10-01T10:00:00Z")]),
+            my_work_items: Some(vec![
+                work_item(10, "Story", "User Story", "Active"),
+                work_item(11, "Bug", "Bug", "New"),
+            ]),
+            ready_work_items: Some(vec![work_item(12, "Ready", "User Story", "Ready")]),
+            sprint_name: Some("Sprint 1".into()),
+        };
+        app
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn ctrl(app: &mut App, c: char) {
+        app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+    }
+
+    fn open_pull_request(app: &mut App) {
+        press(app, KeyCode::Enter);
+        assert!(app.detail.as_ref().is_some_and(|d| d.is_pull_request(1)));
+    }
+
+    #[test]
+    fn focus_moves_between_boxes_and_stops_at_edges() {
+        let mut app = app();
+
+        ctrl(&mut app, 'k');
+        assert_eq!(app.focus, Panel::MyPrs);
+        for _ in 0..5 {
+            ctrl(&mut app, 'j');
+        }
+        assert_eq!(app.focus, Panel::ReadyWorkItems);
+    }
+
+    #[test]
+    fn focus_returns_to_last_left_box() {
+        let mut app = app();
+        ctrl(&mut app, 'j');
+        ctrl(&mut app, 'j');
+
+        ctrl(&mut app, 'l');
+        assert_eq!(app.focus, Panel::Detail);
+        ctrl(&mut app, 'h');
+
+        assert_eq!(app.focus, Panel::OtherPrs);
+    }
+
+    #[test]
+    fn selection_stays_within_list() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.selections[0], 0);
+        for _ in 0..5 {
+            press(&mut app, KeyCode::Char('j'));
+        }
+        assert_eq!(app.selections[0], 2);
+    }
+
+    #[test]
+    fn selection_is_clamped_when_list_shrinks() {
+        let mut app = app();
+        app.selections[0] = 2;
+
+        app.handle_message(Message::MyPullRequests(Ok(vec![pull_request(
+            1,
+            "Only",
+            "me",
+            "2026-10-01T10:00:00Z",
+        )])));
+
+        assert_eq!(app.selections[0], 0);
+    }
+
+    #[test]
+    fn loaded_lists_use_configured_sort() {
+        let mut app = app();
+
+        app.handle_message(Message::MyPullRequests(Ok(vec![
+            pull_request(1, "Old", "me", "2026-10-01T10:00:00Z"),
+            pull_request(2, "New", "me", "2026-10-05T10:00:00Z"),
+        ])));
+
+        assert_eq!(ids_of_prs(app.data.my_prs.as_ref().unwrap()), [2, 1]);
+        assert!(app.last_updated.is_some());
+    }
+
+    #[test]
+    fn enter_opens_selected_item_on_overview() {
+        let mut app = app();
+        app.detail_tab = DetailTab::Checks;
+        app.detail_scroll = 5;
+        press(&mut app, KeyCode::Char('j'));
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(app.detail.as_ref().is_some_and(|d| d.is_pull_request(2)));
+        assert_eq!(app.detail_tab, DetailTab::Overview);
+        assert_eq!(app.detail_scroll, 0);
+        assert!(app.detail_info.is_none());
+    }
+
+    #[test]
+    fn j_scrolls_detail_when_it_has_focus() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        ctrl(&mut app, 'l');
+
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('k'));
+
+        assert_eq!(app.detail_scroll, 1);
+        assert_eq!(app.selections[0], 0);
+    }
+
+    #[test]
+    fn tab_cycles_through_detail_tabs() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        app.detail_scroll = 3;
+
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.detail_tab, DetailTab::Comments);
+        assert_eq!(app.detail_scroll, 0);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.detail_tab, DetailTab::Checks);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.detail_tab, DetailTab::Overview);
+        press(&mut app, KeyCode::BackTab);
+        assert_eq!(app.detail_tab, DetailTab::Checks);
+    }
+
+    #[test]
+    fn tab_without_detail_does_nothing() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Tab);
+
+        assert_eq!(app.detail_tab, DetailTab::Overview);
+    }
+
+    #[test]
+    fn shown_detail_is_updated_after_refresh() {
+        let mut app = app();
+        open_pull_request(&mut app);
+
+        app.handle_message(Message::MyPullRequests(Ok(vec![pull_request(
+            1,
+            "Renamed",
+            "me",
+            "2026-10-01T10:00:00Z",
+        )])));
+
+        assert!(matches!(&app.detail, Some(Detail::PullRequest(pr)) if pr.title == "Renamed"));
+    }
+
+    #[test]
+    fn details_for_another_item_are_ignored() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        let details = || PullRequestDetails {
+            threads: Vec::new(),
+            statuses: Vec::new(),
+            policies: Vec::new(),
+        };
+
+        app.handle_message(Message::PullRequestDetails {
+            id: 99,
+            result: Ok(details()),
+        });
+        assert!(app.detail_info.is_none());
+        app.handle_message(Message::PullRequestDetails {
+            id: 1,
+            result: Ok(details()),
+        });
+        assert!(matches!(app.detail_info, Some(DetailInfo::PullRequest(_))));
+    }
+
+    #[test]
+    fn help_popup_blocks_other_actions() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('?'));
+        assert!(app.show_help);
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.selections[0], 0);
+        press(&mut app, KeyCode::Esc);
+
+        assert!(!app.show_help);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn sort_picker_preselects_current_sort() {
+        let mut app = app();
+        app.config.as_mut().unwrap().sort.work_items = WorkItemSort::Changed;
+        ctrl(&mut app, 'j');
+
+        press(&mut app, KeyCode::Char('S'));
+
+        let Some(Popup::Sort { kind, selection }) = &app.popup else {
+            panic!("sort picker not open");
+        };
+        assert_eq!(*kind, SortKind::WorkItems);
+        assert_eq!(selection.current(), Some("changed"));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn sort_picker_needs_a_list_focus() {
+        let mut app = app();
+        ctrl(&mut app, 'l');
+
+        press(&mut app, KeyCode::Char('S'));
+
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn popup_selection_moves_with_j_and_k() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('S'));
+
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('k'));
+
+        let Some(Popup::Sort { selection, .. }) = &app.popup else {
+            panic!("sort picker not open");
+        };
+        assert_eq!(selection.current(), Some("oldest"));
+        assert_eq!(app.selections[0], 0);
+    }
+
+    #[test]
+    fn types_picker_ticks_configured_types() {
+        let mut app = app();
+        app.config.as_mut().unwrap().work_item_types = vec!["Bug".into(), "Retired".into()];
+
+        app.open_types_picker(vec!["Bug".into(), "Task".into()]);
+
+        let Some(Popup::Types { selection, checked }) = &app.popup else {
+            panic!("types picker not open");
+        };
+        assert_eq!(selection.items, ["Bug", "Task", "Retired"]);
+        assert_eq!(checked, &[true, false, true]);
+    }
+
+    #[test]
+    fn types_picker_ticks_all_without_filter() {
+        let mut app = app();
+
+        app.open_types_picker(vec!["Bug".into(), "Task".into()]);
+
+        assert!(
+            matches!(&app.popup, Some(Popup::Types { checked, .. }) if checked == &[true, true])
+        );
+    }
+
+    #[test]
+    fn space_toggles_type() {
+        let mut app = app();
+        app.open_types_picker(vec!["Bug".into(), "Task".into()]);
+
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char(' '));
+
+        assert!(
+            matches!(&app.popup, Some(Popup::Types { checked, .. }) if checked == &[true, false])
+        );
+    }
+
+    #[test]
+    fn checked_types_keep_ticked_types() {
+        let types = checked_types(vec!["Bug".into(), "Task".into()], &[false, true]);
+
+        assert_eq!(types, ["Task"]);
+    }
+
+    #[test]
+    fn all_or_no_ticked_types_mean_all() {
+        assert!(checked_types(vec!["Bug".into(), "Task".into()], &[true, true]).is_empty());
+        assert!(checked_types(vec!["Bug".into()], &[false]).is_empty());
+    }
+
+    #[test]
+    fn esc_in_setup_quits() {
+        let mut app = App::new(None);
+
+        press(&mut app, KeyCode::Esc);
+
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn esc_in_cancelable_pat_dialog_returns_to_main() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('t'));
+        assert!(matches!(
+            app.screen,
+            Screen::Setup(SetupStep::EnterPat { .. })
+        ));
+        press(&mut app, KeyCode::Esc);
+
+        assert!(matches!(app.screen, Screen::Main));
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn text_input_takes_letters_instead_of_actions() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('t'));
+
+        for c in "qj?".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        press(&mut app, KeyCode::Backspace);
+
+        assert!(!app.should_quit);
+        assert!(
+            matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input == "qj")
+        );
+    }
+
+    #[test]
+    fn q_quits_from_main() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('q'));
+
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn toolbar_actions_follow_context() {
+        let mut app = app();
+        assert!(app.actions().contains(&Action::OpenInBrowser));
+        assert!(!app.actions().contains(&Action::ChangeColumn));
+
+        ctrl(&mut app, 'j');
+        assert!(app.actions().contains(&Action::ChangeColumn));
+
+        press(&mut app, KeyCode::Char('?'));
+        assert_eq!(app.actions(), [Action::Cancel]);
     }
 }

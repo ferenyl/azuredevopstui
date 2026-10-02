@@ -73,3 +73,34 @@ impl Default for Theme {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_colors_keep_mocha_defaults() {
+        let theme: Theme = serde_json::from_str(r##"{"background":"#000000"}"##).unwrap();
+
+        assert_eq!(theme.background, Color::Rgb(0, 0, 0));
+        assert_eq!(theme.foreground, mocha::TEXT);
+        assert_eq!(theme.border_focused, mocha::BLUE);
+    }
+
+    #[test]
+    fn default_theme_is_mocha() {
+        let theme = Theme::default();
+
+        assert_eq!(theme.background, Color::from_u32(0x1e1e2e));
+        assert_eq!(theme.error, mocha::RED);
+    }
+
+    #[test]
+    fn colors_round_trip_as_hex() {
+        let json = serde_json::to_value(Theme::default()).unwrap();
+
+        assert_eq!(json["background"], "#1E1E2E");
+        let theme: Theme = serde_json::from_value(json).unwrap();
+        assert_eq!(theme.background, mocha::BASE);
+    }
+}

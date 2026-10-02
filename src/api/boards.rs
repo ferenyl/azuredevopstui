@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
+use super::AdoClient;
 use super::models::{Backlog, Board, BoardResponse, ListResponse};
-use super::{AdoClient, DEV_AZURE};
 
 const REQUIREMENT_BACKLOG: &str = "requirement";
 
@@ -21,7 +21,7 @@ impl AdoClient {
     pub async fn board(&self, organization: &str, project: &str, team: &str) -> Result<Board> {
         let backlogs: ListResponse<Backlog> = self
             .get(
-                DEV_AZURE,
+                &self.urls.dev_azure,
                 &[organization, project, team, "_apis", "work", "backlogs"],
                 &[],
             )
@@ -33,7 +33,7 @@ impl AdoClient {
             .context("team has no requirement backlog")?;
         let board: BoardResponse = self
             .get(
-                DEV_AZURE,
+                &self.urls.dev_azure,
                 &[
                     organization,
                     project,
@@ -104,7 +104,7 @@ impl AdoClient {
         let id = id.to_string();
         let _: serde::de::IgnoredAny = self
             .patch(
-                DEV_AZURE,
+                &self.urls.dev_azure,
                 &[organization, project, "_apis", "wit", "workitems", &id],
                 &Value::Array(operations),
             )
@@ -142,5 +142,160 @@ impl Board {
             }
         }
         Some(targets)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use serde_json::json;
+    use wiremock::matchers::{body_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::api::models::BoardColumn;
+    use crate::auth::Auth;
+
+    fn column(name: &str, is_split: bool, mappings: &[(&str, &str)]) -> BoardColumn {
+        BoardColumn {
+            name: name.into(),
+            is_split,
+            state_mappings: mappings
+                .iter()
+                .map(|(kind, state)| (kind.to_string(), state.to_string()))
+                .collect::<HashMap<_, _>>(),
+        }
+    }
+
+    fn board(columns: Vec<BoardColumn>) -> Board {
+        Board {
+            column_field: "WEF_X_Kanban.Column".into(),
+            done_field: "WEF_X_Kanban.Column.Done".into(),
+            columns,
+        }
+    }
+
+    #[test]
+    fn plain_column_gives_one_target() {
+        let board = board(vec![column("New", false, &[("User Story", "New")])]);
+
+        let targets = board.targets("User Story").unwrap();
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].label, "New");
+        assert!(!targets[0].done);
+        assert_eq!(targets[0].state, "New");
+    }
+
+    #[test]
+    fn split_column_gives_doing_and_done_targets() {
+        let board = board(vec![column("Active", true, &[("User Story", "Active")])]);
+
+        let targets = board.targets("User Story").unwrap();
+
+        let labels: Vec<_> = targets.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels, ["Active (Doing)", "Active (Done)"]);
+        assert_eq!(
+            targets.iter().map(|t| t.done).collect::<Vec<_>>(),
+            [false, true]
+        );
+        assert!(
+            targets
+                .iter()
+                .all(|t| t.column == "Active" && t.state == "Active")
+        );
+    }
+
+    #[test]
+    fn type_missing_from_a_column_is_not_on_the_board() {
+        let board = board(vec![
+            column("New", false, &[("User Story", "New"), ("Bug", "New")]),
+            column("Closed", false, &[("User Story", "Closed")]),
+        ]);
+
+        assert!(board.targets("Bug").is_none());
+        assert_eq!(board.targets("User Story").unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn board_uses_the_requirement_backlog() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/Team/_apis/work/backlogs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "Epics", "type": "portfolio" },
+                { "name": "Stories", "type": "requirement" }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/Team/_apis/work/boards/Stories"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "columns": [
+                    { "name": "New", "stateMappings": { "User Story": "New" } },
+                    { "name": "Active", "isSplit": true, "stateMappings": { "User Story": "Active" } }
+                ],
+                "fields": {
+                    "columnField": { "referenceName": "WEF_A_Kanban.Column" },
+                    "doneField": { "referenceName": "WEF_A_Kanban.Column.Done" }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+
+        let board = client.board("contoso", "MyProject", "Team").await.unwrap();
+
+        assert_eq!(board.column_field, "WEF_A_Kanban.Column");
+        assert_eq!(board.done_field, "WEF_A_Kanban.Column.Done");
+        assert_eq!(board.columns.len(), 2);
+        assert!(board.columns[1].is_split);
+    }
+
+    #[tokio::test]
+    async fn move_work_item_patches_state_column_and_done() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
+            .and(header("content-type", "application/json-patch+json"))
+            .and(body_json(json!([
+                { "op": "add", "path": "/fields/System.State", "value": "Active" },
+                { "op": "add", "path": "/fields/WEF_X_Kanban.Column", "value": "Active" },
+                { "op": "add", "path": "/fields/WEF_X_Kanban.Column.Done", "value": true }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let board = board(vec![column("Active", true, &[("User Story", "Active")])]);
+        let target = board.targets("User Story").unwrap().pop().unwrap();
+
+        client
+            .move_work_item("contoso", "MyProject", 5, &board, &target)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn assign_work_item_sets_assigned_to() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
+            .and(body_json(json!([
+                { "op": "add", "path": "/fields/System.AssignedTo", "value": "me@example.com" }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+
+        client
+            .assign_work_item("contoso", "MyProject", 5, "me@example.com")
+            .await
+            .unwrap();
     }
 }

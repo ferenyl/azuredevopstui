@@ -67,3 +67,54 @@ pub async fn fetch_token(config_dir: Option<&Path>) -> Result<Token> {
     }
     serde_json::from_slice(&output.stdout).context("failed to parse az token")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn token(expires_on: u64) -> Token {
+        Token {
+            access_token: "token".into(),
+            expires_on,
+        }
+    }
+
+    fn now() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn parses_az_output() {
+        let output = r#"{
+            "accessToken": "eyJ0eXAi",
+            "expiresOn": "2026-10-02 10:00:00.000000",
+            "expires_on": 1790000000,
+            "subscription": "00000000-0000-0000-0000-000000000000",
+            "tenant": "00000000-0000-0000-0000-000000000000",
+            "tokenType": "Bearer"
+        }"#;
+
+        let token: Token = serde_json::from_str(output).unwrap();
+
+        assert_eq!(token.access_token, "eyJ0eXAi");
+        assert_eq!(token.expires_on, 1_790_000_000);
+    }
+
+    #[test]
+    fn past_token_is_expired() {
+        assert!(token(now() - 10).is_expired());
+    }
+
+    #[test]
+    fn token_inside_margin_is_expired() {
+        assert!(token(now() + EXPIRY_MARGIN_SECS - 5).is_expired());
+    }
+
+    #[test]
+    fn future_token_is_valid() {
+        assert!(!token(now() + 3600).is_expired());
+    }
+}

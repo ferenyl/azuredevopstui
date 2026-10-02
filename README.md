@@ -128,6 +128,16 @@ To build the Windows binary from WSL or Linux, see [Windows](#windows).
 
 The release workflow calls the same file, so a release is only built and published once CI passes.
 
+Run the same checks locally before you open a pull request:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+The tests are unit tests next to the code (`#[cfg(test)] mod tests`). API calls are tested against a local mock server ([wiremock](https://crates.io/crates/wiremock)), and the UI is rendered to ratatui's `TestBackend`. No test talks to Azure DevOps, the keyring, `az` or your config file.
+
 ### Publishing a release
 
 `.github/workflows/release.yml` runs when a GitHub release is published. It first runs [CI](#continuous-integration), then:

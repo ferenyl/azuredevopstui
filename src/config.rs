@@ -186,3 +186,131 @@ impl Config {
         fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn auth(dir: Option<&str>) -> AuthConfig {
+        AuthConfig {
+            method: AuthMethod::Auto,
+            azure_config_dir: dir.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn minimal_config_gets_defaults() {
+        let config: Config =
+            serde_json::from_str(r#"{"organization":"o","project":"p","team":"t"}"#).unwrap();
+
+        assert_eq!(config.refresh_interval_secs, 120);
+        assert_eq!(config.auth.method, AuthMethod::Auto);
+        assert!(config.auth.azure_config_dir.is_none());
+        assert!(config.browser_command.is_none());
+        assert!(config.other_prs_filter.reviewers.is_empty());
+        assert!(config.other_prs_filter.creators.is_empty());
+        assert!(config.ready_column.is_none());
+        assert!(config.work_item_types.is_empty());
+        assert_eq!(config.sort.pull_requests, PrSort::Newest);
+        assert_eq!(config.sort.work_items, WorkItemSort::Priority);
+    }
+
+    #[test]
+    fn missing_required_field_is_an_error() {
+        let result = serde_json::from_str::<Config>(r#"{"organization":"o","project":"p"}"#);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sort_options_use_snake_case() {
+        let sort = SortConfig {
+            pull_requests: PrSort::Repository,
+            work_items: WorkItemSort::Changed,
+        };
+
+        let json = serde_json::to_value(sort).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({ "pull_requests": "repository", "work_items": "changed" })
+        );
+    }
+
+    #[test]
+    fn unknown_sort_option_is_an_error() {
+        let result = serde_json::from_str::<SortConfig>(r#"{"pull_requests":"random"}"#);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sort_labels_match_serialized_names() {
+        for sort in PrSort::ALL {
+            assert_eq!(serde_json::to_value(sort).unwrap(), sort.label());
+        }
+        for sort in WorkItemSort::ALL {
+            assert_eq!(serde_json::to_value(sort).unwrap(), sort.label());
+        }
+    }
+
+    #[test]
+    fn auth_method_uses_lowercase() {
+        let auth: AuthConfig = serde_json::from_str(r#"{"method":"azcli"}"#).unwrap();
+
+        assert_eq!(auth.method, AuthMethod::Azcli);
+    }
+
+    #[test]
+    fn unset_optional_fields_are_not_written() {
+        let config = Config::new("o".into(), "p".into(), "t".into());
+
+        let json = serde_json::to_value(&config).unwrap();
+
+        assert!(json.get("ready_column").is_none());
+        assert!(json["auth"].get("azure_config_dir").is_none());
+    }
+
+    #[test]
+    fn new_config_round_trips() {
+        let mut config = Config::new("o".into(), "p".into(), "t".into());
+        config.ready_column = Some("Ready".into());
+        config.work_item_types = vec!["Bug".into()];
+
+        let json = serde_json::to_string(&config).unwrap();
+        let loaded: Config = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(loaded.ready_column.as_deref(), Some("Ready"));
+        assert_eq!(loaded.work_item_types, ["Bug"]);
+        assert_eq!(loaded.colors.background, config.colors.background);
+    }
+
+    #[test]
+    fn azure_config_dir_expands_tilde() {
+        let home = dirs::home_dir().unwrap();
+
+        assert_eq!(
+            auth(Some("~/.azure-devops")).azure_config_dir(),
+            Some(home.join(".azure-devops"))
+        );
+        assert_eq!(auth(Some("~")).azure_config_dir(), Some(home));
+    }
+
+    #[test]
+    fn azure_config_dir_keeps_other_paths() {
+        assert_eq!(
+            auth(Some("/opt/az")).azure_config_dir(),
+            Some(PathBuf::from("/opt/az"))
+        );
+        assert_eq!(
+            auth(Some("~other")).azure_config_dir(),
+            Some(PathBuf::from("~other"))
+        );
+    }
+
+    #[test]
+    fn empty_azure_config_dir_is_none() {
+        assert_eq!(auth(None).azure_config_dir(), None);
+        assert_eq!(auth(Some("  ")).azure_config_dir(), None);
+    }
+}

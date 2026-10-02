@@ -5,6 +5,9 @@ mod config;
 mod theme;
 mod ui;
 
+#[cfg(test)]
+mod test_support;
+
 use std::fs::{self, File};
 use std::io::stdout;
 use std::sync::Mutex;

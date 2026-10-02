@@ -357,3 +357,100 @@ pub struct DetailComment {
     pub date: String,
     pub text: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn unique_name_prefers_account_property() {
+        let data: ConnectionData = serde_json::from_value(json!({
+            "authenticatedUser": {
+                "id": "user-id",
+                "providerDisplayName": "Anna Andersson",
+                "properties": { "Account": { "$type": "System.String", "$value": "anna@example.com" } }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(data.authenticated_user.id, "user-id");
+        assert_eq!(data.authenticated_user.unique_name(), "anna@example.com");
+    }
+
+    #[test]
+    fn unique_name_falls_back_to_display_name() {
+        let user: CurrentUser = serde_json::from_value(json!({
+            "id": "user-id",
+            "providerDisplayName": "Anna Andersson"
+        }))
+        .unwrap();
+
+        assert_eq!(user.unique_name(), "Anna Andersson");
+    }
+
+    #[test]
+    fn work_item_allows_missing_optional_fields() {
+        let item: WorkItem = serde_json::from_value(json!({
+            "id": 1,
+            "fields": {
+                "System.Title": "Title",
+                "System.WorkItemType": "Bug",
+                "System.State": "New"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(item.fields.priority, None);
+        assert_eq!(item.fields.board_column, None);
+        assert!(item.fields.assigned_to.is_none());
+        assert_eq!(item.fields.changed_date, "");
+    }
+
+    #[test]
+    fn work_item_reads_all_fields() {
+        let item: WorkItem = serde_json::from_value(json!({
+            "id": 2,
+            "fields": {
+                "System.Title": "Title",
+                "System.WorkItemType": "User Story",
+                "System.State": "Active",
+                "System.BoardColumn": "Active",
+                "System.BoardColumnDone": true,
+                "Microsoft.VSTS.Common.Priority": 2,
+                "System.ChangedDate": "2026-10-01T10:00:00Z",
+                "System.CreatedDate": "2026-09-01T10:00:00Z",
+                "System.AssignedTo": { "id": "u", "displayName": "Anna" }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(item.fields.priority, Some(2));
+        assert_eq!(item.fields.board_column_done, Some(true));
+        assert_eq!(item.fields.assigned_to.unwrap().display_name, "Anna");
+    }
+
+    #[test]
+    fn pull_request_reads_reviewers() {
+        let pr = crate::test_support::pull_request(1, "Title", "creator", "2026-10-01T10:00:00Z");
+
+        assert_eq!(pr.reviewers.len(), 2);
+        assert_eq!(pr.reviewers[0].vote, 10);
+        assert_eq!(pr.reviewers[0].is_required, Some(true));
+        assert_eq!(pr.reviewers[1].is_required, None);
+        assert!(!pr.is_draft);
+    }
+
+    #[test]
+    fn board_column_defaults_to_not_split() {
+        let column: BoardColumn = serde_json::from_value(json!({
+            "name": "New",
+            "stateMappings": { "User Story": "New", "Bug": "New" }
+        }))
+        .unwrap();
+
+        assert!(!column.is_split);
+        assert_eq!(column.state_mappings["Bug"], "New");
+    }
+}

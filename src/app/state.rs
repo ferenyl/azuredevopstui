@@ -239,3 +239,203 @@ impl Panel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{
+        ids_of_items, ids_of_prs, pull_request, pull_request_in, work_item, work_item_with,
+    };
+
+    fn sorted_prs(sort: PrSort) -> Vec<u32> {
+        let mut prs = vec![
+            pull_request(1, "beta", "u", "2026-10-02T10:00:00Z"),
+            pull_request(2, "Alpha", "u", "2026-10-03T10:00:00Z"),
+            pull_request(3, "gamma", "u", "2026-10-01T10:00:00Z"),
+        ];
+        sort_pull_requests(&mut prs, sort);
+        ids_of_prs(&prs)
+    }
+
+    fn sorted_items(sort: WorkItemSort) -> Vec<u32> {
+        let mut items = vec![
+            work_item_with(1, Some(2), "2026-10-01", "2026-09-03"),
+            work_item_with(2, None, "2026-10-05", "2026-09-01"),
+            work_item_with(3, Some(1), "2026-10-02", "2026-09-02"),
+            work_item_with(4, Some(2), "2026-10-03", "2026-09-04"),
+        ];
+        sort_work_items(&mut items, sort);
+        ids_of_items(&items)
+    }
+
+    fn data() -> Data {
+        Data {
+            my_prs: Some(vec![pull_request(1, "Mine", "me", "2026-10-01T10:00:00Z")]),
+            other_prs: Some(vec![
+                pull_request(2, "Theirs", "u", "2026-10-01T10:00:00Z"),
+                pull_request(3, "Newer", "u", "2026-10-02T10:00:00Z"),
+            ]),
+            my_work_items: Some(vec![work_item(10, "Story", "User Story", "Active")]),
+            ready_work_items: None,
+            sprint_name: Some("Sprint 1".into()),
+        }
+    }
+
+    #[test]
+    fn pull_requests_sort_newest_first() {
+        assert_eq!(sorted_prs(PrSort::Newest), [2, 1, 3]);
+    }
+
+    #[test]
+    fn pull_requests_sort_oldest_first() {
+        assert_eq!(sorted_prs(PrSort::Oldest), [3, 1, 2]);
+    }
+
+    #[test]
+    fn pull_requests_sort_by_title_ignoring_case() {
+        assert_eq!(sorted_prs(PrSort::Title), [2, 1, 3]);
+    }
+
+    #[test]
+    fn pull_requests_sort_by_repository_then_newest() {
+        let mut prs = vec![
+            pull_request_in(1, "web", "2026-10-01T10:00:00Z"),
+            pull_request_in(2, "Api", "2026-10-01T10:00:00Z"),
+            pull_request_in(3, "web", "2026-10-02T10:00:00Z"),
+        ];
+
+        sort_pull_requests(&mut prs, PrSort::Repository);
+
+        assert_eq!(ids_of_prs(&prs), [2, 3, 1]);
+    }
+
+    #[test]
+    fn work_items_sort_by_priority_with_missing_last() {
+        assert_eq!(sorted_items(WorkItemSort::Priority), [3, 4, 1, 2]);
+    }
+
+    #[test]
+    fn work_items_sort_by_changed() {
+        assert_eq!(sorted_items(WorkItemSort::Changed), [2, 4, 3, 1]);
+    }
+
+    #[test]
+    fn work_items_sort_by_created() {
+        assert_eq!(sorted_items(WorkItemSort::Created), [4, 1, 3, 2]);
+    }
+
+    #[test]
+    fn work_items_sort_by_id() {
+        assert_eq!(sorted_items(WorkItemSort::Id), [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn work_items_sort_by_state_then_changed() {
+        let mut items = vec![
+            work_item(1, "a", "Bug", "New"),
+            work_item(2, "b", "Bug", "Active"),
+            work_item(3, "c", "Bug", "Active"),
+        ];
+        items[2].fields.changed_date = "2026-12-01".into();
+
+        sort_work_items(&mut items, WorkItemSort::State);
+
+        assert_eq!(ids_of_items(&items), [3, 2, 1]);
+    }
+
+    #[test]
+    fn data_sort_applies_to_all_lists() {
+        let mut data = data();
+
+        data.sort(&SortConfig::default());
+
+        assert_eq!(ids_of_prs(data.other_prs.as_ref().unwrap()), [3, 2]);
+    }
+
+    #[test]
+    fn data_len_counts_loaded_lists() {
+        let data = data();
+
+        assert_eq!(data.len(Panel::MyPrs), 1);
+        assert_eq!(data.len(Panel::OtherPrs), 2);
+        assert_eq!(data.len(Panel::MyWorkItems), 1);
+        assert_eq!(data.len(Panel::ReadyWorkItems), 0);
+        assert_eq!(data.len(Panel::Detail), 0);
+    }
+
+    #[test]
+    fn data_detail_picks_row_from_panel() {
+        let data = data();
+
+        assert!(
+            data.detail(Panel::OtherPrs, 1)
+                .is_some_and(|d| d.is_pull_request(3))
+        );
+        assert!(
+            data.detail(Panel::MyWorkItems, 0)
+                .is_some_and(|d| d.is_work_item(10))
+        );
+        assert!(data.detail(Panel::OtherPrs, 5).is_none());
+        assert!(data.detail(Panel::ReadyWorkItems, 0).is_none());
+    }
+
+    #[test]
+    fn data_find_returns_fresh_version() {
+        let mut data = data();
+        let shown = data.detail(Panel::OtherPrs, 0).unwrap();
+        data.other_prs.as_mut().unwrap()[0].title = "Renamed".into();
+
+        let fresh = data.find(&shown);
+
+        assert!(matches!(fresh, Some(Detail::PullRequest(pr)) if pr.title == "Renamed"));
+    }
+
+    #[test]
+    fn data_find_is_none_when_item_is_gone() {
+        let mut data = data();
+        let shown = data.detail(Panel::MyWorkItems, 0).unwrap();
+        data.my_work_items = Some(Vec::new());
+
+        assert!(data.find(&shown).is_none());
+    }
+
+    #[test]
+    fn detail_kind_matches_only_same_type_and_id() {
+        let pr = Detail::PullRequest(Box::new(pull_request(5, "PR", "u", "2026-10-01")));
+        let item = Detail::WorkItem(work_item(5, "Item", "Bug", "New"));
+
+        assert!(pr.is_pull_request(5));
+        assert!(!pr.is_work_item(5));
+        assert!(item.is_work_item(5));
+        assert!(!item.is_pull_request(5));
+    }
+
+    #[test]
+    fn tabs_depend_on_detail_kind() {
+        let pr = Detail::PullRequest(Box::new(pull_request(5, "PR", "u", "2026-10-01")));
+        let item = Detail::WorkItem(work_item(5, "Item", "Bug", "New"));
+
+        assert_eq!(
+            pr.tabs(),
+            [DetailTab::Overview, DetailTab::Comments, DetailTab::Checks]
+        );
+        assert_eq!(
+            item.tabs(),
+            [
+                DetailTab::Overview,
+                DetailTab::Children,
+                DetailTab::Comments
+            ]
+        );
+    }
+
+    #[test]
+    fn panel_index_and_sort_kind() {
+        assert_eq!(Panel::MyPrs.index(), Some(0));
+        assert_eq!(Panel::ReadyWorkItems.index(), Some(3));
+        assert_eq!(Panel::Detail.index(), None);
+        assert_eq!(Panel::OtherPrs.sort_kind(), Some(SortKind::PullRequests));
+        assert_eq!(Panel::MyWorkItems.sort_kind(), Some(SortKind::WorkItems));
+        assert_eq!(Panel::Detail.sort_kind(), None);
+    }
+}

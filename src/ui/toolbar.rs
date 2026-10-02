@@ -53,3 +53,17 @@ fn ago(secs: u64) -> String {
         _ => format!("{}h ago", secs / 3600),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ago_uses_largest_whole_unit() {
+        assert_eq!(ago(0), "0s ago");
+        assert_eq!(ago(59), "59s ago");
+        assert_eq!(ago(60), "1m ago");
+        assert_eq!(ago(3599), "59m ago");
+        assert_eq!(ago(7200), "2h ago");
+    }
+}
