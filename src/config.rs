@@ -27,6 +27,8 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready_column: Option<String>,
     #[serde(default)]
+    pub sort: SortConfig,
+    #[serde(default)]
     pub colors: Theme,
 }
 
@@ -56,6 +58,67 @@ pub struct OtherPrsFilter {
     pub creators: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SortConfig {
+    pub pull_requests: PrSort,
+    pub work_items: WorkItemSort,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrSort {
+    #[default]
+    Newest,
+    Oldest,
+    Title,
+    Repository,
+}
+
+impl PrSort {
+    pub const ALL: [Self; 4] = [Self::Newest, Self::Oldest, Self::Title, Self::Repository];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Newest => "newest",
+            Self::Oldest => "oldest",
+            Self::Title => "title",
+            Self::Repository => "repository",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkItemSort {
+    #[default]
+    Priority,
+    Changed,
+    Created,
+    State,
+    Id,
+}
+
+impl WorkItemSort {
+    pub const ALL: [Self; 5] = [
+        Self::Priority,
+        Self::Changed,
+        Self::Created,
+        Self::State,
+        Self::Id,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Priority => "priority",
+            Self::Changed => "changed",
+            Self::Created => "created",
+            Self::State => "state",
+            Self::Id => "id",
+        }
+    }
+}
+
 impl Config {
     pub fn new(organization: String, project: String, team: String) -> Self {
         Self {
@@ -67,6 +130,7 @@ impl Config {
             auth: AuthConfig::default(),
             other_prs_filter: OtherPrsFilter::default(),
             ready_column: None,
+            sort: SortConfig::default(),
             colors: Theme::default(),
         }
     }

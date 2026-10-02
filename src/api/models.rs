@@ -263,6 +263,12 @@ pub struct WorkItemFields {
     pub board_column: Option<String>,
     #[serde(rename = "System.BoardColumnDone")]
     pub board_column_done: Option<bool>,
+    #[serde(rename = "Microsoft.VSTS.Common.Priority")]
+    pub priority: Option<u8>,
+    #[serde(rename = "System.ChangedDate", default)]
+    pub changed_date: String,
+    #[serde(rename = "System.CreatedDate", default)]
+    pub created_date: String,
 }
 
 pub struct SprintWorkItems {

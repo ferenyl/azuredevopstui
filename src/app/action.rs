@@ -16,14 +16,19 @@ pub enum Action {
     AssignToMe,
     ChangeColumn,
     ChangeToken,
+    Sort,
+    NextTab,
+    PrevTab,
     Help,
 }
 
 /// Actions listed in the help popup.
-pub const HELP: [Action; 11] = [
+pub const HELP: [Action; 13] = [
     Action::Down,
     Action::FocusRight,
+    Action::NextTab,
     Action::Confirm,
+    Action::Sort,
     Action::ChangeColumn,
     Action::AssignToMe,
     Action::OpenInBrowser,
@@ -51,6 +56,9 @@ impl Action {
             (KeyCode::Char('o'), _) => Some(Self::OpenInBrowser),
             (KeyCode::Char('a'), _) => Some(Self::AssignToMe),
             (KeyCode::Char('s'), _) => Some(Self::ChangeColumn),
+            (KeyCode::Char('S'), _) => Some(Self::Sort),
+            (KeyCode::Tab, _) => Some(Self::NextTab),
+            (KeyCode::BackTab, _) => Some(Self::PrevTab),
             (KeyCode::Char('t'), _) => Some(Self::ChangeToken),
             (KeyCode::Char('?'), _) => Some(Self::Help),
             _ => None,
@@ -73,6 +81,9 @@ impl Action {
             Self::AssignToMe => "a",
             Self::ChangeColumn => "s",
             Self::ChangeToken => "t",
+            Self::Sort => "S",
+            Self::NextTab => "tab",
+            Self::PrevTab => "shift+tab",
             Self::Help => "?",
         }
     }
@@ -93,6 +104,9 @@ impl Action {
             Self::AssignToMe => "assign to me",
             Self::ChangeColumn => "change status",
             Self::ChangeToken => "set PAT",
+            Self::Sort => "sort",
+            Self::NextTab => "next tab",
+            Self::PrevTab => "previous tab",
             Self::Help => "help",
         }
     }

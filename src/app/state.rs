@@ -1,5 +1,6 @@
 use super::setup::Selection;
 use crate::api::{ColumnTarget, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails};
+use crate::config::{PrSort, SortConfig, WorkItemSort};
 
 #[derive(Clone)]
 pub enum Detail {
@@ -22,6 +23,45 @@ impl Detail {
     pub fn is_work_item(&self, id: u32) -> bool {
         matches!(self, Self::WorkItem(_)) && self.id() == id
     }
+
+    pub fn tabs(&self) -> &'static [DetailTab] {
+        match self {
+            Self::PullRequest(_) => &[DetailTab::Overview, DetailTab::Comments, DetailTab::Checks],
+            Self::WorkItem(_) => &[DetailTab::Overview, DetailTab::Comments],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DetailTab {
+    #[default]
+    Overview,
+    Comments,
+    Checks,
+}
+
+impl DetailTab {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Overview => "Overview",
+            Self::Comments => "Comments",
+            Self::Checks => "Checks",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortKind {
+    PullRequests,
+    WorkItems,
+}
+
+pub enum Popup {
+    Column(ColumnPicker),
+    Sort {
+        kind: SortKind,
+        selection: Selection,
+    },
 }
 
 pub struct ColumnPicker {
@@ -91,6 +131,21 @@ impl Data {
         }
     }
 
+    pub fn sort(&mut self, sort: &SortConfig) {
+        for prs in [&mut self.my_prs, &mut self.other_prs]
+            .into_iter()
+            .flatten()
+        {
+            sort_pull_requests(prs, sort.pull_requests);
+        }
+        for items in [&mut self.my_work_items, &mut self.ready_work_items]
+            .into_iter()
+            .flatten()
+        {
+            sort_work_items(items, sort.work_items);
+        }
+    }
+
     pub fn detail(&self, panel: Panel, index: usize) -> Option<Detail> {
         let pr = |prs: &Option<Vec<PullRequest>>| {
             prs.as_ref()?
@@ -111,6 +166,45 @@ impl Data {
     }
 }
 
+fn sort_pull_requests(prs: &mut [PullRequest], sort: PrSort) {
+    match sort {
+        PrSort::Newest => prs.sort_by(|a, b| b.creation_date.cmp(&a.creation_date)),
+        PrSort::Oldest => prs.sort_by(|a, b| a.creation_date.cmp(&b.creation_date)),
+        PrSort::Title => prs.sort_by_key(|pr| pr.title.to_lowercase()),
+        PrSort::Repository => prs.sort_by(|a, b| {
+            a.repository
+                .name
+                .to_lowercase()
+                .cmp(&b.repository.name.to_lowercase())
+                .then_with(|| b.creation_date.cmp(&a.creation_date))
+        }),
+    }
+}
+
+fn sort_work_items(items: &mut [WorkItem], sort: WorkItemSort) {
+    let newest_change =
+        |a: &WorkItem, b: &WorkItem| b.fields.changed_date.cmp(&a.fields.changed_date);
+    match sort {
+        WorkItemSort::Priority => items.sort_by(|a, b| {
+            let priority = |item: &WorkItem| item.fields.priority.unwrap_or(u8::MAX);
+            priority(a)
+                .cmp(&priority(b))
+                .then_with(|| newest_change(a, b))
+        }),
+        WorkItemSort::Changed => items.sort_by(newest_change),
+        WorkItemSort::Created => {
+            items.sort_by(|a, b| b.fields.created_date.cmp(&a.fields.created_date));
+        }
+        WorkItemSort::State => items.sort_by(|a, b| {
+            a.fields
+                .state
+                .cmp(&b.fields.state)
+                .then_with(|| newest_change(a, b))
+        }),
+        WorkItemSort::Id => items.sort_by_key(|item| item.id),
+    }
+}
+
 impl Panel {
     /// Position in the left column, `None` for the detail panel.
     pub fn index(self) -> Option<usize> {
@@ -124,6 +218,14 @@ impl Panel {
             Self::OtherPrs => "Others' PRs",
             Self::ReadyWorkItems => "Ready (sprint)",
             Self::Detail => "Details",
+        }
+    }
+
+    pub fn sort_kind(self) -> Option<SortKind> {
+        match self {
+            Self::MyPrs | Self::OtherPrs => Some(SortKind::PullRequests),
+            Self::MyWorkItems | Self::ReadyWorkItems => Some(SortKind::WorkItems),
+            Self::Detail => None,
         }
     }
 }

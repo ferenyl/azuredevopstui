@@ -5,7 +5,9 @@ mod state;
 
 pub use action::{Action, HELP};
 pub use setup::{Retry, Selection, SetupStep};
-pub use state::{ColumnPicker, Data, Detail, DetailInfo, LEFT_PANELS, Panel};
+pub use state::{
+    ColumnPicker, Data, Detail, DetailInfo, DetailTab, LEFT_PANELS, Panel, Popup, SortKind,
+};
 
 use std::time::{Duration, Instant};
 
@@ -16,7 +18,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::api::{self, AdoClient, Board, CurrentUser, WorkItem};
 use crate::auth::Auth;
-use crate::config::{AuthMethod, Config};
+use crate::config::{AuthMethod, Config, PrSort, WorkItemSort};
 use crate::theme::Theme;
 use message::Message;
 
@@ -37,7 +39,8 @@ pub struct App {
     /// `None` while the selected detail is loading.
     pub detail_info: Option<DetailInfo>,
     pub detail_scroll: u16,
-    pub popup: Option<ColumnPicker>,
+    pub detail_tab: DetailTab,
+    pub popup: Option<Popup>,
     pub show_help: bool,
     pub last_updated: Option<Instant>,
     last_refresh: Instant,
@@ -67,6 +70,7 @@ impl App {
             detail: None,
             detail_info: None,
             detail_scroll: 0,
+            detail_tab: DetailTab::default(),
             popup: None,
             show_help: false,
             last_updated: None,
@@ -117,30 +121,32 @@ impl App {
                 Some(Detail::PullRequest(_)) => &[
                     Action::Down,
                     Action::FocusRight,
+                    Action::NextTab,
                     Action::Confirm,
                     Action::OpenInBrowser,
+                    Action::Sort,
                     Action::Reload,
-                    Action::ChangeToken,
                     Action::Help,
                     Action::Quit,
                 ],
                 Some(Detail::WorkItem(_)) => &[
                     Action::Down,
                     Action::FocusRight,
+                    Action::NextTab,
                     Action::Confirm,
                     Action::ChangeColumn,
                     Action::AssignToMe,
                     Action::OpenInBrowser,
+                    Action::Sort,
                     Action::Reload,
-                    Action::ChangeToken,
                     Action::Help,
                     Action::Quit,
                 ],
                 None => &[
                     Action::Down,
                     Action::FocusRight,
+                    Action::Sort,
                     Action::Reload,
-                    Action::ChangeToken,
                     Action::Help,
                     Action::Quit,
                 ],
@@ -260,20 +266,72 @@ impl App {
                     .position(|t| Some(t.column.as_str()) == current)
             })
             .unwrap_or(0);
-        self.popup = Some(ColumnPicker {
+        self.popup = Some(Popup::Column(ColumnPicker {
             work_item_id: item.id,
             targets,
             selection,
-        });
+        }));
     }
 
-    fn confirm_column(&mut self) {
-        let (Some(picker), Some(board), Some(client), Some(config)) = (
-            self.popup.take(),
-            self.board.clone(),
-            self.client.clone(),
-            self.config.clone(),
-        ) else {
+    fn open_sort_picker(&mut self) {
+        let (Some(kind), Some(config)) = (self.focus.sort_kind(), &self.config) else {
+            return;
+        };
+        let (labels, selected): (Vec<String>, _) = match kind {
+            SortKind::PullRequests => (
+                PrSort::ALL.iter().map(|s| s.label().into()).collect(),
+                PrSort::ALL
+                    .iter()
+                    .position(|s| *s == config.sort.pull_requests),
+            ),
+            SortKind::WorkItems => (
+                WorkItemSort::ALL.iter().map(|s| s.label().into()).collect(),
+                WorkItemSort::ALL
+                    .iter()
+                    .position(|s| *s == config.sort.work_items),
+            ),
+        };
+        let mut selection = Selection::new(labels);
+        selection.selected = selected.unwrap_or(0);
+        self.popup = Some(Popup::Sort { kind, selection });
+    }
+
+    fn confirm_popup(&mut self) {
+        match self.popup.take() {
+            Some(Popup::Column(picker)) => self.confirm_column(picker),
+            Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
+            None => {}
+        }
+    }
+
+    fn confirm_sort(&mut self, kind: SortKind, index: usize) {
+        let Some(config) = &mut self.config else {
+            return;
+        };
+        match kind {
+            SortKind::PullRequests => {
+                if let Some(sort) = PrSort::ALL.get(index) {
+                    config.sort.pull_requests = *sort;
+                }
+            }
+            SortKind::WorkItems => {
+                if let Some(sort) = WorkItemSort::ALL.get(index) {
+                    config.sort.work_items = *sort;
+                }
+            }
+        }
+        self.data.sort(&config.sort);
+        let result = config.save();
+        self.clamp_selections();
+        if let Err(err) = result {
+            self.report_error(err);
+        }
+    }
+
+    fn confirm_column(&mut self, picker: ColumnPicker) {
+        let (Some(board), Some(client), Some(config)) =
+            (self.board.clone(), self.client.clone(), self.config.clone())
+        else {
             return;
         };
         let Some(target) = picker.targets.get(picker.selection.selected).cloned() else {
@@ -597,8 +655,29 @@ impl App {
                 }
             }
         }
+        if let Some(config) = &self.config {
+            self.data.sort(&config.sort);
+        }
         self.clamp_selections();
         self.sync_detail();
+    }
+
+    fn switch_tab(&mut self, next: bool) {
+        let Some(detail) = &self.detail else {
+            return;
+        };
+        let tabs = detail.tabs();
+        let index = tabs
+            .iter()
+            .position(|tab| *tab == self.detail_tab)
+            .unwrap_or(0);
+        let index = if next {
+            (index + 1) % tabs.len()
+        } else {
+            (index + tabs.len() - 1) % tabs.len()
+        };
+        self.detail_tab = tabs[index];
+        self.detail_scroll = 0;
     }
 
     fn clamp_selections(&mut self) {
@@ -655,6 +734,7 @@ impl App {
         self.detail = Some(detail);
         self.detail_info = None;
         self.detail_scroll = 0;
+        self.detail_tab = DetailTab::Overview;
     }
 
     fn load_detail(&self, detail: &Detail) {
@@ -719,11 +799,15 @@ impl App {
             }
             return;
         }
-        if let Some(picker) = &mut self.popup {
+        if let Some(popup) = &mut self.popup {
+            let selection = match popup {
+                Popup::Column(picker) => &mut picker.selection,
+                Popup::Sort { selection, .. } => selection,
+            };
             match action {
-                Action::Up => picker.selection.previous(),
-                Action::Down => picker.selection.next(),
-                Action::Confirm => self.confirm_column(),
+                Action::Up => selection.previous(),
+                Action::Down => selection.next(),
+                Action::Confirm => self.confirm_popup(),
                 Action::Cancel => self.popup = None,
                 Action::Quit => self.should_quit = true,
                 _ => {}
@@ -768,9 +852,16 @@ impl App {
                 Screen::Main => self.open_selected(),
                 Screen::Setup(_) => self.confirm_setup_step(),
             },
-            Action::OpenInBrowser | Action::AssignToMe | Action::ChangeColumn
+            Action::OpenInBrowser
+            | Action::AssignToMe
+            | Action::ChangeColumn
+            | Action::Sort
+            | Action::NextTab
+            | Action::PrevTab
                 if !matches!(self.screen, Screen::Main) => {}
             Action::OpenInBrowser => self.open_in_browser(),
+            Action::Sort => self.open_sort_picker(),
+            Action::NextTab | Action::PrevTab => self.switch_tab(action == Action::NextTab),
             Action::AssignToMe => self.assign_to_me(),
             Action::ChangeColumn => self.change_column(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {

@@ -8,12 +8,15 @@ use super::models::{
 use super::{AdoClient, DEV_AZURE};
 
 const MAX_WORK_ITEMS: &str = "200";
-const FIELDS: [&str; 5] = [
+const FIELDS: [&str; 8] = [
     "System.Title",
     "System.WorkItemType",
     "System.State",
     "System.BoardColumn",
     "System.BoardColumnDone",
+    "Microsoft.VSTS.Common.Priority",
+    "System.ChangedDate",
+    "System.CreatedDate",
 ];
 const COMMENTS_API_VERSION: &str = "7.1-preview.4";
 const MAX_COMMENTS: &str = "10";
