@@ -7,19 +7,27 @@ pub enum Action {
     Up,
     Down,
     Confirm,
-    Retry,
+    Reload,
+    FocusLeft,
+    FocusRight,
+    FocusUp,
+    FocusDown,
 }
 
 impl Action {
     pub fn from_key(key: KeyEvent) -> Option<Self> {
         match (key.code, key.modifiers) {
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(Self::Quit),
+            (KeyCode::Char('h') | KeyCode::Left, KeyModifiers::CONTROL) => Some(Self::FocusLeft),
+            (KeyCode::Char('l') | KeyCode::Right, KeyModifiers::CONTROL) => Some(Self::FocusRight),
+            (KeyCode::Char('k') | KeyCode::Up, KeyModifiers::CONTROL) => Some(Self::FocusUp),
+            (KeyCode::Char('j') | KeyCode::Down, KeyModifiers::CONTROL) => Some(Self::FocusDown),
             (KeyCode::Char('q'), _) => Some(Self::Quit),
             (KeyCode::Esc, _) => Some(Self::Cancel),
             (KeyCode::Char('j') | KeyCode::Down, _) => Some(Self::Down),
             (KeyCode::Char('k') | KeyCode::Up, _) => Some(Self::Up),
             (KeyCode::Enter, _) => Some(Self::Confirm),
-            (KeyCode::Char('r'), _) => Some(Self::Retry),
+            (KeyCode::Char('r'), _) => Some(Self::Reload),
             _ => None,
         }
     }
@@ -29,9 +37,13 @@ impl Action {
             Self::Quit => "q",
             Self::Cancel => "esc",
             Self::Up => "k/↑",
-            Self::Down => "j/↓",
+            Self::Down => "j/k",
             Self::Confirm => "enter",
-            Self::Retry => "r",
+            Self::Reload => "r",
+            Self::FocusLeft => "ctrl+h/←",
+            Self::FocusRight => "ctrl+hjkl",
+            Self::FocusUp => "ctrl+k/↑",
+            Self::FocusDown => "ctrl+j/↓",
         }
     }
 
@@ -40,9 +52,13 @@ impl Action {
             Self::Quit => "quit",
             Self::Cancel => "cancel",
             Self::Up => "up",
-            Self::Down => "down",
+            Self::Down => "move",
             Self::Confirm => "select",
-            Self::Retry => "retry",
+            Self::Reload => "reload",
+            Self::FocusLeft => "left",
+            Self::FocusRight => "focus",
+            Self::FocusUp => "box up",
+            Self::FocusDown => "box down",
         }
     }
 }

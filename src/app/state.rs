@@ -1,3 +1,42 @@
+use crate::api::{PullRequest, PullRequestDetails, WorkItem, WorkItemDetails};
+
+pub enum Detail {
+    PullRequest(Box<PullRequest>),
+    WorkItem(WorkItem),
+}
+
+impl Detail {
+    fn id(&self) -> u32 {
+        match self {
+            Self::PullRequest(pr) => pr.pull_request_id,
+            Self::WorkItem(item) => item.id,
+        }
+    }
+
+    pub fn is_pull_request(&self, id: u32) -> bool {
+        matches!(self, Self::PullRequest(_)) && self.id() == id
+    }
+
+    pub fn is_work_item(&self, id: u32) -> bool {
+        matches!(self, Self::WorkItem(_)) && self.id() == id
+    }
+}
+
+pub enum DetailInfo {
+    PullRequest(PullRequestDetails),
+    WorkItem(WorkItemDetails),
+}
+
+/// `None` means not loaded yet.
+#[derive(Default)]
+pub struct Data {
+    pub my_prs: Option<Vec<PullRequest>>,
+    pub other_prs: Option<Vec<PullRequest>>,
+    pub my_work_items: Option<Vec<WorkItem>>,
+    pub ready_work_items: Option<Vec<WorkItem>>,
+    pub sprint_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
     MyPrs,
@@ -14,7 +53,43 @@ pub const LEFT_PANELS: [Panel; 4] = [
     Panel::ReadyWorkItems,
 ];
 
+impl Data {
+    pub fn len(&self, panel: Panel) -> usize {
+        match panel {
+            Panel::MyPrs => self.my_prs.as_ref().map_or(0, Vec::len),
+            Panel::OtherPrs => self.other_prs.as_ref().map_or(0, Vec::len),
+            Panel::MyWorkItems => self.my_work_items.as_ref().map_or(0, Vec::len),
+            Panel::ReadyWorkItems => self.ready_work_items.as_ref().map_or(0, Vec::len),
+            Panel::Detail => 0,
+        }
+    }
+
+    pub fn detail(&self, panel: Panel, index: usize) -> Option<Detail> {
+        let pr = |prs: &Option<Vec<PullRequest>>| {
+            prs.as_ref()?
+                .get(index)
+                .cloned()
+                .map(|pr| Detail::PullRequest(Box::new(pr)))
+        };
+        let item = |items: &Option<Vec<WorkItem>>| {
+            items.as_ref()?.get(index).cloned().map(Detail::WorkItem)
+        };
+        match panel {
+            Panel::MyPrs => pr(&self.my_prs),
+            Panel::OtherPrs => pr(&self.other_prs),
+            Panel::MyWorkItems => item(&self.my_work_items),
+            Panel::ReadyWorkItems => item(&self.ready_work_items),
+            Panel::Detail => None,
+        }
+    }
+}
+
 impl Panel {
+    /// Position in the left column, `None` for the detail panel.
+    pub fn index(self) -> Option<usize> {
+        LEFT_PANELS.iter().position(|panel| *panel == self)
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Self::MyPrs => "My PRs",

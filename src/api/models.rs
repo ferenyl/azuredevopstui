@@ -6,6 +6,19 @@ pub struct ListResponse<T> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionData {
+    pub authenticated_user: CurrentUser,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentUser {
+    pub id: String,
+    pub provider_display_name: String,
+}
+
+#[derive(Deserialize)]
 pub struct Profile {
     pub id: String,
 }
@@ -26,4 +39,228 @@ pub struct Backlog {
     pub name: String,
     #[serde(rename = "type")]
     pub kind: String,
+}
+
+#[derive(Deserialize)]
+pub struct Identity {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityRef {
+    pub id: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Repository {
+    pub id: String,
+    pub name: String,
+    pub project: ProjectRef,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProjectRef {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequest {
+    pub pull_request_id: u32,
+    pub title: String,
+    pub created_by: IdentityRef,
+    pub repository: Repository,
+    #[serde(default)]
+    pub is_draft: bool,
+    pub status: String,
+    pub source_ref_name: String,
+    pub target_ref_name: String,
+    pub creation_date: String,
+    pub merge_status: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub reviewers: Vec<Reviewer>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reviewer {
+    pub display_name: String,
+    pub vote: i32,
+    pub is_required: Option<bool>,
+}
+
+pub struct PullRequestDetails {
+    pub threads: Vec<Thread>,
+    pub statuses: Vec<PullRequestStatus>,
+    pub policies: Vec<PolicyEvaluation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Thread {
+    pub status: Option<String>,
+    #[serde(default)]
+    pub is_deleted: bool,
+    pub thread_context: Option<ThreadContext>,
+    pub comments: Vec<Comment>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadContext {
+    pub file_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Comment {
+    pub author: IdentityRef,
+    pub content: Option<String>,
+    pub comment_type: Option<String>,
+    pub published_date: Option<String>,
+    #[serde(default)]
+    pub is_deleted: bool,
+}
+
+#[derive(Deserialize)]
+pub struct PullRequestStatus {
+    pub id: u32,
+    pub state: Option<String>,
+    pub description: Option<String>,
+    pub context: StatusContext,
+}
+
+#[derive(Deserialize)]
+pub struct StatusContext {
+    pub name: String,
+    pub genre: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PolicyEvaluation {
+    pub status: String,
+    pub configuration: PolicyConfiguration,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicyConfiguration {
+    pub is_blocking: bool,
+    #[serde(rename = "type")]
+    pub kind: PolicyType,
+    pub settings: PolicySettings,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicyType {
+    pub display_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicySettings {
+    pub display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct Iteration {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WiqlResult {
+    pub work_items: Vec<WorkItemRef>,
+}
+
+#[derive(Deserialize)]
+pub struct WorkItemRef {
+    pub id: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkItem {
+    pub id: u32,
+    pub fields: WorkItemFields,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkItemFields {
+    #[serde(rename = "System.Title")]
+    pub title: String,
+    #[serde(rename = "System.WorkItemType")]
+    pub work_item_type: String,
+    #[serde(rename = "System.State")]
+    pub state: String,
+}
+
+pub struct SprintWorkItems {
+    pub iteration_name: String,
+    pub mine: Vec<WorkItem>,
+    pub ready: Vec<WorkItem>,
+}
+
+#[derive(Deserialize)]
+pub struct WorkItemResponse {
+    pub fields: WorkItemDetailFields,
+}
+
+#[derive(Deserialize)]
+pub struct WorkItemDetailFields {
+    #[serde(rename = "System.BoardColumn")]
+    pub board_column: Option<String>,
+    #[serde(rename = "System.BoardColumnDone")]
+    pub board_column_done: Option<bool>,
+    #[serde(rename = "System.AssignedTo")]
+    pub assigned_to: Option<IdentityRef>,
+    #[serde(rename = "System.IterationPath")]
+    pub iteration_path: Option<String>,
+    #[serde(rename = "System.Tags")]
+    pub tags: Option<String>,
+    #[serde(rename = "System.Description")]
+    pub description: Option<String>,
+    #[serde(rename = "Microsoft.VSTS.Common.AcceptanceCriteria")]
+    pub acceptance_criteria: Option<String>,
+    #[serde(rename = "Microsoft.VSTS.TCM.ReproSteps")]
+    pub repro_steps: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentList {
+    pub total_count: u32,
+    pub comments: Vec<WorkItemComment>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkItemComment {
+    pub created_by: IdentityRef,
+    pub created_date: String,
+    pub text: String,
+}
+
+/// Work item fields not included in the list query, with HTML converted to text.
+pub struct WorkItemDetails {
+    pub board_column: Option<String>,
+    pub board_column_done: bool,
+    pub assigned_to: Option<String>,
+    pub iteration_path: Option<String>,
+    pub tags: Option<String>,
+    pub description: Option<String>,
+    pub acceptance_criteria: Option<String>,
+    pub repro_steps: Option<String>,
+    pub comment_count: u32,
+    pub comments: Vec<DetailComment>,
+}
+
+pub struct DetailComment {
+    pub author: String,
+    pub date: String,
+    pub text: String,
 }

@@ -1,7 +1,6 @@
 use anyhow::Result;
-use serde::de::IgnoredAny;
 
-use super::models::{Account, ListResponse, Named, Profile};
+use super::models::{Account, ConnectionData, CurrentUser, ListResponse, Named, Profile};
 use super::{AdoClient, DEV_AZURE, VSSPS, sorted_names};
 
 const VSSPS_API_VERSION: &str = "7.1-preview";
@@ -33,8 +32,8 @@ impl AdoClient {
         ))
     }
 
-    pub async fn check_connection(&self, organization: &str) -> Result<()> {
-        let _: IgnoredAny = self
+    pub async fn current_user(&self, organization: &str) -> Result<CurrentUser> {
+        let connection: ConnectionData = self
             .get_versioned(
                 DEV_AZURE,
                 &[organization, "_apis", "connectionData"],
@@ -42,7 +41,7 @@ impl AdoClient {
                 CONNECTION_DATA_API_VERSION,
             )
             .await?;
-        Ok(())
+        Ok(connection.authenticated_user)
     }
 
     pub async fn projects(&self, organization: &str) -> Result<Vec<String>> {

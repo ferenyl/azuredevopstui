@@ -54,6 +54,14 @@ impl Auth {
         pat::delete().await
     }
 
+    pub async fn refresh(&self) -> Result<()> {
+        let mut credential = self.credential.lock().await;
+        if let Credential::AzCli(token) = &mut *credential {
+            *token = azcli::fetch_token().await?;
+        }
+        Ok(())
+    }
+
     pub async fn authorize(&self, request: RequestBuilder) -> Result<RequestBuilder> {
         let mut credential = self.credential.lock().await;
         if let Credential::AzCli(token) = &mut *credential
