@@ -117,9 +117,20 @@ cp target/release/azuredevopstui ~/.local/bin/
 
 To build the Windows binary from WSL or Linux, see [Windows](#windows).
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`, on both Linux and Windows:
+
+- `cargo fmt --check` (Linux only)
+- `cargo clippy` (warnings fail the build)
+- `cargo test`
+- `cargo build`
+
+The release workflow calls the same file, so a release is only built and published once CI passes.
+
 ### Publishing a release
 
-`.github/workflows/release.yml` runs when a GitHub release is published:
+`.github/workflows/release.yml` runs when a GitHub release is published. It first runs [CI](#continuous-integration), then:
 
 1. Create a release on GitHub with a new tag, for example `v0.2.0`. You can do it in the web UI or run `gh release create v0.2.0 --title v0.2.0 --notes ""`.
 2. The workflow adds every commit since the previous release tag to the release notes, under *Changes since \<previous tag\>*. Merge commits are skipped. For the first release, every commit is listed. Text you wrote in the release yourself is kept above the list.

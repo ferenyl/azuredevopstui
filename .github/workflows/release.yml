@@ -12,6 +12,10 @@ env:
   GH_TOKEN: ${{ github.token }}
 
 jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
   notes:
     name: Release notes
     runs-on: ubuntu-latest
@@ -44,6 +48,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
+    needs: ci
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
