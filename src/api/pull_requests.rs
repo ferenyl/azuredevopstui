@@ -311,6 +311,11 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .mount(&server)
+            .await;
         let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
 
         let prs = client
@@ -341,6 +346,11 @@ mod tests {
                 pull_request_json(5, "Review me", "other", "2026-10-01T10:00:00Z")
             ]})))
             .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
         let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());

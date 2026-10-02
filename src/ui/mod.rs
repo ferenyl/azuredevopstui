@@ -771,7 +771,7 @@ mod tests {
 
         assert!(screen.contains(" Keys "));
         assert!(screen.contains("change box/column"));
-        assert!(screen.contains("work item types"));
+        assert!(screen.contains("filter"));
     }
 
     #[test]
