@@ -347,6 +347,7 @@ mod tests {
         let filter = OtherPrsFilter {
             reviewers: vec!["[MyProject]\\Developers".into()],
             creators: Vec::new(),
+            ..Default::default()
         };
 
         let prs = client
@@ -369,6 +370,7 @@ mod tests {
         let filter = OtherPrsFilter {
             reviewers: Vec::new(),
             creators: vec!["nobody@example.com".into()],
+            ..Default::default()
         };
 
         let err = client
