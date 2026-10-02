@@ -43,6 +43,26 @@ fn default_refresh_interval_secs() -> u64 {
 #[serde(default)]
 pub struct AuthConfig {
     pub method: AuthMethod,
+    /// Separate Azure CLI login (`AZURE_CONFIG_DIR`) for the DevOps account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub azure_config_dir: Option<String>,
+}
+
+impl AuthConfig {
+    /// `azure_config_dir` with a leading `~` expanded to the home directory.
+    pub fn azure_config_dir(&self) -> Option<PathBuf> {
+        let dir = self.azure_config_dir.as_deref()?.trim();
+        if dir.is_empty() {
+            return None;
+        }
+        let rest = dir
+            .strip_prefix('~')
+            .filter(|rest| rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\'));
+        match (rest, dirs::home_dir()) {
+            (Some(rest), Some(home)) => Some(home.join(rest.trim_start_matches(['/', '\\']))),
+            _ => Some(PathBuf::from(dir)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

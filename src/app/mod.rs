@@ -18,7 +18,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::api::{self, AdoClient, Board, CurrentUser, WorkItem};
 use crate::auth::Auth;
-use crate::config::{AuthMethod, Config, PrSort, WorkItemSort};
+use crate::config::{Config, PrSort, WorkItemSort};
 use crate::theme::Theme;
 use message::Message;
 
@@ -536,12 +536,12 @@ impl App {
     }
 
     fn authenticate(&mut self) {
-        let method = self
+        let auth = self
             .config
             .as_ref()
-            .map(|c| c.auth.method)
-            .unwrap_or(AuthMethod::Auto);
-        self.spawn(async move { Message::Authenticated(Auth::resolve(method).await) });
+            .map(|c| c.auth.clone())
+            .unwrap_or_default();
+        self.spawn(async move { Message::Authenticated(Auth::resolve(auth).await) });
     }
 
     fn continue_setup(&mut self) {

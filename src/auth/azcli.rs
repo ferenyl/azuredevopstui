@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
@@ -29,8 +30,13 @@ impl Token {
     }
 }
 
-pub async fn fetch_token() -> Result<Token> {
-    let output = Command::new(AZ)
+/// Uses the login in `config_dir` (`AZURE_CONFIG_DIR`) when set, else the default one.
+pub async fn fetch_token(config_dir: Option<&Path>) -> Result<Token> {
+    let mut command = Command::new(AZ);
+    if let Some(dir) = config_dir {
+        command.env("AZURE_CONFIG_DIR", dir);
+    }
+    let output = command
         .args([
             "account",
             "get-access-token",
@@ -43,8 +49,19 @@ pub async fn fetch_token() -> Result<Token> {
         .await
         .context("failed to run az, is Azure CLI installed and on PATH?")?;
     if !output.status.success() {
+        let login = match config_dir {
+            Some(dir) if cfg!(windows) => format!(
+                "$env:AZURE_CONFIG_DIR=\"{}\"; az login --allow-no-subscriptions",
+                dir.display()
+            ),
+            Some(dir) => format!(
+                "AZURE_CONFIG_DIR={} az login --allow-no-subscriptions",
+                dir.display()
+            ),
+            None => "az login --allow-no-subscriptions".into(),
+        };
         bail!(
-            "az login required: {}",
+            "az login required, run `{login}`: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }

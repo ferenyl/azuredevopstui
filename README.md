@@ -83,7 +83,7 @@ The app runs natively on Windows. Use Windows Terminal; the old console host lac
   cargo build --release --target x86_64-pc-windows-gnu
   ```
   The binary ends up in `target/x86_64-pc-windows-gnu/release/azuredevopstui.exe`.
-- **Azure CLI**: use the Windows version of Azure CLI. It has its own login, separate from WSL, so run `az login` in PowerShell.
+- **Azure CLI**: use the Windows version of Azure CLI. It has its own login, separate from WSL, so run `az login` in PowerShell. Use `azure_config_dir` there too if you have separate DevOps and cloud accounts; see [Separate account for Azure DevOps](#separate-account-for-azure-devops-azure_config_dir).
 - **Run it from Windows**: start the `.exe` from PowerShell or cmd in Windows Terminal, not from a WSL shell.
 - **Paths**:
   - Config: `%APPDATA%\azuredevopstui\config.json`
@@ -108,7 +108,7 @@ The method is set by `auth.method` in the config.
 
 | Method | Behaviour |
 |---|---|
-| `auto` (default) | Use the Azure CLI. If that fails, use the PAT from the keyring. If there is none, ask for one. |
+| `auto` (default) | Use the Azure CLI. If that fails, use the PAT from the keyring. If there is none, ask for one. When `azure_config_dir` is set, an az failure shows the login command instead of falling back to the PAT. |
 | `azcli` | Only use the Azure CLI. |
 | `pat` | Only use the PAT from the keyring. |
 
@@ -120,6 +120,62 @@ If your tenant has no Azure subscriptions, log in with:
 
 ```sh
 az login --allow-no-subscriptions --tenant <tenant-id>
+```
+
+### Finding your tenant ID
+
+`<tenant-id>` is the ID of the Microsoft Entra directory that your Azure DevOps organization is connected to.
+
+1. Open `https://dev.azure.com/<organization>/_settings/organizationAad`, or go to *Organization settings → Microsoft Entra*.
+2. The page shows the connected directory. Copy its ID, which is a GUID.
+
+### Separate account for Azure DevOps (`azure_config_dir`)
+
+Some setups use one account for Azure DevOps and another for the Azure portal, for example a cloud or admin account. The Azure CLI has one active account per config directory, so logging in with one account replaces the other.
+
+The fix is to give the DevOps account its own Azure CLI login. The Azure CLI keeps its login in `~/.azure` by default, or in the directory set by the `AZURE_CONFIG_DIR` environment variable. Each directory is a separate login, so both accounts can stay logged in at the same time.
+
+**1. Log in the DevOps account in its own directory (once)**
+
+Linux / WSL / macOS:
+
+```sh
+AZURE_CONFIG_DIR=~/.azure-devops az login --allow-no-subscriptions --tenant <tenant-id>
+```
+
+Windows (PowerShell):
+
+```powershell
+$env:AZURE_CONFIG_DIR="$HOME\.azure-devops"; az login --allow-no-subscriptions --tenant <tenant-id>
+Remove-Item Env:AZURE_CONFIG_DIR
+```
+
+For `<tenant-id>`, see [Finding your tenant ID](#finding-your-tenant-id). Pick the DevOps account in the browser. The variable only applies to that command or session, so your normal `az` keeps using the cloud account in `~/.azure`.
+
+**2. Point the app at it**
+
+```json
+"auth": {
+  "method": "auto",
+  "azure_config_dir": "~/.azure-devops"
+}
+```
+
+`~` is expanded to your home directory on all platforms. An absolute path such as `"C:\\Users\\me\\.azure-devops"` also works.
+
+**3. Use the Azure CLI as usual for the cloud account**
+
+```sh
+az login                   # cloud account, stored in ~/.azure
+az account show            # shows the cloud account
+```
+
+The app sets `AZURE_CONFIG_DIR` only for its own `az account get-access-token` calls. It never changes your shell or the default login.
+
+When the DevOps login expires, the app shows *Setup failed* with the exact `az login` command to run. Run it and press `r` to retry. Check which account the DevOps login uses with:
+
+```sh
+AZURE_CONFIG_DIR=~/.azure-devops az account show
 ```
 
 ### Personal Access Token
@@ -144,7 +200,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
   "team": "My Team",
   "refresh_interval_secs": 120,
   "browser_command": null,
-  "auth": { "method": "auto" },
+  "auth": { "method": "auto", "azure_config_dir": "~/.azure-devops" },
   "other_prs_filter": {
     "reviewers": ["[MyProject]\\Developers", "anna.andersson@example.com"],
     "creators": []
@@ -167,6 +223,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `refresh_interval_secs` | `120` | Auto refresh interval in seconds. Set it to `0` to turn auto refresh off. Auto refresh pauses while a popup is open. |
 | `browser_command` | `null` | Command used to open URLs, with the URL appended as the last argument, for example `"wslview"` or `"firefox --new-tab"`. The command is split on spaces, so it must be on `PATH` (use `"chrome"`, not `"C:\\Program Files\\…"`). When `null`, the system default is used. |
 | `auth.method` | `"auto"` | `auto`, `azcli` or `pat`. See [Authentication](#authentication). |
+| `auth.azure_config_dir` | not set | Azure CLI config directory for the DevOps login, for example `"~/.azure-devops"`. Use it when the DevOps account differs from your Azure portal account. When not set, the default `~/.azure` is used. See [Separate account for Azure DevOps](#separate-account-for-azure-devops-azure_config_dir). |
 | `other_prs_filter.reviewers` | `[]` | Show PRs where any of these users or groups is a reviewer. |
 | `other_prs_filter.creators` | `[]` | Show PRs created by any of these users or groups. |
 | `ready_column` | set by setup | The board column treated as *ready*. |
@@ -281,6 +338,8 @@ At `debug` level every API request is logged.
 | The Azure CLI token fails with *refresh token has expired* | Run `az login` again. Add `--allow-no-subscriptions` if the tenant has no subscriptions. |
 | *unauthorized* (401 or 203) with a PAT | The PAT has expired or lacks a scope. The app asks for a new one; you can also press `t`. |
 | The PAT cannot be saved | No Secret Service keyring is running. Start one (on WSL, `gnome-keyring-daemon`), or use the Azure CLI. On Windows, Credential Manager is always available. |
+| Logging in with `az login` for DevOps breaks your Azure portal account, or the other way round | Use a separate login for DevOps with `auth.azure_config_dir`. See [Separate account for Azure DevOps](#separate-account-for-azure-devops-azure_config_dir). |
+| *az login required, run `…`* | The Azure CLI login has expired or was never made. Run the command shown and press `r`. |
 | *failed to run az* | Azure CLI is not installed or not on `PATH`. On Windows the app runs `az.cmd`. |
 | `$env:RUST_LOG` on Windows | In PowerShell, set it with `$env:RUST_LOG="azuredevopstui=debug"` before you start the app. |
 | *team has no current sprint* | Set the current iteration for the team in *Project settings → Team configuration → Iterations*. |
