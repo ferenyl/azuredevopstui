@@ -31,12 +31,19 @@ pub struct Config {
     pub work_item_types: Vec<String>,
     #[serde(default)]
     pub sort: SortConfig,
+    /// Detect terminal graphics and draw images. Off skips the terminal query entirely.
+    #[serde(default = "default_true")]
+    pub show_images: bool,
     #[serde(default)]
     pub colors: Theme,
 }
 
 fn default_refresh_interval_secs() -> u64 {
     DEFAULT_REFRESH_INTERVAL_SECS
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -79,6 +86,8 @@ pub enum AuthMethod {
 pub struct OtherPrsFilter {
     pub reviewers: Vec<String>,
     pub creators: Vec<String>,
+    pub show_approved: bool,
+    pub show_drafts: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -155,6 +164,7 @@ impl Config {
             ready_column: None,
             work_item_types: Vec::new(),
             sort: SortConfig::default(),
+            show_images: true,
             colors: Theme::default(),
         }
     }
@@ -213,6 +223,7 @@ mod tests {
         assert!(config.work_item_types.is_empty());
         assert_eq!(config.sort.pull_requests, PrSort::Newest);
         assert_eq!(config.sort.work_items, WorkItemSort::Priority);
+        assert!(config.show_images);
     }
 
     #[test]

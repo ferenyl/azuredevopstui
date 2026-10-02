@@ -39,7 +39,7 @@ impl SetupStep {
         match self {
             Self::Loading(_) => "Setup",
             Self::EnterPat { .. } => "Enter personal access token",
-            Self::EnterOrganization(_) => "Enter organization",
+            Self::EnterOrganization(_) => "Enter organization name or URL",
             Self::SelectOrganization(_) => "Select organization",
             Self::SelectProject { .. } => "Select project",
             Self::SelectTeam { .. } => "Select team",
@@ -77,6 +77,24 @@ impl SetupStep {
 
     pub fn is_input(&self) -> bool {
         matches!(self, Self::EnterPat { .. } | Self::EnterOrganization(_))
+    }
+}
+
+/// Organization name from `name`, `https://dev.azure.com/name/...` or `https://name.visualstudio.com`.
+pub fn organization_name(input: &str) -> &str {
+    let input = input.trim();
+    let rest = input
+        .strip_prefix("https://")
+        .or_else(|| input.strip_prefix("http://"))
+        .unwrap_or(input);
+    let mut segments = rest.split('/');
+    let host = segments.next().unwrap_or_default();
+    if host.eq_ignore_ascii_case("dev.azure.com") {
+        segments.next().unwrap_or_default()
+    } else if let Some(name) = host.strip_suffix(".visualstudio.com") {
+        name
+    } else {
+        host
     }
 }
 

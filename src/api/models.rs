@@ -144,6 +144,9 @@ pub struct PullRequest {
     pub description: Option<String>,
     #[serde(default)]
     pub reviewers: Vec<Reviewer>,
+    /// Reviewer policies met; only set for others' PRs.
+    #[serde(skip)]
+    pub approved: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

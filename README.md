@@ -24,7 +24,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 ## Features
 
 - **Four lists** on the left:
-  - **My PRs**: active pull requests you created, across all repositories in the project.
+  - **My PRs**: active pull requests you created, across all repositories in the project, marked with what needs your attention. See [PR markers](#pr-markers).
   - **My work items**: open items assigned to you in the current sprint, limited to the chosen work item types.
   - **Others' PRs**: active pull requests created by someone else. You can filter them by reviewer or creator.
   - **Ready**: items in the current sprint that sit in your *ready* board column and are not assigned to you.
@@ -37,10 +37,12 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
     - **Overview** shows type, state, board column, priority, assignee, sprint, tags, description, repro steps and acceptance criteria.
     - **Children** shows child items grouped by type (Task, Release Task, User Story, …), each with state and assignee.
     - **Comments** shows the 10 newest comments.
+  - **Images** in descriptions and comments are drawn inline when the terminal supports graphics. See [Images](#images).
 - **Actions**:
   - Open a PR or work item in the browser.
   - Move a work item to another board column. The columns come from your team's board, and split columns (for example *Active → Doing / Done*) are supported.
   - Assign a work item to yourself.
+  - Unassign yourself from a work item and pick its new board column in the same step.
 - **Sorting** per list type. The choice is saved to the config.
 - **Work item type filter**: pick which types (User Story, Bug, Feature, …) the work item lists show. The list of types comes from the project, and the choice is saved to the config.
 - **Auto refresh** at a configurable interval. The open detail view refreshes too.
@@ -52,7 +54,10 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 - **Rust**: a toolchain with edition 2024 support (Rust 1.88 or newer).
 - **Azure CLI** (recommended): you must be logged in with `az login`.
 - **For PAT authentication**: an OS keyring.
-  - **Linux**: a Secret Service compatible keyring, such as GNOME Keyring, KeePassXC or KWallet.
+  - **Linux**: a keyring that implements the Secret Service API (`org.freedesktop.secrets`), for example:
+    - **GNOME Keyring** (`gnome-keyring`): the default on GNOME and works on most other desktops and window managers.
+    - **KWallet** (`kwallet`): the default on KDE Plasma. It provides the Secret Service API since KDE Frameworks 5.97, so make sure the wallet is enabled.
+    - **KeePassXC**: enable *Secret Service Integration* in its settings.
   - **WSL**: one running inside the distro, for example `gnome-keyring-daemon`. Otherwise the PAT cannot be stored.
   - **Windows**: Windows Credential Manager, which is built in.
 - **Terminal**: one with true color support. A terminal that supports the kitty keyboard protocol gives you `ctrl+h`/`ctrl+j`. In other terminals, use `ctrl+arrow` instead.
@@ -185,8 +190,8 @@ The app runs natively on Windows. Use Windows Terminal; the old console host lac
 
 When there is no config file, the app runs a setup:
 
-1. **Sign in**: uses the Azure CLI token, or asks for a PAT if the CLI is not available.
-2. **Organization**: picked from the organizations your account belongs to. If the list cannot be fetched, you type the name instead.
+1. **Sign in**: uses the Azure CLI token. If that fails, the error is shown and you can press `r` to try again (for example after `az login`) or `t` to enter a PAT. The PAT is saved in the OS keyring.
+2. **Organization**: picked from the organizations your account belongs to. If the list cannot be fetched (for example with a PAT that is limited to one organization), you type the name or paste the URL, such as `https://dev.azure.com/myorg`.
 3. **Project** and then **team**: picked from lists.
 4. **Ready column**: picked from your team's board columns.
 
@@ -198,7 +203,7 @@ The method is set by `auth.method` in the config.
 
 | Method | Behaviour |
 |---|---|
-| `auto` (default) | Use the Azure CLI. If that fails, use the PAT from the keyring. If there is none, ask for one. When `azure_config_dir` is set, an az failure shows the login command instead of falling back to the PAT. |
+| `auto` (default) | Use the Azure CLI. If that fails, use the PAT from the keyring. If there is none, show the az error and let you try again (`r`) or enter a PAT (`t`). When `azure_config_dir` is set, an az failure is shown instead of falling back to a saved PAT. |
 | `azcli` | Only use the Azure CLI. |
 | `pat` | Only use the PAT from the keyring. |
 
@@ -297,6 +302,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
   },
   "ready_column": "Ready",
   "work_item_types": [],
+  "show_images": true,
   "sort": {
     "pull_requests": "newest",
     "work_items": "priority"
@@ -316,8 +322,11 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `auth.azure_config_dir` | not set | Azure CLI config directory for the DevOps login, for example `"~/.azure-devops"`. Use it when the DevOps account differs from your Azure portal account. When not set, the default `~/.azure` is used. See [Separate account for Azure DevOps](#separate-account-for-azure-devops-azure_config_dir). |
 | `other_prs_filter.reviewers` | `[]` | Show PRs where any of these users or groups is a reviewer. |
 | `other_prs_filter.creators` | `[]` | Show PRs created by any of these users or groups. |
+| `other_prs_filter.show_approved` | `false` | Also show PRs whose reviewer policies are approved (set with `f`). |
+| `other_prs_filter.show_drafts` | `false` | Also show draft PRs (set with `f`). |
 | `ready_column` | set by setup | The board column treated as *ready*. |
 | `work_item_types` | `[]` | Work item types shown in *My work items* and *Ready*, for example `["User Story", "Bug"]`. An empty array shows all types. |
+| `show_images` | `true` | Draw images in the detail panel when the terminal supports graphics. Set it to `false` to skip the terminal graphics query at startup. |
 | `sort.pull_requests` | `"newest"` | Sort order for both PR lists. |
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
 | `colors` | Catppuccin Mocha | Theme colors. See [Colors](#colors). |
@@ -350,6 +359,8 @@ Press `S` on a list to choose the order. PR lists and work item lists each have 
 ### Work item types
 
 Press `f` to open a list of all work item types used in the project. Hidden types such as test plans and code reviews are left out. Use `space` to tick or untick a type, and `enter` to save the choice to `work_item_types` and reload the lists. The filter applies to both work item lists. All types are shown by default, and ticking every type (or none) also shows all of them.
+
+On a PR, `f` instead opens the filter for others' PRs: tick *Show approved* and *Show drafts* to list those too. Both are hidden by default. A PR counts as approved when all its blocking reviewer policies are approved, or, without such policies, when someone has approved it. Your own PRs are always all shown.
 
 ### Colors
 
@@ -389,10 +400,11 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `enter` | Open the selected item in the detail panel |
 | `tab` / `shift+tab` | Next or previous detail tab |
 | `S` | Choose the sort order for the focused list |
-| `f` | Choose which work item types are shown |
+| `f` | Choose which work item types are shown, or on a PR, filter others' PRs |
 | `space` | Tick or untick an item in the type list |
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
+| `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
 | `o` | Open the PR or work item in the browser |
 | `r` | Reload everything |
 | `t` | Enter a new PAT |
@@ -401,6 +413,39 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `q`, `ctrl+c` | Quit |
 
 Actions apply to the selected row in the focused list. When the detail panel has focus, they apply to the item shown there. The toolbar always shows the keys that work in the current context.
+
+## PR markers
+
+Each pull request in *My PRs* shows markers right after its ID when something needs your attention:
+
+| Marker | Meaning |
+|---|---|
+| `✎2` | Unresolved comment threads (status *active* or *pending*), here 2 |
+| `◔` | A reviewer voted *waiting for author* |
+| `⊘` | A reviewer *rejected* the PR |
+| `✖` | A blocking policy failed, for example the build, or a status check failed |
+| `⇄` | Merge conflicts |
+
+No marker means nothing is waiting on you. The markers are refreshed together with the lists.
+
+## Images
+
+Images in work item descriptions, repro steps, acceptance criteria and comments, and in PR descriptions and comments, are shown inline in the detail panel. This needs a terminal with a graphics protocol:
+
+| Protocol | Terminals |
+|---|---|
+| Kitty graphics | kitty, Ghostty, WezTerm, Konsole |
+| Sixel | Windows Terminal 1.22+, foot, xterm (`-ti vt340`), mlterm |
+| iTerm2 | iTerm2, WezTerm |
+
+The app detects the protocol at startup. Without one, an image is shown as a placeholder line such as `[image: screenshot.png]`. Open the item in the browser with `o` to see it.
+
+- **Loading:** images download in the background and show `⟳ loading image…` until they are ready.
+- **Size:** they are drawn at most 20 rows tall and never wider than the panel.
+- **Scrolling:** an image that is only partly scrolled into view is left blank until it fits on screen.
+- **Credentials:** images are only downloaded from Azure DevOps hosts (`dev.azure.com`, `*.visualstudio.com`), so your token is never sent anywhere else.
+
+If startup hangs for a moment or the first key press is lost, the terminal does not answer the graphics query. Set `"show_images": false` to turn detection off.
 
 ## What the lists contain
 
@@ -435,6 +480,8 @@ At `debug` level every API request is logged.
 | *team has no current sprint* | Set the current iteration for the team in *Project settings → Team configuration → Iterations*. |
 | *X items are not on the board* | The work item type has no column on the team's board, so it cannot be moved. |
 | `ctrl+h` / `ctrl+j` do nothing | Your terminal does not support the kitty keyboard protocol. Use `ctrl+←` / `ctrl+↓`. |
+| Images show as `[image: …]` | The terminal has no graphics protocol, or `show_images` is `false`. See [Images](#images). |
+| Startup pauses for about 2 seconds, or the first key is ignored | The terminal does not answer the graphics query. Set `"show_images": false`. |
 | Wrong organization, project or team | Edit the config file, or delete it to run the setup again. |
 
 ## Project structure
@@ -456,5 +503,6 @@ src/
     pr_detail.rs       PR tabs
     workitem_detail.rs work item tabs
     popup.rs           help, column, sort and type pickers
+  images.rs            image markers, download cache and terminal graphics
     toolbar.rs         key hints and status
 ```

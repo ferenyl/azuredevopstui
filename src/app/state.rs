@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::setup::Selection;
 use crate::api::{ColumnTarget, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails};
 use crate::config::{PrSort, SortConfig, WorkItemSort};
@@ -72,12 +74,18 @@ pub enum Popup {
         selection: Selection,
         checked: Vec<bool>,
     },
+    PrFilter {
+        selection: Selection,
+        checked: Vec<bool>,
+    },
 }
 
 pub struct ColumnPicker {
     pub work_item_id: u32,
     pub targets: Vec<ColumnTarget>,
     pub selection: Selection,
+    /// Also clear the assignee when the column is confirmed.
+    pub unassign: bool,
 }
 
 pub enum DetailInfo {
@@ -90,9 +98,49 @@ pub enum DetailInfo {
 pub struct Data {
     pub my_prs: Option<Vec<PullRequest>>,
     pub other_prs: Option<Vec<PullRequest>>,
+    /// Also list others' PRs that are already approved.
+    pub show_approved: bool,
+    /// Also list others' draft PRs.
+    pub show_drafts: bool,
     pub my_work_items: Option<Vec<WorkItem>>,
     pub ready_work_items: Option<Vec<WorkItem>>,
     pub sprint_name: Option<String>,
+    /// Things to act on in my PRs, by PR id.
+    pub pr_signals: HashMap<u32, Signals>,
+}
+
+/// What needs attention in a pull request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Signals {
+    pub unresolved: usize,
+    pub waiting: bool,
+    pub rejected: bool,
+    pub failed_checks: bool,
+    pub conflicts: bool,
+}
+
+impl Signals {
+    pub fn new(pr: &PullRequest, details: &PullRequestDetails) -> Self {
+        let failed_policy = details.policies.iter().any(|policy| {
+            policy.configuration.is_blocking
+                && matches!(policy.status.as_str(), "rejected" | "broken")
+        });
+        let failed_status = details
+            .statuses
+            .iter()
+            .any(|status| matches!(status.state.as_deref(), Some("failed" | "error")));
+        Self {
+            unresolved: details
+                .threads
+                .iter()
+                .filter(|thread| matches!(thread.status.as_deref(), Some("active" | "pending")))
+                .count(),
+            waiting: pr.reviewers.iter().any(|reviewer| reviewer.vote == -5),
+            rejected: pr.reviewers.iter().any(|reviewer| reviewer.vote == -10),
+            failed_checks: failed_policy || failed_status,
+            conflicts: matches!(pr.merge_status.as_deref(), Some("conflicts" | "failure")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,11 +163,22 @@ impl Data {
     pub fn len(&self, panel: Panel) -> usize {
         match panel {
             Panel::MyPrs => self.my_prs.as_ref().map_or(0, Vec::len),
-            Panel::OtherPrs => self.other_prs.as_ref().map_or(0, Vec::len),
+            Panel::OtherPrs => self.shown_other_prs().map_or(0, |prs| prs.len()),
             Panel::MyWorkItems => self.my_work_items.as_ref().map_or(0, Vec::len),
             Panel::ReadyWorkItems => self.ready_work_items.as_ref().map_or(0, Vec::len),
             Panel::Detail => 0,
         }
+    }
+
+    /// Others' PRs as listed, without approved and draft ones unless shown.
+    pub fn shown_other_prs(&self) -> Option<Vec<&PullRequest>> {
+        self.other_prs.as_ref().map(|prs| {
+            prs.iter()
+                .filter(|pr| {
+                    (self.show_approved || !pr.approved) && (self.show_drafts || !pr.is_draft)
+                })
+                .collect()
+        })
     }
 
     /// The freshly loaded version of a shown detail, if it is still listed.
@@ -168,7 +227,10 @@ impl Data {
         };
         match panel {
             Panel::MyPrs => pr(&self.my_prs),
-            Panel::OtherPrs => pr(&self.other_prs),
+            Panel::OtherPrs => self
+                .shown_other_prs()?
+                .get(index)
+                .map(|pr| Detail::PullRequest(Box::new((*pr).clone()))),
             Panel::MyWorkItems => item(&self.my_work_items),
             Panel::ReadyWorkItems => item(&self.ready_work_items),
             Panel::Detail => None,
@@ -246,6 +308,7 @@ mod tests {
     use crate::test_support::{
         ids_of_items, ids_of_prs, pull_request, pull_request_in, work_item, work_item_with,
     };
+    use serde_json::{Value, json};
 
     fn sorted_prs(sort: PrSort) -> Vec<u32> {
         let mut prs = vec![
@@ -278,6 +341,7 @@ mod tests {
             my_work_items: Some(vec![work_item(10, "Story", "User Story", "Active")]),
             ready_work_items: None,
             sprint_name: Some("Sprint 1".into()),
+            ..Default::default()
         }
     }
 
@@ -437,5 +501,88 @@ mod tests {
         assert_eq!(Panel::OtherPrs.sort_kind(), Some(SortKind::PullRequests));
         assert_eq!(Panel::MyWorkItems.sort_kind(), Some(SortKind::WorkItems));
         assert_eq!(Panel::Detail.sort_kind(), None);
+    }
+
+    fn details(threads: Value, statuses: Value, policies: Value) -> PullRequestDetails {
+        PullRequestDetails {
+            threads: serde_json::from_value(threads).unwrap(),
+            statuses: serde_json::from_value(statuses).unwrap(),
+            policies: serde_json::from_value(policies).unwrap(),
+        }
+    }
+
+    fn policy(status: &str, is_blocking: bool) -> Value {
+        json!({
+            "status": status,
+            "configuration": {
+                "isBlocking": is_blocking,
+                "type": { "displayName": "Build" },
+                "settings": {}
+            }
+        })
+    }
+
+    fn thread(status: &str) -> Value {
+        json!({ "status": status, "comments": [] })
+    }
+
+    #[test]
+    fn healthy_pull_request_has_no_signals() {
+        let pr = pull_request(1, "PR", "me", "2026-10-01");
+        let details = details(
+            json!([thread("fixed"), thread("closed")]),
+            json!([{ "id": 1, "state": "succeeded", "context": { "name": "ci" } }]),
+            json!([policy("approved", true), policy("rejected", false)]),
+        );
+
+        assert_eq!(Signals::new(&pr, &details), Signals::default());
+    }
+
+    #[test]
+    fn active_and_pending_threads_are_unresolved() {
+        let pr = pull_request(1, "PR", "me", "2026-10-01");
+        let details = details(
+            json!([thread("active"), thread("pending"), thread("fixed")]),
+            json!([]),
+            json!([]),
+        );
+
+        assert_eq!(Signals::new(&pr, &details).unresolved, 2);
+    }
+
+    #[test]
+    fn reviewer_votes_give_waiting_and_rejected() {
+        let mut pr = pull_request(1, "PR", "me", "2026-10-01");
+        pr.reviewers[0].vote = -5;
+        pr.reviewers[1].vote = -10;
+
+        let signals = Signals::new(&pr, &details(json!([]), json!([]), json!([])));
+
+        assert!(signals.waiting);
+        assert!(signals.rejected);
+    }
+
+    #[test]
+    fn blocking_policy_or_failed_status_is_a_failed_check() {
+        let pr = pull_request(1, "PR", "me", "2026-10-01");
+        let broken_policy = details(json!([]), json!([]), json!([policy("broken", true)]));
+        let failed_status = details(
+            json!([]),
+            json!([{ "id": 1, "state": "error", "context": { "name": "ci" } }]),
+            json!([]),
+        );
+
+        assert!(Signals::new(&pr, &broken_policy).failed_checks);
+        assert!(Signals::new(&pr, &failed_status).failed_checks);
+    }
+
+    #[test]
+    fn merge_conflicts_are_flagged() {
+        let mut pr = pull_request(1, "PR", "me", "2026-10-01");
+        pr.merge_status = Some("conflicts".into());
+
+        let signals = Signals::new(&pr, &details(json!([]), json!([]), json!([])));
+
+        assert!(signals.conflicts);
     }
 }
