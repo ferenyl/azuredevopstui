@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.release.tag_name }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  notes:
+    name: Release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: List commits since previous release
+        run: |
+          previous=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          if [ -n "$previous" ]; then
+            range="$previous..$TAG"
+            heading="## Changes since $previous"
+          else
+            range="$TAG"
+            heading="## Changes"
+          fi
+          {
+            # Drop a changes section from an earlier run so re-runs don't duplicate it.
+            body=$(gh release view "$TAG" --json body --jq .body | awk '/^## Changes/ { exit } { print }')
+            if [ -n "$body" ]; then
+              printf '%s\n\n' "$body"
+            fi
+            echo "$heading"
+            echo
+            git log --no-merges --pretty='- %s (%h)' "$range"
+          } > notes.md
+          gh release edit "$TAG" --notes-file notes.md
+
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package (Linux)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          name="azuredevopstui-$TAG-${{ matrix.target }}"
+          mkdir "$name"
+          cp "target/${{ matrix.target }}/release/azuredevopstui" README.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          echo "ASSET=$name.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $name = "azuredevopstui-$env:TAG-${{ matrix.target }}"
+          New-Item -ItemType Directory $name | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/azuredevopstui.exe", README.md $name
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          "ASSET=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload to release
+        shell: bash
+        run: gh release upload "$TAG" "$ASSET" --clobber

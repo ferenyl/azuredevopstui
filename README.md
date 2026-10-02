@@ -59,18 +59,69 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 
 ## Install
 
+### Download a release
+
+Prebuilt binaries for Linux (`x86_64-unknown-linux-gnu`) and Windows (`x86_64-pc-windows-msvc`) are attached to every [GitHub release](https://github.com/ferenyl/azuredevopstui/releases).
+
+Linux:
+
 ```sh
-git clone <repo-url> azuredevopstui
+tar -xzf azuredevopstui-<version>-x86_64-unknown-linux-gnu.tar.gz
+install -Dm755 azuredevopstui-<version>-x86_64-unknown-linux-gnu/azuredevopstui ~/.local/bin/azuredevopstui
+```
+
+Make sure `~/.local/bin` is on your `PATH`. The Linux binary is built on Ubuntu 24.04, so it needs glibc 2.39 or newer.
+
+Windows (PowerShell):
+
+```powershell
+Expand-Archive azuredevopstui-<version>-x86_64-pc-windows-msvc.zip -DestinationPath .
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\azuredevopstui" | Out-Null
+Copy-Item azuredevopstui-<version>-x86_64-pc-windows-msvc\azuredevopstui.exe "$env:LOCALAPPDATA\Programs\azuredevopstui\"
+```
+
+Then add `%LOCALAPPDATA%\Programs\azuredevopstui` to your user `PATH`.
+
+### Install from source
+
+`cargo install` builds in release mode and puts the binary in `~/.cargo/bin` (`%USERPROFILE%\.cargo\bin` on Windows), which rustup has already added to your `PATH`:
+
+```sh
+git clone https://github.com/ferenyl/azuredevopstui.git
 cd azuredevopstui
-cargo install --path .
+cargo install --path . --locked
 ```
 
-Or build without installing:
+Run the same command again to upgrade after a `git pull`. To remove the app, run `cargo uninstall azuredevopstui`.
+
+### Build a release binary without installing
 
 ```sh
-cargo build --release
-./target/release/azuredevopstui
+cargo build --release --locked
 ```
+
+The binary ends up in `target/release/azuredevopstui` (`target\release\azuredevopstui.exe` on Windows). Run it directly or copy it to a directory on your `PATH`:
+
+```sh
+./target/release/azuredevopstui
+cp target/release/azuredevopstui ~/.local/bin/
+```
+
+To build the Windows binary from WSL or Linux, see [Windows](#windows).
+
+### Publishing a release
+
+`.github/workflows/release.yml` runs when a GitHub release is published:
+
+1. Create a release on GitHub with a new tag, for example `v0.2.0`. You can do it in the web UI or run `gh release create v0.2.0 --title v0.2.0 --notes ""`.
+2. The workflow adds every commit since the previous release tag to the release notes, under *Changes since \<previous tag\>*. Merge commits are skipped. For the first release, every commit is listed. Text you wrote in the release yourself is kept above the list.
+3. It builds the release binaries for Linux and Windows and attaches them to the release:
+   - `azuredevopstui-<tag>-x86_64-unknown-linux-gnu.tar.gz`
+   - `azuredevopstui-<tag>-x86_64-pc-windows-msvc.zip`
+
+   Each archive contains the binary and this README.
+
+Re-running the workflow replaces the assets and the changes list; it does not duplicate them.
 
 ## Windows
 
