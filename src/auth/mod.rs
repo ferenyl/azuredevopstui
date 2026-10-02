@@ -32,7 +32,8 @@ impl Auth {
         }
     }
 
-    /// Returns `None` when no credential is available and a PAT has to be entered.
+    /// Returns `None` when a PAT has to be entered. In `auto` mode an az failure without a saved PAT is an error,
+    /// so the user can retry az or enter a PAT.
     pub async fn resolve(config: AuthConfig) -> Result<Option<Self>> {
         let config_dir = config.azure_config_dir();
         let az = |token| Credential::AzCli {
@@ -48,7 +49,10 @@ impl Auth {
                 Err(err) if config_dir.is_some() => return Err(err),
                 Err(err) => {
                     tracing::warn!("az token unavailable, trying PAT: {err:#}");
-                    pat::load().await?.map(Credential::Pat)
+                    match pat::load().await? {
+                        Some(pat) => Some(Credential::Pat(pat)),
+                        None => return Err(err),
+                    }
                 }
             },
         };

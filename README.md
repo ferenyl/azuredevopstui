@@ -54,7 +54,10 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 - **Rust**: a toolchain with edition 2024 support (Rust 1.88 or newer).
 - **Azure CLI** (recommended): you must be logged in with `az login`.
 - **For PAT authentication**: an OS keyring.
-  - **Linux**: a Secret Service compatible keyring, such as GNOME Keyring, KeePassXC or KWallet.
+  - **Linux**: a keyring that implements the Secret Service API (`org.freedesktop.secrets`), for example:
+    - **GNOME Keyring** (`gnome-keyring`): the default on GNOME and works on most other desktops and window managers.
+    - **KWallet** (`kwallet`): the default on KDE Plasma. It provides the Secret Service API since KDE Frameworks 5.97, so make sure the wallet is enabled.
+    - **KeePassXC**: enable *Secret Service Integration* in its settings.
   - **WSL**: one running inside the distro, for example `gnome-keyring-daemon`. Otherwise the PAT cannot be stored.
   - **Windows**: Windows Credential Manager, which is built in.
 - **Terminal**: one with true color support. A terminal that supports the kitty keyboard protocol gives you `ctrl+h`/`ctrl+j`. In other terminals, use `ctrl+arrow` instead.
@@ -187,8 +190,8 @@ The app runs natively on Windows. Use Windows Terminal; the old console host lac
 
 When there is no config file, the app runs a setup:
 
-1. **Sign in**: uses the Azure CLI token, or asks for a PAT if the CLI is not available.
-2. **Organization**: picked from the organizations your account belongs to. If the list cannot be fetched, you type the name instead.
+1. **Sign in**: uses the Azure CLI token. If that fails, the error is shown and you can press `r` to try again (for example after `az login`) or `t` to enter a PAT. The PAT is saved in the OS keyring.
+2. **Organization**: picked from the organizations your account belongs to. If the list cannot be fetched (for example with a PAT that is limited to one organization), you type the name or paste the URL, such as `https://dev.azure.com/myorg`.
 3. **Project** and then **team**: picked from lists.
 4. **Ready column**: picked from your team's board columns.
 
@@ -200,7 +203,7 @@ The method is set by `auth.method` in the config.
 
 | Method | Behaviour |
 |---|---|
-| `auto` (default) | Use the Azure CLI. If that fails, use the PAT from the keyring. If there is none, ask for one. When `azure_config_dir` is set, an az failure shows the login command instead of falling back to the PAT. |
+| `auto` (default) | Use the Azure CLI. If that fails, use the PAT from the keyring. If there is none, show the az error and let you try again (`r`) or enter a PAT (`t`). When `azure_config_dir` is set, an az failure is shown instead of falling back to a saved PAT. |
 | `azcli` | Only use the Azure CLI. |
 | `pat` | Only use the PAT from the keyring. |
 

@@ -21,10 +21,11 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::api::{self, AdoClient, Board, CurrentUser, PullRequest, WorkItem};
 use crate::auth::Auth;
-use crate::config::{Config, PrSort, WorkItemSort};
+use crate::config::{AuthMethod, Config, PrSort, WorkItemSort};
 use crate::images::{Images, image_urls};
 use crate::theme::Theme;
 use message::Message;
+use setup::organization_name;
 
 pub enum Screen {
     Setup(SetupStep),
@@ -120,6 +121,10 @@ impl App {
     pub fn actions(&self) -> &'static [Action] {
         match &self.screen {
             Screen::Setup(step) if step.is_input() => &[Action::Confirm, Action::Cancel],
+            Screen::Setup(SetupStep::Failed {
+                retry: Retry::Authenticate,
+                ..
+            }) if self.can_enter_pat() => &[Action::Reload, Action::ChangeToken, Action::Quit],
             Screen::Setup(SetupStep::Failed { .. }) => &[Action::Reload, Action::Quit],
             Screen::Setup(step) if step.selection().is_some() => {
                 &[Action::Down, Action::Up, Action::Confirm, Action::Quit]
@@ -583,6 +588,12 @@ impl App {
         }
     }
 
+    fn can_enter_pat(&self) -> bool {
+        self.config
+            .as_ref()
+            .is_none_or(|c| c.auth.method == AuthMethod::Auto)
+    }
+
     fn authenticate(&mut self) {
         let auth = self
             .config
@@ -1043,15 +1054,22 @@ impl App {
                 Screen::Main => {}
             },
             Action::Help => self.show_help = matches!(self.screen, Screen::Main),
-            Action::ChangeToken => {
-                if matches!(self.screen, Screen::Main) {
-                    self.set_step(SetupStep::EnterPat {
-                        input: String::new(),
-                        error: None,
-                        cancelable: true,
-                    });
-                }
-            }
+            Action::ChangeToken => match self.screen {
+                Screen::Main => self.set_step(SetupStep::EnterPat {
+                    input: String::new(),
+                    error: None,
+                    cancelable: true,
+                }),
+                Screen::Setup(SetupStep::Failed {
+                    retry: Retry::Authenticate,
+                    ..
+                }) if self.can_enter_pat() => self.set_step(SetupStep::EnterPat {
+                    input: String::new(),
+                    error: None,
+                    cancelable: false,
+                }),
+                Screen::Setup(_) => {}
+            },
             Action::Up | Action::Down => match &mut self.screen {
                 Screen::Main if self.focus == Panel::Detail => {
                     self.scroll_detail(action == Action::Down);
@@ -1120,8 +1138,8 @@ impl App {
                     Message::Authenticated(Auth::with_new_pat(pat).await.map(Some))
                 });
             }
-            SetupStep::EnterOrganization(organization) if !organization.trim().is_empty() => {
-                self.load_projects(organization.trim().to_string());
+            SetupStep::EnterOrganization(input) if !organization_name(&input).is_empty() => {
+                self.load_projects(organization_name(&input).to_string());
             }
             SetupStep::SelectOrganization(selection) => match selection.current() {
                 Some(organization) => self.load_projects(organization.to_string()),
