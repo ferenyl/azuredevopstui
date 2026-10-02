@@ -5,7 +5,12 @@ mod config;
 mod theme;
 mod ui;
 
+use std::fs::{self, File};
 use std::io::stdout;
+use std::sync::Mutex;
+
+use anyhow::Context;
+use tracing_subscriber::EnvFilter;
 
 use config::Config;
 use crossterm::event::{
@@ -16,6 +21,7 @@ use crossterm::terminal::supports_keyboard_enhancement;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    init_logging()?;
     let config = Config::load()?;
     let mut terminal = ratatui::init();
     // Needed to tell ctrl+h/ctrl+j apart from backspace/enter.
@@ -31,4 +37,21 @@ async fn main() -> anyhow::Result<()> {
     }
     ratatui::restore();
     result
+}
+
+/// Logs to `$XDG_STATE_HOME/azuredevopstui/log`; level from `RUST_LOG`, default `info`.
+fn init_logging() -> anyhow::Result<()> {
+    let Some(dir) = dirs::state_dir().map(|dir| dir.join("azuredevopstui")) else {
+        return Ok(());
+    };
+    fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
+    let file = File::create(dir.join("log")).context("failed to create log file")?;
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .with_writer(Mutex::new(file))
+        .with_ansi(false)
+        .init();
+    Ok(())
 }

@@ -5,6 +5,8 @@ pub enum SetupStep {
     EnterPat {
         input: String,
         error: Option<String>,
+        /// Opened from the main view; cancel returns there.
+        cancelable: bool,
     },
     EnterOrganization(String),
     SelectOrganization(Selection),

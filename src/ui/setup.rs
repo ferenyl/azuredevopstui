@@ -29,7 +29,7 @@ pub fn render(frame: &mut Frame, app: &App, step: &SetupStep, area: Rect) {
                 inner,
             );
         }
-        SetupStep::EnterPat { input, error } => {
+        SetupStep::EnterPat { input, error, .. } => {
             let [input_area, error_area] =
                 Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
             render_input(frame, app, input_area, &"*".repeat(input.chars().count()));

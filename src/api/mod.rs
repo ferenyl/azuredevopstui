@@ -105,15 +105,21 @@ impl AdoClient {
     ) -> Result<T> {
         let mut response = self.send(method.clone(), &url, body).await?;
         if is_unauthorized_status(response.status()) && !self.auth.uses_pat() {
+            tracing::info!(path = url.path(), "token rejected, refreshing");
             self.auth.refresh().await?;
-            response = self.send(method, &url, body).await?;
+            response = self.send(method.clone(), &url, body).await?;
         }
         let status = response.status();
+        tracing::debug!(%method, path = url.path(), %status, "request");
         if is_unauthorized_status(status) {
             return Err(Unauthorized).context(url.path().to_string());
         }
         if !status.is_success() {
-            bail!("{status}: {}", url.path());
+            let body: Option<Value> = response.json().await.ok();
+            match body.as_ref().and_then(|b| b["message"].as_str()) {
+                Some(message) => bail!("{status}: {message}"),
+                None => bail!("{status}: {}", url.path()),
+            }
         }
         response
             .json()

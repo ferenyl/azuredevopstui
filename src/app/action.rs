@@ -15,7 +15,24 @@ pub enum Action {
     OpenInBrowser,
     AssignToMe,
     ChangeColumn,
+    ChangeToken,
+    Help,
 }
+
+/// Actions listed in the help popup.
+pub const HELP: [Action; 11] = [
+    Action::Down,
+    Action::FocusRight,
+    Action::Confirm,
+    Action::ChangeColumn,
+    Action::AssignToMe,
+    Action::OpenInBrowser,
+    Action::Reload,
+    Action::ChangeToken,
+    Action::Help,
+    Action::Cancel,
+    Action::Quit,
+];
 
 impl Action {
     pub fn from_key(key: KeyEvent) -> Option<Self> {
@@ -34,6 +51,8 @@ impl Action {
             (KeyCode::Char('o'), _) => Some(Self::OpenInBrowser),
             (KeyCode::Char('a'), _) => Some(Self::AssignToMe),
             (KeyCode::Char('s'), _) => Some(Self::ChangeColumn),
+            (KeyCode::Char('t'), _) => Some(Self::ChangeToken),
+            (KeyCode::Char('?'), _) => Some(Self::Help),
             _ => None,
         }
     }
@@ -43,7 +62,7 @@ impl Action {
             Self::Quit => "q",
             Self::Cancel => "esc",
             Self::Up => "k/↑",
-            Self::Down => "j/k",
+            Self::Down => "j/k/↑/↓",
             Self::Confirm => "enter",
             Self::Reload => "r",
             Self::FocusLeft => "ctrl+h/←",
@@ -53,24 +72,28 @@ impl Action {
             Self::OpenInBrowser => "o",
             Self::AssignToMe => "a",
             Self::ChangeColumn => "s",
+            Self::ChangeToken => "t",
+            Self::Help => "?",
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Quit => "quit",
-            Self::Cancel => "cancel",
+            Self::Cancel => "close/cancel",
             Self::Up => "up",
-            Self::Down => "move",
+            Self::Down => "move/scroll",
             Self::Confirm => "select",
             Self::Reload => "reload",
             Self::FocusLeft => "left",
-            Self::FocusRight => "focus",
+            Self::FocusRight => "change box/column",
             Self::FocusUp => "box up",
             Self::FocusDown => "box down",
             Self::OpenInBrowser => "open in browser",
             Self::AssignToMe => "assign to me",
             Self::ChangeColumn => "change status",
+            Self::ChangeToken => "set PAT",
+            Self::Help => "help",
         }
     }
 }

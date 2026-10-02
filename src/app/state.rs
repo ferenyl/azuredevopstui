@@ -72,6 +72,25 @@ impl Data {
         }
     }
 
+    /// The freshly loaded version of a shown detail, if it is still listed.
+    pub fn find(&self, detail: &Detail) -> Option<Detail> {
+        match detail {
+            Detail::PullRequest(current) => [&self.my_prs, &self.other_prs]
+                .into_iter()
+                .flatten()
+                .flatten()
+                .find(|pr| pr.pull_request_id == current.pull_request_id)
+                .map(|pr| Detail::PullRequest(Box::new(pr.clone()))),
+            Detail::WorkItem(current) => [&self.my_work_items, &self.ready_work_items]
+                .into_iter()
+                .flatten()
+                .flatten()
+                .find(|item| item.id == current.id)
+                .cloned()
+                .map(Detail::WorkItem),
+        }
+    }
+
     pub fn detail(&self, panel: Panel, index: usize) -> Option<Detail> {
         let pr = |prs: &Option<Vec<PullRequest>>| {
             prs.as_ref()?

@@ -3,9 +3,11 @@ mod message;
 mod setup;
 mod state;
 
-pub use action::Action;
+pub use action::{Action, HELP};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{ColumnPicker, Data, Detail, DetailInfo, LEFT_PANELS, Panel};
+
+use std::time::{Duration, Instant};
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
@@ -36,6 +38,9 @@ pub struct App {
     pub detail_info: Option<DetailInfo>,
     pub detail_scroll: u16,
     pub popup: Option<ColumnPicker>,
+    pub show_help: bool,
+    pub last_updated: Option<Instant>,
+    last_refresh: Instant,
     board: Option<Board>,
     last_left: Panel,
     pub error: Option<String>,
@@ -63,6 +68,9 @@ impl App {
             detail_info: None,
             detail_scroll: 0,
             popup: None,
+            show_help: false,
+            last_updated: None,
+            last_refresh: Instant::now(),
             board: None,
             last_left: Panel::MyPrs,
             error: None,
@@ -76,6 +84,7 @@ impl App {
     pub async fn run(mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         self.authenticate();
         let mut events = EventStream::new();
+        let mut ticker = tokio::time::interval(Duration::from_secs(1));
         while !self.should_quit {
             terminal.draw(|frame| crate::ui::render(frame, &self))?;
             tokio::select! {
@@ -86,6 +95,7 @@ impl App {
                     None => break,
                 },
                 Some(message) = self.rx.recv() => self.handle_message(message),
+                _ = ticker.tick() => self.auto_refresh(),
             }
         }
         Ok(())
@@ -99,6 +109,7 @@ impl App {
                 &[Action::Down, Action::Up, Action::Confirm, Action::Quit]
             }
             Screen::Setup(_) => &[Action::Quit],
+            Screen::Main if self.show_help => &[Action::Cancel],
             Screen::Main if self.popup.is_some() => {
                 &[Action::Down, Action::Confirm, Action::Cancel]
             }
@@ -109,6 +120,8 @@ impl App {
                     Action::Confirm,
                     Action::OpenInBrowser,
                     Action::Reload,
+                    Action::ChangeToken,
+                    Action::Help,
                     Action::Quit,
                 ],
                 Some(Detail::WorkItem(_)) => &[
@@ -119,12 +132,16 @@ impl App {
                     Action::AssignToMe,
                     Action::OpenInBrowser,
                     Action::Reload,
+                    Action::ChangeToken,
+                    Action::Help,
                     Action::Quit,
                 ],
                 None => &[
                     Action::Down,
                     Action::FocusRight,
                     Action::Reload,
+                    Action::ChangeToken,
+                    Action::Help,
                     Action::Quit,
                 ],
             },
@@ -172,6 +189,7 @@ impl App {
             None => open::that_detached(url.as_str()),
         };
         if let Err(err) = result {
+            tracing::warn!("failed to open browser: {err}");
             self.error = Some(format!("failed to open browser: {err}"));
         }
     }
@@ -230,10 +248,22 @@ impl App {
             return;
         };
         let labels = targets.iter().map(|t| t.label.clone()).collect();
+        let mut selection = Selection::new(labels);
+        let done = item.fields.board_column_done.unwrap_or(false);
+        let current = item.fields.board_column.as_deref();
+        selection.selected = targets
+            .iter()
+            .position(|t| Some(t.column.as_str()) == current && t.done == done)
+            .or_else(|| {
+                targets
+                    .iter()
+                    .position(|t| Some(t.column.as_str()) == current)
+            })
+            .unwrap_or(0);
         self.popup = Some(ColumnPicker {
             work_item_id: item.id,
             targets,
-            selection: Selection::new(labels),
+            selection,
         });
     }
 
@@ -255,18 +285,6 @@ impl App {
                 .move_work_item(&config.organization, &config.project, id, &board, &target)
                 .await;
             Message::WorkItemUpdated { id, result }
-        });
-    }
-
-    fn reload_work_item_details(&mut self, id: u32) {
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
-            return;
-        };
-        self.spawn(async move {
-            let result = client
-                .work_item_details(&config.organization, &config.project, id)
-                .await;
-            Message::WorkItemDetails { id, result }
         });
     }
 
@@ -294,12 +312,14 @@ impl App {
             self.set_step(SetupStep::EnterPat {
                 input: String::new(),
                 error: Some("The saved token was rejected. Enter a new one.".into()),
+                cancelable: false,
             });
         }
         pat_rejected
     }
 
     fn fail(&mut self, err: anyhow::Error, retry: Retry) {
+        tracing::error!("setup failed: {err:#}");
         if self.handle_rejected_pat(&err) {
             return;
         }
@@ -310,8 +330,23 @@ impl App {
     }
 
     fn report_error(&mut self, err: anyhow::Error) {
+        tracing::error!("{err:#}");
         if !self.handle_rejected_pat(&err) {
             self.error = Some(format!("{err:#}"));
+        }
+    }
+
+    /// Refreshes on the configured interval while the main view is idle. 0 disables it.
+    fn auto_refresh(&mut self) {
+        let Some(interval) = self.config.as_ref().map(|c| c.refresh_interval_secs) else {
+            return;
+        };
+        if interval > 0
+            && matches!(self.screen, Screen::Main)
+            && self.popup.is_none()
+            && self.last_refresh.elapsed() >= Duration::from_secs(interval)
+        {
+            self.refresh();
         }
     }
 
@@ -322,6 +357,7 @@ impl App {
             return;
         };
         self.error = None;
+        self.last_refresh = Instant::now();
 
         let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
         self.spawn(async move {
@@ -343,6 +379,10 @@ impl App {
                 .await,
             )
         });
+
+        if let Some(detail) = &self.detail {
+            self.load_detail(detail);
+        }
 
         if let Some(ready_column) = config.ready_column.clone() {
             self.spawn(async move {
@@ -462,6 +502,7 @@ impl App {
             Message::Authenticated(Ok(None)) => self.set_step(SetupStep::EnterPat {
                 input: String::new(),
                 error: None,
+                cancelable: false,
             }),
             Message::Authenticated(Err(err)) => self.fail(err, Retry::Authenticate),
             Message::Organizations(Ok(organizations)) if !organizations.is_empty() => {
@@ -502,11 +543,17 @@ impl App {
                 self.refresh();
             }
             Message::MyPullRequests(result) => match result {
-                Ok(prs) => self.data.my_prs = Some(prs),
+                Ok(prs) => {
+                    self.data.my_prs = Some(prs);
+                    self.last_updated = Some(Instant::now());
+                }
                 Err(err) => self.report_error(err),
             },
             Message::OtherPullRequests(result) => match result {
-                Ok(prs) => self.data.other_prs = Some(prs),
+                Ok(prs) => {
+                    self.data.other_prs = Some(prs);
+                    self.last_updated = Some(Instant::now());
+                }
                 Err(err) => self.report_error(err),
             },
             Message::SprintWorkItems(result) => match result {
@@ -514,6 +561,7 @@ impl App {
                     self.data.sprint_name = Some(sprint.iteration_name);
                     self.data.my_work_items = Some(sprint.mine);
                     self.data.ready_work_items = Some(sprint.ready);
+                    self.last_updated = Some(Instant::now());
                 }
                 Err(err) => self.report_error(err),
             },
@@ -535,10 +583,8 @@ impl App {
             },
             Message::WorkItemUpdated { id, result } => match result {
                 Ok(()) => {
+                    tracing::info!(id, "work item updated");
                     self.refresh();
-                    if self.detail.as_ref().is_some_and(|d| d.is_work_item(id)) {
-                        self.reload_work_item_details(id);
-                    }
                 }
                 Err(err) => self.report_error(err),
             },
@@ -552,6 +598,7 @@ impl App {
             }
         }
         self.clamp_selections();
+        self.sync_detail();
     }
 
     fn clamp_selections(&mut self) {
@@ -598,15 +645,23 @@ impl App {
     }
 
     fn open_selected(&mut self) {
-        let (Some(index), Some(client), Some(config)) =
-            (self.focus.index(), self.client.clone(), self.config.clone())
-        else {
+        let Some(index) = self.focus.index() else {
             return;
         };
         let Some(detail) = self.data.detail(self.focus, self.selections[index]) else {
             return;
         };
-        match &detail {
+        self.load_detail(&detail);
+        self.detail = Some(detail);
+        self.detail_info = None;
+        self.detail_scroll = 0;
+    }
+
+    fn load_detail(&self, detail: &Detail) {
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        match detail {
             Detail::PullRequest(pr) => {
                 let (id, pr) = (pr.pull_request_id, pr.clone());
                 self.spawn(async move {
@@ -626,9 +681,12 @@ impl App {
                 });
             }
         }
-        self.detail = Some(detail);
-        self.detail_info = None;
-        self.detail_scroll = 0;
+    }
+
+    fn sync_detail(&mut self) {
+        if let Some(fresh) = self.detail.as_ref().and_then(|d| self.data.find(d)) {
+            self.detail = Some(fresh);
+        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
@@ -653,6 +711,14 @@ impl App {
     }
 
     fn apply(&mut self, action: Action) {
+        if self.show_help {
+            match action {
+                Action::Cancel | Action::Help => self.show_help = false,
+                Action::Quit => self.should_quit = true,
+                _ => {}
+            }
+            return;
+        }
         if let Some(picker) = &mut self.popup {
             match action {
                 Action::Up => picker.selection.previous(),
@@ -666,9 +732,21 @@ impl App {
         }
         match action {
             Action::Quit => self.should_quit = true,
-            Action::Cancel => {
-                if matches!(self.screen, Screen::Setup(_)) {
-                    self.should_quit = true;
+            Action::Cancel => match self.screen {
+                Screen::Setup(SetupStep::EnterPat {
+                    cancelable: true, ..
+                }) => self.screen = Screen::Main,
+                Screen::Setup(_) => self.should_quit = true,
+                Screen::Main => {}
+            },
+            Action::Help => self.show_help = matches!(self.screen, Screen::Main),
+            Action::ChangeToken => {
+                if matches!(self.screen, Screen::Main) {
+                    self.set_step(SetupStep::EnterPat {
+                        input: String::new(),
+                        error: None,
+                        cancelable: true,
+                    });
                 }
             }
             Action::Up | Action::Down => match &mut self.screen {

@@ -259,6 +259,10 @@ pub struct WorkItemFields {
     pub work_item_type: String,
     #[serde(rename = "System.State")]
     pub state: String,
+    #[serde(rename = "System.BoardColumn")]
+    pub board_column: Option<String>,
+    #[serde(rename = "System.BoardColumnDone")]
+    pub board_column_done: Option<bool>,
 }
 
 pub struct SprintWorkItems {

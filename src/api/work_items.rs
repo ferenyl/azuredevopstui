@@ -8,7 +8,13 @@ use super::models::{
 use super::{AdoClient, DEV_AZURE};
 
 const MAX_WORK_ITEMS: &str = "200";
-const FIELDS: [&str; 3] = ["System.Title", "System.WorkItemType", "System.State"];
+const FIELDS: [&str; 5] = [
+    "System.Title",
+    "System.WorkItemType",
+    "System.State",
+    "System.BoardColumn",
+    "System.BoardColumnDone",
+];
 const COMMENTS_API_VERSION: &str = "7.1-preview.4";
 const MAX_COMMENTS: &str = "10";
 const HTML_TEXT_WIDTH: usize = 10_000;

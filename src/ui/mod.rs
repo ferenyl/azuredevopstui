@@ -4,6 +4,7 @@ mod setup;
 mod toolbar;
 mod workitem_detail;
 
+use chrono::{DateTime, Local};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -38,6 +39,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_panel(frame, app, Panel::Detail, right);
     if let Some(picker) = &app.popup {
         popup::render_column_picker(frame, app, picker, main);
+    }
+    if app.show_help {
+        popup::render_help(frame, app, main);
     }
 }
 
@@ -135,9 +139,15 @@ fn indented(text: &str, indent: usize) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// `2026-10-01T14:49:33Z` -> `2026-10-01 14:49` (UTC).
+/// `2026-10-01T14:49:33Z` -> `2026-10-01 16:49` in local time.
 fn short_date(date: &str) -> String {
-    date.get(..16).unwrap_or(date).replace('T', " ")
+    match DateTime::parse_from_rfc3339(date) {
+        Ok(date) => date
+            .with_timezone(&Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string(),
+        Err(_) => date.get(..16).unwrap_or(date).replace('T', " "),
+    }
 }
 
 /// `None` while the panel's data is loading.
