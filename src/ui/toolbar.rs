@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let theme = &app.config.colors;
+    let theme = &app.theme;
     let spans: Vec<Span> = app
         .actions()
         .iter()

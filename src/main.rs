@@ -1,4 +1,6 @@
+mod api;
 mod app;
+mod auth;
 mod config;
 mod theme;
 mod ui;

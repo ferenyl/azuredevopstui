@@ -9,18 +9,29 @@ use crate::theme::Theme;
 const APP_NAME: &str = "azuredevopstui";
 const CONFIG_FILE: &str = "config.json";
 
+const DEFAULT_REFRESH_INTERVAL_SECS: u64 = 120;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct Config {
     pub organization: String,
     pub project: String,
     pub team: String,
+    #[serde(default = "default_refresh_interval_secs")]
     pub refresh_interval_secs: u64,
+    #[serde(default)]
     pub browser_command: Option<String>,
+    #[serde(default)]
     pub auth: AuthConfig,
+    #[serde(default)]
     pub other_prs_filter: OtherPrsFilter,
-    pub ready_column: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ready_column: Option<String>,
+    #[serde(default)]
     pub colors: Theme,
+}
+
+fn default_refresh_interval_secs() -> u64 {
+    DEFAULT_REFRESH_INTERVAL_SECS
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -45,38 +56,35 @@ pub struct OtherPrsFilter {
     pub creators: Vec<String>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
+impl Config {
+    pub fn new(organization: String, project: String, team: String) -> Self {
         Self {
-            organization: "contoso".into(),
-            project: "MyProject".into(),
-            team: "My Team".into(),
-            refresh_interval_secs: 120,
+            organization,
+            project,
+            team,
+            refresh_interval_secs: DEFAULT_REFRESH_INTERVAL_SECS,
             browser_command: None,
             auth: AuthConfig::default(),
             other_prs_filter: OtherPrsFilter::default(),
-            ready_column: "Ready".into(),
+            ready_column: None,
             colors: Theme::default(),
         }
     }
-}
 
-impl Config {
     pub fn path() -> Result<PathBuf> {
         let dir = dirs::config_dir().context("could not resolve config directory")?;
         Ok(dir.join(APP_NAME).join(CONFIG_FILE))
     }
 
-    pub fn load() -> Result<Self> {
+    pub fn load() -> Result<Option<Self>> {
         let path = Self::path()?;
         if !path.exists() {
-            let config = Self::default();
-            config.save()?;
-            return Ok(config);
+            return Ok(None);
         }
         let content = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         serde_json::from_str(&content)
+            .map(Some)
             .with_context(|| format!("failed to parse {}", path.display()))
     }
 
