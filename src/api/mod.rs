@@ -4,13 +4,15 @@ mod projects;
 mod pull_requests;
 mod work_items;
 
+pub use boards::ColumnTarget;
 pub use models::{
-    CurrentUser, PullRequest, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
+    Board, CurrentUser, PullRequest, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
 };
 
 use std::fmt;
 
 use anyhow::{Context, Result, anyhow, bail};
+use reqwest::header::CONTENT_TYPE;
 use reqwest::{Method, StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -85,6 +87,16 @@ impl AdoClient {
         self.request(Method::POST, url, Some(body)).await
     }
 
+    async fn patch<T: DeserializeOwned>(
+        &self,
+        base: &str,
+        segments: &[&str],
+        body: &Value,
+    ) -> Result<T> {
+        let url = build_url(base, segments, &[], API_VERSION)?;
+        self.request(Method::PATCH, url, Some(body)).await
+    }
+
     async fn request<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -115,7 +127,11 @@ impl AdoClient {
         url: &Url,
         body: Option<&Value>,
     ) -> Result<reqwest::Response> {
+        let is_patch = method == Method::PATCH;
         let mut request = self.http.request(method, url.clone());
+        if is_patch {
+            request = request.header(CONTENT_TYPE, "application/json-patch+json");
+        }
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -126,6 +142,30 @@ impl AdoClient {
             .await
             .with_context(|| format!("request failed: {}", url.path()))
     }
+}
+
+pub fn pull_request_url(organization: &str, project: &str, repository: &str, id: u32) -> Url {
+    web_url(&[
+        organization,
+        project,
+        "_git",
+        repository,
+        "pullrequest",
+        &id.to_string(),
+    ])
+}
+
+pub fn work_item_url(organization: &str, project: &str, id: u32) -> Url {
+    web_url(&[organization, project, "_workitems", "edit", &id.to_string()])
+}
+
+fn web_url(segments: &[&str]) -> Url {
+    let mut url = Url::parse(DEV_AZURE).expect("valid base url");
+    url.path_segments_mut()
+        .expect("base url can have path")
+        .pop_if_empty()
+        .extend(segments);
+    url
 }
 
 fn build_url(

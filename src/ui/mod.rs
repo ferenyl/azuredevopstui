@@ -1,3 +1,4 @@
+mod popup;
 mod pr_detail;
 mod setup;
 mod toolbar;
@@ -35,6 +36,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_panel(frame, app, *panel, *area);
     }
     render_panel(frame, app, Panel::Detail, right);
+    if let Some(picker) = &app.popup {
+        popup::render_column_picker(frame, app, picker, main);
+    }
 }
 
 fn render_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {

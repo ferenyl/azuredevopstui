@@ -78,6 +78,7 @@ impl AdoClient {
         )?;
         let fields = item.fields;
         Ok(WorkItemDetails {
+            state: fields.state,
             board_column: fields.board_column,
             board_column_done: fields.board_column_done.unwrap_or(false),
             assigned_to: fields.assigned_to.map(|identity| identity.display_name),

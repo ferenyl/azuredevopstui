@@ -13,12 +13,10 @@ pub fn lines(app: &App, item: &WorkItem, details: Option<&WorkItemDetails>) -> V
             Span::raw(value),
         ])
     };
+    let state = details.map_or(&item.fields.state, |d| &d.state);
     let mut lines = vec![field(
         "Type",
-        format!(
-            "{}   State {}",
-            item.fields.work_item_type, item.fields.state
-        ),
+        format!("{}   State {}", item.fields.work_item_type, state),
     )];
     let Some(details) = details else {
         lines.push(Line::styled("Loading…", muted));

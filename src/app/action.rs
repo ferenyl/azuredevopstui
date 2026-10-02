@@ -12,6 +12,9 @@ pub enum Action {
     FocusRight,
     FocusUp,
     FocusDown,
+    OpenInBrowser,
+    AssignToMe,
+    ChangeColumn,
 }
 
 impl Action {
@@ -28,6 +31,9 @@ impl Action {
             (KeyCode::Char('k') | KeyCode::Up, _) => Some(Self::Up),
             (KeyCode::Enter, _) => Some(Self::Confirm),
             (KeyCode::Char('r'), _) => Some(Self::Reload),
+            (KeyCode::Char('o'), _) => Some(Self::OpenInBrowser),
+            (KeyCode::Char('a'), _) => Some(Self::AssignToMe),
+            (KeyCode::Char('s'), _) => Some(Self::ChangeColumn),
             _ => None,
         }
     }
@@ -44,6 +50,9 @@ impl Action {
             Self::FocusRight => "ctrl+hjkl",
             Self::FocusUp => "ctrl+k/↑",
             Self::FocusDown => "ctrl+j/↓",
+            Self::OpenInBrowser => "o",
+            Self::AssignToMe => "a",
+            Self::ChangeColumn => "s",
         }
     }
 
@@ -59,6 +68,9 @@ impl Action {
             Self::FocusRight => "focus",
             Self::FocusUp => "box up",
             Self::FocusDown => "box down",
+            Self::OpenInBrowser => "open in browser",
+            Self::AssignToMe => "assign to me",
+            Self::ChangeColumn => "change status",
         }
     }
 }

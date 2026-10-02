@@ -1,5 +1,7 @@
-use crate::api::{PullRequest, PullRequestDetails, WorkItem, WorkItemDetails};
+use super::setup::Selection;
+use crate::api::{ColumnTarget, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails};
 
+#[derive(Clone)]
 pub enum Detail {
     PullRequest(Box<PullRequest>),
     WorkItem(WorkItem),
@@ -20,6 +22,12 @@ impl Detail {
     pub fn is_work_item(&self, id: u32) -> bool {
         matches!(self, Self::WorkItem(_)) && self.id() == id
     }
+}
+
+pub struct ColumnPicker {
+    pub work_item_id: u32,
+    pub targets: Vec<ColumnTarget>,
+    pub selection: Selection,
 }
 
 pub enum DetailInfo {

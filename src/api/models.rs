@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -16,6 +18,30 @@ pub struct ConnectionData {
 pub struct CurrentUser {
     pub id: String,
     pub provider_display_name: String,
+    #[serde(default)]
+    pub properties: UserProperties,
+}
+
+impl CurrentUser {
+    /// Email/UPN when available, used as identity value in work item fields.
+    pub fn unique_name(&self) -> &str {
+        self.properties
+            .account
+            .as_ref()
+            .map_or(&self.provider_display_name, |account| &account.value)
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UserProperties {
+    #[serde(rename = "Account")]
+    pub account: Option<PropertyValue>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PropertyValue {
+    #[serde(rename = "$value")]
+    pub value: String,
 }
 
 #[derive(Deserialize)]
@@ -32,6 +58,42 @@ pub struct Account {
 #[derive(Deserialize)]
 pub struct Named {
     pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct BoardResponse {
+    pub columns: Vec<BoardColumn>,
+    pub fields: BoardFields,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardFields {
+    pub column_field: FieldReference,
+    pub done_field: FieldReference,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldReference {
+    pub reference_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardColumn {
+    pub name: String,
+    #[serde(default)]
+    pub is_split: bool,
+    #[serde(default)]
+    pub state_mappings: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Board {
+    pub column_field: String,
+    pub done_field: String,
+    pub columns: Vec<BoardColumn>,
 }
 
 #[derive(Deserialize)]
@@ -212,6 +274,8 @@ pub struct WorkItemResponse {
 
 #[derive(Deserialize)]
 pub struct WorkItemDetailFields {
+    #[serde(rename = "System.State")]
+    pub state: String,
     #[serde(rename = "System.BoardColumn")]
     pub board_column: Option<String>,
     #[serde(rename = "System.BoardColumnDone")]
@@ -247,6 +311,7 @@ pub struct WorkItemComment {
 
 /// Work item fields not included in the list query, with HTML converted to text.
 pub struct WorkItemDetails {
+    pub state: String,
     pub board_column: Option<String>,
     pub board_column_done: bool,
     pub assigned_to: Option<String>,

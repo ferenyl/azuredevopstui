@@ -5,14 +5,14 @@ mod state;
 
 pub use action::Action;
 pub use setup::{Retry, Selection, SetupStep};
-pub use state::{Data, Detail, DetailInfo, LEFT_PANELS, Panel};
+pub use state::{ColumnPicker, Data, Detail, DetailInfo, LEFT_PANELS, Panel};
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::api::{self, AdoClient, CurrentUser};
+use crate::api::{self, AdoClient, Board, CurrentUser, WorkItem};
 use crate::auth::Auth;
 use crate::config::{AuthMethod, Config};
 use crate::theme::Theme;
@@ -35,6 +35,8 @@ pub struct App {
     /// `None` while the selected detail is loading.
     pub detail_info: Option<DetailInfo>,
     pub detail_scroll: u16,
+    pub popup: Option<ColumnPicker>,
+    board: Option<Board>,
     last_left: Panel,
     pub error: Option<String>,
     client: Option<AdoClient>,
@@ -60,6 +62,8 @@ impl App {
             detail: None,
             detail_info: None,
             detail_scroll: 0,
+            popup: None,
+            board: None,
             last_left: Panel::MyPrs,
             error: None,
             client: None,
@@ -95,14 +99,175 @@ impl App {
                 &[Action::Down, Action::Up, Action::Confirm, Action::Quit]
             }
             Screen::Setup(_) => &[Action::Quit],
-            Screen::Main => &[
-                Action::Down,
-                Action::FocusRight,
-                Action::Confirm,
-                Action::Reload,
-                Action::Quit,
-            ],
+            Screen::Main if self.popup.is_some() => {
+                &[Action::Down, Action::Confirm, Action::Cancel]
+            }
+            Screen::Main => match self.current_item() {
+                Some(Detail::PullRequest(_)) => &[
+                    Action::Down,
+                    Action::FocusRight,
+                    Action::Confirm,
+                    Action::OpenInBrowser,
+                    Action::Reload,
+                    Action::Quit,
+                ],
+                Some(Detail::WorkItem(_)) => &[
+                    Action::Down,
+                    Action::FocusRight,
+                    Action::Confirm,
+                    Action::ChangeColumn,
+                    Action::AssignToMe,
+                    Action::OpenInBrowser,
+                    Action::Reload,
+                    Action::Quit,
+                ],
+                None => &[
+                    Action::Down,
+                    Action::FocusRight,
+                    Action::Reload,
+                    Action::Quit,
+                ],
+            },
         }
+    }
+
+    /// The item actions apply to: the shown detail when focused, else the selected row.
+    fn current_item(&self) -> Option<Detail> {
+        match self.focus.index() {
+            Some(index) => self.data.detail(self.focus, self.selections[index]),
+            None => self.detail.clone(),
+        }
+    }
+
+    fn open_in_browser(&mut self) {
+        let (Some(item), Some(config)) = (self.current_item(), &self.config) else {
+            return;
+        };
+        let url = match &item {
+            Detail::PullRequest(pr) => api::pull_request_url(
+                &config.organization,
+                &config.project,
+                &pr.repository.name,
+                pr.pull_request_id,
+            ),
+            Detail::WorkItem(item) => {
+                api::work_item_url(&config.organization, &config.project, item.id)
+            }
+        };
+        let result = match &config.browser_command {
+            Some(command) => {
+                let mut parts = command.split_whitespace();
+                match parts.next() {
+                    Some(program) => std::process::Command::new(program)
+                        .args(parts)
+                        .arg(url.as_str())
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .map(|_| ()),
+                    None => Ok(()),
+                }
+            }
+            None => open::that_detached(url.as_str()),
+        };
+        if let Err(err) = result {
+            self.error = Some(format!("failed to open browser: {err}"));
+        }
+    }
+
+    fn current_work_item(&self) -> Option<WorkItem> {
+        match self.current_item()? {
+            Detail::WorkItem(item) => Some(item),
+            Detail::PullRequest(_) => None,
+        }
+    }
+
+    fn assign_to_me(&mut self) {
+        let (Some(item), Some(client), Some(config), Some(user)) = (
+            self.current_work_item(),
+            self.client.clone(),
+            self.config.clone(),
+            self.user.as_ref(),
+        ) else {
+            return;
+        };
+        let (id, assignee) = (item.id, user.unique_name().to_string());
+        self.spawn(async move {
+            let result = client
+                .assign_work_item(&config.organization, &config.project, id, &assignee)
+                .await;
+            Message::WorkItemUpdated { id, result }
+        });
+    }
+
+    fn change_column(&mut self) {
+        let Some(item) = self.current_work_item() else {
+            return;
+        };
+        if let Some(board) = &self.board {
+            let board = board.clone();
+            self.open_column_picker(item, &board);
+            return;
+        }
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        self.spawn(async move {
+            let result = client
+                .board(&config.organization, &config.project, &config.team)
+                .await;
+            Message::Board { item, result }
+        });
+    }
+
+    fn open_column_picker(&mut self, item: WorkItem, board: &Board) {
+        let Some(targets) = board.targets(&item.fields.work_item_type) else {
+            self.error = Some(format!(
+                "{} items are not on the board",
+                item.fields.work_item_type
+            ));
+            return;
+        };
+        let labels = targets.iter().map(|t| t.label.clone()).collect();
+        self.popup = Some(ColumnPicker {
+            work_item_id: item.id,
+            targets,
+            selection: Selection::new(labels),
+        });
+    }
+
+    fn confirm_column(&mut self) {
+        let (Some(picker), Some(board), Some(client), Some(config)) = (
+            self.popup.take(),
+            self.board.clone(),
+            self.client.clone(),
+            self.config.clone(),
+        ) else {
+            return;
+        };
+        let Some(target) = picker.targets.get(picker.selection.selected).cloned() else {
+            return;
+        };
+        let id = picker.work_item_id;
+        self.spawn(async move {
+            let result = client
+                .move_work_item(&config.organization, &config.project, id, &board, &target)
+                .await;
+            Message::WorkItemUpdated { id, result }
+        });
+    }
+
+    fn reload_work_item_details(&mut self, id: u32) {
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        self.spawn(async move {
+            let result = client
+                .work_item_details(&config.organization, &config.project, id)
+                .await;
+            Message::WorkItemDetails { id, result }
+        });
     }
 
     fn spawn<F>(&self, future: F)
@@ -361,6 +526,22 @@ impl App {
                     }
                 }
             }
+            Message::Board { item, result } => match result {
+                Ok(board) => {
+                    self.open_column_picker(item, &board);
+                    self.board = Some(board);
+                }
+                Err(err) => self.report_error(err),
+            },
+            Message::WorkItemUpdated { id, result } => match result {
+                Ok(()) => {
+                    self.refresh();
+                    if self.detail.as_ref().is_some_and(|d| d.is_work_item(id)) {
+                        self.reload_work_item_details(id);
+                    }
+                }
+                Err(err) => self.report_error(err),
+            },
             Message::WorkItemDetails { id, result } => {
                 if self.detail.as_ref().is_some_and(|d| d.is_work_item(id)) {
                     match result {
@@ -472,6 +653,17 @@ impl App {
     }
 
     fn apply(&mut self, action: Action) {
+        if let Some(picker) = &mut self.popup {
+            match action {
+                Action::Up => picker.selection.previous(),
+                Action::Down => picker.selection.next(),
+                Action::Confirm => self.confirm_column(),
+                Action::Cancel => self.popup = None,
+                Action::Quit => self.should_quit = true,
+                _ => {}
+            }
+            return;
+        }
         match action {
             Action::Quit => self.should_quit = true,
             Action::Cancel => {
@@ -498,6 +690,11 @@ impl App {
                 Screen::Main => self.open_selected(),
                 Screen::Setup(_) => self.confirm_setup_step(),
             },
+            Action::OpenInBrowser | Action::AssignToMe | Action::ChangeColumn
+                if !matches!(self.screen, Screen::Main) => {}
+            Action::OpenInBrowser => self.open_in_browser(),
+            Action::AssignToMe => self.assign_to_me(),
+            Action::ChangeColumn => self.change_column(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);

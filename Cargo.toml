@@ -10,6 +10,7 @@ dirs = "7.0.0"
 futures = "0.3.34"
 html2text = "0.17.1"
 keyring = "4.2.0"
+open = "5.4.4"
 ratatui = { version = "0.30.2", features = ["serde"] }
 reqwest = { version = "0.13.5", features = ["json"] }
 serde = { version = "1.0.229", features = ["derive"] }

@@ -1,6 +1,8 @@
 use anyhow::Result;
 
-use crate::api::{CurrentUser, PullRequest, PullRequestDetails, SprintWorkItems, WorkItemDetails};
+use crate::api::{
+    Board, CurrentUser, PullRequest, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
+};
 use crate::auth::Auth;
 
 pub enum Message {
@@ -27,5 +29,13 @@ pub enum Message {
     WorkItemDetails {
         id: u32,
         result: Result<WorkItemDetails>,
+    },
+    Board {
+        item: WorkItem,
+        result: Result<Board>,
+    },
+    WorkItemUpdated {
+        id: u32,
+        result: Result<()>,
     },
 }
