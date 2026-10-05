@@ -23,19 +23,22 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 
 ## Features
 
-- **Five lists** on the left:
-  - **Inbox**: everything that waits on you, oldest first: your PRs with markers, others' PRs that need your vote or answer, and work items where someone mentioned you. Entries that showed up since the first refresh get a `•` until you open them.
+- **Six lists** on the left:
+  - **Inbox**: everything that waits on you, oldest first: your PRs with markers, others' PRs that need your vote or answer, work items where someone mentioned you, and your failed pipeline runs. Entries that showed up since the first refresh get a `•` until you open them.
   - **My PRs**: active pull requests you created, across all repositories in the project, marked with what needs your attention. See [PR markers](#pr-markers).
   - **My work items**: open items assigned to you in the current sprint, limited to the chosen work item types.
   - **Others' PRs**: active pull requests created by someone else, marked with what waits on you. See [Review markers](#review-markers). You can filter them by reviewer or creator.
-  - **Ready**: items in the current sprint that sit in your *ready* board column and are not assigned to you.
+  - **Ready**: items in the current sprint that sit in your *ready* board column and are not assigned to you. The title shows the work days left in the sprint.
+  - **My pipelines**: the latest run per pipeline and branch that you triggered in the last 14 days, also for branches without a PR. Pull request runs are left out; they show up in the PR's checks.
+- **Sprint overview** in the detail panel when nothing is open: the sprint dates, the work days left and your items per board column. `esc` closes an open item and brings it back.
 - **Detail panel** with tabs:
+  - **Pipeline run**: pipeline, run number, branch, status, reason, times and duration.
   - **Pull request**:
-    - **Overview** shows status, branches, merge status, reviewers and their votes, and the description.
+    - **Overview** shows status, branches, merge status, reviewers and their votes, the linked work items (with a warning when there are none), and the description.
     - **Comments** shows the comment threads with their status and file path.
     - **Checks** shows the branch policies and statuses, with a summary of passed, failed and pending.
   - **Work item**:
-    - **Overview** shows type, state, board column, priority, assignee, sprint, tags, description, repro steps and acceptance criteria.
+    - **Overview** shows type, state, board column, priority, assignee, sprint, tags, linked pull requests, description, repro steps and acceptance criteria.
     - **Children** shows child items grouped by type (Task, Release Task, User Story, …), each with state and assignee.
     - **Comments** shows the 10 newest comments.
   - **Images** in descriptions and comments are drawn inline when the terminal supports graphics. See [Images](#images).
@@ -408,11 +411,11 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
 | `c` | Complete your ready PR: pick the merge strategy, then `enter`. `esc` cancels and nothing is completed |
-| `o` | Open the PR or work item in the browser |
+| `o` | Open the PR, work item or pipeline run in the browser |
 | `r` | Reload everything |
 | `t` | Enter a new PAT |
 | `?` | Show all keys |
-| `esc` | Close a popup or cancel |
+| `esc` | Close a popup or cancel, or close the open item to show the sprint overview |
 | `q`, `ctrl+c` | Quit |
 
 Actions apply to the selected row in the focused list. When the detail panel has focus, they apply to the item shown there. The toolbar always shows the keys that work in the current context.
@@ -429,6 +432,7 @@ Each pull request in *My PRs* shows markers right after its ID when something ne
 | `✖` | A blocking policy failed, for example the build, or a status check failed |
 | `⇄` | Merge conflicts |
 
+| `∅` | No work item is linked |
 | `✔` | Approved and nothing blocks the merge; press `c` to complete |
 
 No marker means nothing is waiting on you. The markers are refreshed together with the lists.

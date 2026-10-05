@@ -191,6 +191,7 @@ pub struct PullRequestDetails {
     pub threads: Vec<Thread>,
     pub statuses: Vec<PullRequestStatus>,
     pub policies: Vec<PolicyEvaluation>,
+    pub work_items: Vec<WorkItem>,
 }
 
 #[derive(Deserialize)]
@@ -296,6 +297,15 @@ impl PolicySettings {
 pub struct Iteration {
     pub name: String,
     pub path: String,
+    #[serde(default)]
+    pub attributes: IterationAttributes,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IterationAttributes {
+    pub start_date: Option<String>,
+    pub finish_date: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -307,6 +317,12 @@ pub struct WiqlResult {
 #[derive(Deserialize)]
 pub struct WorkItemRef {
     pub id: u32,
+}
+
+/// A reference whose id is a string, such as a work item linked to a pull request.
+#[derive(Deserialize)]
+pub struct ResourceRef {
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -345,6 +361,8 @@ pub struct Mention {
 
 pub struct SprintWorkItems {
     pub iteration_name: String,
+    pub start_date: Option<String>,
+    pub finish_date: Option<String>,
     pub mine: Vec<WorkItem>,
     pub ready: Vec<WorkItem>,
 }
@@ -420,12 +438,40 @@ pub struct WorkItemDetails {
     pub comment_count: u32,
     pub comments: Vec<DetailComment>,
     pub children: Vec<WorkItem>,
+    pub pull_requests: Vec<PullRequest>,
 }
 
 pub struct DetailComment {
     pub author: String,
     pub date: String,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Build {
+    pub id: u32,
+    pub build_number: String,
+    pub status: String,
+    pub result: Option<String>,
+    pub definition: BuildDefinition,
+    pub source_branch: String,
+    pub reason: Option<String>,
+    pub queue_time: Option<String>,
+    pub start_time: Option<String>,
+    pub finish_time: Option<String>,
+}
+
+impl Build {
+    pub fn failed(&self) -> bool {
+        self.status == "completed" && self.result.as_deref() == Some("failed")
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuildDefinition {
+    pub id: u32,
+    pub name: String,
 }
 
 #[cfg(test)]

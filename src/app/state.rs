@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::setup::Selection;
 use crate::api::{
-    ColumnTarget, Mention, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails,
+    Build, ColumnTarget, Mention, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails,
     is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
@@ -11,6 +11,7 @@ use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 pub enum Detail {
     PullRequest(Box<PullRequest>),
     WorkItem(WorkItem),
+    Build(Box<Build>),
 }
 
 impl Detail {
@@ -18,6 +19,7 @@ impl Detail {
         match self {
             Self::PullRequest(pr) => pr.pull_request_id,
             Self::WorkItem(item) => item.id,
+            Self::Build(build) => build.id,
         }
     }
 
@@ -26,6 +28,7 @@ impl Detail {
         match self {
             Self::PullRequest(pr) => format!("!{}", pr.pull_request_id),
             Self::WorkItem(item) => format!("#{}", item.id),
+            Self::Build(build) => format!("build {}", build.id),
         }
     }
 
@@ -45,6 +48,7 @@ impl Detail {
                 DetailTab::Children,
                 DetailTab::Comments,
             ],
+            Self::Build(_) => &[DetailTab::Overview],
         }
     }
 }
@@ -123,6 +127,10 @@ pub struct Data {
     pub my_work_items: Option<Vec<WorkItem>>,
     pub ready_work_items: Option<Vec<WorkItem>>,
     pub sprint_name: Option<String>,
+    pub sprint_start: Option<String>,
+    pub sprint_finish: Option<String>,
+    /// Latest run per pipeline and branch that the user triggered.
+    pub builds: Option<Vec<Build>>,
     /// Things to act on in my PRs, by PR id.
     pub pr_signals: HashMap<u32, Signals>,
     /// Work items with unanswered mentions of the user.
@@ -146,6 +154,8 @@ pub struct Signals {
     pub rejected: bool,
     pub failed_checks: bool,
     pub conflicts: bool,
+    /// No work item is linked.
+    pub unlinked: bool,
     /// Approved and nothing blocks the merge.
     pub ready: bool,
 }
@@ -171,6 +181,7 @@ impl Signals {
             rejected: pr.reviewers.iter().any(|reviewer| reviewer.vote == -10),
             failed_checks: failed_policy || failed_status,
             conflicts: matches!(pr.merge_status.as_deref(), Some("conflicts" | "failure")),
+            unlinked: false,
             ready: false,
         };
         let blocking_approved = details
@@ -182,6 +193,7 @@ impl Signals {
             && blocking_approved
             && is_approved(pr, &details.policies)
             && signals == Self::default();
+        signals.unlinked = details.work_items.is_empty();
         signals
     }
 }
@@ -193,15 +205,17 @@ pub enum Panel {
     MyWorkItems,
     OtherPrs,
     ReadyWorkItems,
+    Builds,
     Detail,
 }
 
-pub const LEFT_PANELS: [Panel; 5] = [
+pub const LEFT_PANELS: [Panel; 6] = [
     Panel::Inbox,
     Panel::MyPrs,
     Panel::MyWorkItems,
     Panel::OtherPrs,
     Panel::ReadyWorkItems,
+    Panel::Builds,
 ];
 
 impl Data {
@@ -212,6 +226,7 @@ impl Data {
             Panel::OtherPrs => self.shown_other_prs().map_or(0, |prs| prs.len()),
             Panel::MyWorkItems => self.my_work_items.as_ref().map_or(0, Vec::len),
             Panel::ReadyWorkItems => self.ready_work_items.as_ref().map_or(0, Vec::len),
+            Panel::Builds => self.builds.as_ref().map_or(0, Vec::len),
             Panel::Detail => 0,
         }
     }
@@ -252,7 +267,21 @@ impl Data {
             detail: Detail::WorkItem(mention.item.clone()),
             since: mention.date.clone(),
         });
-        let mut entries: Vec<InboxEntry> = mine.chain(others).chain(mentions).collect();
+        let builds = self
+            .builds
+            .iter()
+            .flatten()
+            .filter(|build| build.failed())
+            .map(|build| InboxEntry {
+                detail: Detail::Build(Box::new(build.clone())),
+                since: build
+                    .finish_time
+                    .clone()
+                    .or_else(|| build.queue_time.clone())
+                    .unwrap_or_default(),
+            });
+        let mut entries: Vec<InboxEntry> =
+            mine.chain(others).chain(mentions).chain(builds).collect();
         entries.sort_by(|a, b| a.since.cmp(&b.since));
         entries
     }
@@ -281,6 +310,12 @@ impl Data {
                 .find(|item| item.id == current.id)
                 .cloned()
                 .map(Detail::WorkItem),
+            Detail::Build(current) => self
+                .builds
+                .iter()
+                .flatten()
+                .find(|build| build.id == current.id)
+                .map(|build| Detail::Build(Box::new(build.clone()))),
         }
     }
 
@@ -310,7 +345,11 @@ impl Data {
             items.as_ref()?.get(index).cloned().map(Detail::WorkItem)
         };
         match panel {
-            Panel::Inbox => self.inbox().into_iter().nth(index).map(|entry| entry.detail),
+            Panel::Inbox => self
+                .inbox()
+                .into_iter()
+                .nth(index)
+                .map(|entry| entry.detail),
             Panel::MyPrs => pr(&self.my_prs),
             Panel::OtherPrs => self
                 .shown_other_prs()?
@@ -318,6 +357,11 @@ impl Data {
                 .map(|pr| Detail::PullRequest(Box::new((*pr).clone()))),
             Panel::MyWorkItems => item(&self.my_work_items),
             Panel::ReadyWorkItems => item(&self.ready_work_items),
+            Panel::Builds => self
+                .builds
+                .as_ref()?
+                .get(index)
+                .map(|build| Detail::Build(Box::new(build.clone()))),
             Panel::Detail => None,
         }
     }
@@ -375,6 +419,7 @@ impl Panel {
             Self::MyWorkItems => "My work items",
             Self::OtherPrs => "Others' PRs",
             Self::ReadyWorkItems => "Ready (sprint)",
+            Self::Builds => "My pipelines",
             Self::Detail => "Details",
         }
     }
@@ -383,7 +428,7 @@ impl Panel {
         match self {
             Self::MyPrs | Self::OtherPrs => Some(SortKind::PullRequests),
             Self::MyWorkItems | Self::ReadyWorkItems => Some(SortKind::WorkItems),
-            Self::Inbox | Self::Detail => None,
+            Self::Inbox | Self::Builds | Self::Detail => None,
         }
     }
 }
@@ -594,6 +639,7 @@ mod tests {
             threads: serde_json::from_value(threads).unwrap(),
             statuses: serde_json::from_value(statuses).unwrap(),
             policies: serde_json::from_value(policies).unwrap(),
+            work_items: vec![work_item(9, "Linked", "User Story", "Active")],
         }
     }
 

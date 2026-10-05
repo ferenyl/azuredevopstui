@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::{StreamExt, TryStreamExt, future, stream};
 use serde_json::json;
 
 use super::AdoClient;
 use super::models::{
-    CommentList, DetailComment, Iteration, ListResponse, Mention, Relation, SprintWorkItems,
-    WiqlResult, WorkItem, WorkItemComment, WorkItemDetails, WorkItemResponse,
+    CommentList, DetailComment, Iteration, ListResponse, Mention, PullRequest, Relation,
+    SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails, WorkItemResponse,
     WorkItemTypeCategory,
 };
 
@@ -22,6 +22,8 @@ const FIELDS: [&str; 9] = [
     "System.AssignedTo",
 ];
 const CHILD_LINK: &str = "System.LinkTypes.Hierarchy-Forward";
+const ARTIFACT_LINK: &str = "ArtifactLink";
+const PULL_REQUEST_ARTIFACT: &str = "vstfs:///Git/PullRequestId/";
 const HIDDEN_CATEGORY: &str = "Microsoft.HiddenCategory";
 const COMMENTS_API_VERSION: &str = "7.1-preview.4";
 const MAX_COMMENTS: &str = "10";
@@ -62,6 +64,8 @@ impl AdoClient {
         )?;
         Ok(SprintWorkItems {
             iteration_name: iteration.name,
+            start_date: iteration.attributes.start_date,
+            finish_date: iteration.attributes.finish_date,
             mine,
             ready,
         })
@@ -89,12 +93,15 @@ impl AdoClient {
             ),
             self.comments(organization, project, id),
         )?;
-        let children = self
-            .work_items_batch(organization, project, &child_ids(&item.relations))
-            .await?;
+        let child_ids = child_ids(&item.relations);
+        let (children, pull_requests) = tokio::join!(
+            self.work_items_batch(organization, project, &child_ids),
+            self.linked_pull_requests(organization, &item.relations),
+        );
         let fields = item.fields;
         Ok(WorkItemDetails {
-            children,
+            children: children?,
+            pull_requests,
             state: fields.state,
             board_column: fields.board_column,
             board_column_done: fields.board_column_done.unwrap_or(false),
@@ -115,6 +122,27 @@ impl AdoClient {
                 })
                 .collect(),
         })
+    }
+
+    /// Linked pull requests that could be loaded; others are skipped.
+    async fn linked_pull_requests(
+        &self,
+        organization: &str,
+        relations: &[Relation],
+    ) -> Vec<PullRequest> {
+        let links = pull_request_links(relations);
+        let results = future::join_all(links.iter().map(|(project, repository, id)| {
+            self.pull_request(organization, project, repository, *id)
+        }))
+        .await;
+        results
+            .into_iter()
+            .filter_map(|result| {
+                result
+                    .inspect_err(|err| tracing::warn!("failed to load linked PR: {err:#}"))
+                    .ok()
+            })
+            .collect()
     }
 
     /// Open work items recently mentioning the user in a comment they have not answered.
@@ -232,7 +260,7 @@ impl AdoClient {
     }
 
     /// Fetches the given work items, keeping the order of `ids`.
-    async fn work_items_batch(
+    pub(super) async fn work_items_batch(
         &self,
         organization: &str,
         project: &str,
@@ -272,6 +300,25 @@ fn unanswered_mention(newest_first: &[WorkItemComment], user_id: &str) -> Option
         .take_while(|comment| !comment.created_by.id.eq_ignore_ascii_case(&user_id))
         .find(|comment| comment.text.to_lowercase().contains(&user_id))
         .map(|comment| comment.created_date.clone())
+}
+
+/// Project id, repository id and PR id of linked pull requests.
+fn pull_request_links(relations: &[Relation]) -> Vec<(String, String, u32)> {
+    relations
+        .iter()
+        .filter(|relation| relation.rel == ARTIFACT_LINK)
+        .filter_map(|relation| {
+            let link = relation.url.strip_prefix(PULL_REQUEST_ARTIFACT)?;
+            let link = link.replace("%2F", "/").replace("%2f", "/");
+            let mut parts = link.split('/');
+            let (project, repository, id) = (parts.next()?, parts.next()?, parts.next()?);
+            Some((
+                project.to_string(),
+                repository.to_string(),
+                id.parse().ok()?,
+            ))
+        })
+        .collect()
 }
 
 fn child_ids(relations: &[Relation]) -> Vec<u32> {

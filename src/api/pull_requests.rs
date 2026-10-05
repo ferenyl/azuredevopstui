@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::AdoClient;
 use super::models::{
     Comment, Identity, ListResponse, PolicyEvaluation, PullRequest, PullRequestDetails,
-    PullRequestStatus, ReviewSignals, Thread,
+    PullRequestStatus, ResourceRef, ReviewSignals, Thread,
 };
 use crate::config::{MergeStrategy, OtherPrsFilter};
 use crate::images::markdown_images;
@@ -85,18 +85,57 @@ impl AdoClient {
         pr: &PullRequest,
     ) -> Result<PullRequestDetails> {
         let id = pr.pull_request_id.to_string();
-        let statuses_path = [&pr_path(organization, project, pr, &id)[..], &["statuses"]].concat();
-        let (threads, statuses, policies): (_, ListResponse<PullRequestStatus>, _) = tokio::try_join!(
+        let pr_path = pr_path(organization, project, pr, &id);
+        let statuses_path = [&pr_path[..], &["statuses"]].concat();
+        let work_items_path = [&pr_path[..], &["workitems"]].concat();
+        let (threads, statuses, policies, work_items): (
+            _,
+            ListResponse<PullRequestStatus>,
+            _,
+            ListResponse<ResourceRef>,
+        ) = tokio::try_join!(
             self.threads(organization, project, pr),
             self.get(&self.urls.dev_azure, &statuses_path, &[]),
             self.policy_evaluations(organization, project, pr),
+            self.get(&self.urls.dev_azure, &work_items_path, &[]),
         )?;
+        let ids: Vec<u32> = work_items
+            .value
+            .iter()
+            .filter_map(|item| item.id.parse().ok())
+            .collect();
 
         Ok(PullRequestDetails {
             threads: visible_threads(threads),
             statuses: latest_statuses(statuses.value),
             policies,
+            work_items: self.work_items_batch(organization, project, &ids).await?,
         })
+    }
+
+    /// A pull request by its repository, in any state.
+    pub(super) async fn pull_request(
+        &self,
+        organization: &str,
+        project: &str,
+        repository: &str,
+        id: u32,
+    ) -> Result<PullRequest> {
+        self.get(
+            &self.urls.dev_azure,
+            &[
+                organization,
+                project,
+                "_apis",
+                "git",
+                "repositories",
+                repository,
+                "pullRequests",
+                &id.to_string(),
+            ],
+            &[],
+        )
+        .await
     }
 
     /// Merge strategies the target branch policies allow.
@@ -556,6 +595,11 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
                 { "status": "active", "comments": [comment("Fix this", "text", false)] }
             ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("{pr_path}/workitems")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
         Mock::given(method("GET"))

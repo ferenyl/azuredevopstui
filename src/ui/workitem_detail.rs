@@ -94,6 +94,30 @@ fn overview(
         lines.push(field(app, "Tags", tags));
     }
 
+    if !details.pull_requests.is_empty() {
+        lines.push(Line::default());
+        lines.push(heading(app, "Pull requests", width));
+    }
+    for pr in &details.pull_requests {
+        let theme = &app.theme;
+        let color = match pr.status.as_str() {
+            "completed" => theme.pr_approved,
+            "abandoned" => theme.muted,
+            _ => theme.build_running,
+        };
+        let mut spans = vec![
+            Span::styled(format!("  !{} ", pr.pull_request_id), muted),
+            Span::raw(pr.title.clone()),
+            Span::raw("  "),
+            badge(&pr.status, color),
+        ];
+        if pr.is_draft {
+            spans.push(Span::styled(" · draft", muted));
+        }
+        spans.push(Span::styled(format!(" · {}", pr.repository.name), muted));
+        lines.push(Line::from(spans));
+    }
+
     for (title, text) in [
         ("Description", &details.description),
         ("Repro steps", &details.repro_steps),

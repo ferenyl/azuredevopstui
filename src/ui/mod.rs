@@ -1,6 +1,8 @@
+mod build_detail;
 mod popup;
 mod pr_detail;
 mod setup;
+mod sprint;
 mod toolbar;
 mod workitem_detail;
 
@@ -101,12 +103,25 @@ fn render_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
     };
     let items = panel_items(app, panel);
     let mut title = match (panel, &app.data.sprint_name, &app.detail) {
-        (Panel::ReadyWorkItems, Some(sprint), _) => format!(" Ready – {sprint}"),
+        (Panel::ReadyWorkItems, Some(sprint), _) => {
+            match app
+                .data
+                .sprint_finish
+                .as_deref()
+                .and_then(sprint::work_days_left)
+            {
+                Some(days) => format!(" Ready – {sprint} · {days}d left"),
+                None => format!(" Ready – {sprint}"),
+            }
+        }
         (Panel::Detail, _, Some(Detail::PullRequest(pr))) => {
             format!(" !{} {}", pr.pull_request_id, pr.title)
         }
         (Panel::Detail, _, Some(Detail::WorkItem(item))) => {
             format!(" #{} {}", item.id, item.fields.title)
+        }
+        (Panel::Detail, _, Some(Detail::Build(build))) => {
+            format!(" {} {}", build.definition.name, build.build_number)
         }
         _ => format!(" {}", panel.title()),
     };
@@ -162,10 +177,7 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let Some(detail) = &app.detail else {
-        frame.render_widget(
-            Paragraph::new(Line::styled("Select an item and press enter", muted)),
-            inner,
-        );
+        frame.render_widget(Paragraph::new(sprint::overview(app, inner.width)), inner);
         return;
     };
 
@@ -210,6 +222,7 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
         (Detail::WorkItem(item), _) => {
             workitem_detail::lines(app, item, None, app.detail_tab, width)
         }
+        (Detail::Build(build), _) => build_detail::lines(app, build),
     };
     let (lines, slots) = place_images(app, lines, width);
     frame.render_widget(
@@ -449,6 +462,12 @@ fn panel_items(app: &App, panel: Panel) -> Option<Vec<Line<'static>>> {
             .ready_work_items
             .as_ref()
             .map(|items| items.iter().map(|item| work_item_line(app, item)).collect()),
+        Panel::Builds => data.builds.as_ref().map(|builds| {
+            builds
+                .iter()
+                .map(|build| build_detail::line(app, build))
+                .collect()
+        }),
         Panel::Detail => None,
     }
 }
@@ -550,14 +569,18 @@ fn inbox_line(app: &App, entry: &InboxEntry) -> Line<'static> {
     let theme = &app.theme;
     let muted = Style::new().fg(theme.muted);
     let mut spans = vec![if app.data.is_new(&entry.detail) {
-        marker("•".into(), theme.title)
+        marker("• ".into(), theme.title)
     } else {
-        Span::raw("  ")
+        Span::raw("   ")
     }];
     match &entry.detail {
         Detail::PullRequest(pr) => {
-            spans.push(Span::styled(format!("!{} ", pr.pull_request_id), muted));
-            spans.extend(pr_markers(app, pr));
+            spans.push(Span::styled(format!("!{}  ", pr.pull_request_id), muted));
+            spans.extend(
+                pr_markers(app, pr)
+                    .into_iter()
+                    .map(|span| Span::styled(format!("{} ", span.content), span.style)),
+            );
             spans.push(Span::raw(pr.title.clone()));
         }
         Detail::WorkItem(item) => {
@@ -565,8 +588,11 @@ fn inbox_line(app: &App, entry: &InboxEntry) -> Line<'static> {
                 format!("#{} ", item.id),
                 Style::new().fg(type_color(app, &item.fields.work_item_type)),
             ));
-            spans.push(marker("@".into(), theme.title));
+            spans.push(marker("@ ".into(), theme.title));
             spans.push(Span::raw(item.fields.title.clone()));
+        }
+        Detail::Build(build) => {
+            spans.extend(build_detail::line(app, build).spans);
         }
     }
     spans.push(Span::styled(format!("  {}", age(&entry.since)), muted));
@@ -605,6 +631,9 @@ fn signal_spans(app: &App, signals: &Signals) -> Vec<Span<'static>> {
     }
     if signals.conflicts {
         push("⇄".into(), theme.error);
+    }
+    if signals.unlinked {
+        push("∅".into(), theme.pr_waiting);
     }
     if signals.ready {
         push("✔".into(), theme.pr_approved);
@@ -712,6 +741,7 @@ mod tests {
                 }))
                 .unwrap(),
             ],
+            work_items: Vec::new(),
         }
     }
 
@@ -733,6 +763,7 @@ mod tests {
                 work_item(21, "Deploy", "Release Task", "New"),
                 work_item(22, "Write UI", "Task", "Closed"),
             ],
+            pull_requests: Vec::new(),
         }
     }
 
@@ -961,6 +992,7 @@ mod tests {
                 rejected: true,
                 failed_checks: true,
                 conflicts: true,
+                unlinked: false,
                 ready: false,
             },
         );

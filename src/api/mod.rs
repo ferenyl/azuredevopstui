@@ -1,4 +1,5 @@
 mod boards;
+mod builds;
 mod models;
 mod projects;
 mod pull_requests;
@@ -6,8 +7,8 @@ mod work_items;
 
 pub use boards::ColumnTarget;
 pub use models::{
-    Board, CurrentUser, Mention, PullRequest, PullRequestDetails, ReviewSignals, SprintWorkItems,
-    Thread, WorkItem, WorkItemDetails,
+    Board, Build, CurrentUser, Mention, PullRequest, PullRequestDetails, ReviewSignals,
+    SprintWorkItems, Thread, WorkItem, WorkItemDetails,
 };
 pub use pull_requests::{is_approved, is_reviewer_policy};
 
@@ -237,6 +238,13 @@ pub fn pull_request_url(organization: &str, project: &str, repository: &str, id:
 
 pub fn work_item_url(organization: &str, project: &str, id: u32) -> Url {
     web_url(&[organization, project, "_workitems", "edit", &id.to_string()])
+}
+
+pub fn build_results_url(organization: &str, project: &str, id: u32) -> Url {
+    let mut url = web_url(&[organization, project, "_build", "results"]);
+    url.query_pairs_mut()
+        .append_pair("buildId", &id.to_string());
+    url
 }
 
 fn web_url(segments: &[&str]) -> Url {

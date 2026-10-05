@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::api::{
-    Board, CurrentUser, Mention, PullRequest, PullRequestDetails, SprintWorkItems, WorkItem,
+    Board, Build, CurrentUser, Mention, PullRequest, PullRequestDetails, SprintWorkItems, WorkItem,
     WorkItemDetails,
 };
 use crate::auth::Auth;
@@ -26,6 +26,8 @@ pub enum Message {
     OtherPullRequests(Result<Vec<PullRequest>>),
     SprintWorkItems(Result<SprintWorkItems>),
     Mentions(Result<Vec<Mention>>),
+    Builds(Result<Vec<Build>>),
+    TeamBoard(Result<Board>),
     PullRequestDetails {
         id: u32,
         result: Result<PullRequestDetails>,

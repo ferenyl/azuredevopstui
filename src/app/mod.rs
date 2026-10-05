@@ -188,8 +188,16 @@ impl App {
                     Action::Help,
                     Action::Quit,
                 ],
-                Some(Detail::WorkItem(_)) => &[
+                Some(Detail::Build(_)) => &[
                     Action::Down,
+                    Action::FocusRight,
+                    Action::Confirm,
+                    Action::OpenInBrowser,
+                    Action::Reload,
+                    Action::Help,
+                    Action::Quit,
+                ],
+                Some(Detail::WorkItem(_)) => &[
                     Action::FocusRight,
                     Action::NextTab,
                     Action::Confirm,
@@ -236,6 +244,9 @@ impl App {
             Detail::WorkItem(item) => {
                 api::work_item_url(&config.organization, &config.project, item.id)
             }
+            Detail::Build(build) => {
+                api::build_results_url(&config.organization, &config.project, build.id)
+            }
         };
         let result = match &config.browser_command {
             Some(command) => {
@@ -263,7 +274,7 @@ impl App {
     fn current_work_item(&self) -> Option<WorkItem> {
         match self.current_item()? {
             Detail::WorkItem(item) => Some(item),
-            Detail::PullRequest(_) => None,
+            Detail::PullRequest(_) | Detail::Build(_) => None,
         }
     }
 
@@ -355,6 +366,15 @@ impl App {
             selection,
             unassign,
         }));
+    }
+
+    /// Column names of the team board, empty until it is loaded.
+    pub fn board_columns(&self) -> Vec<String> {
+        self.board
+            .iter()
+            .flat_map(|board| &board.columns)
+            .map(|column| column.name.clone())
+            .collect()
     }
 
     /// My PR with nothing blocking the merge.
@@ -463,6 +483,20 @@ impl App {
             Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
             None => {}
         }
+    }
+
+    /// Board columns, used for the sprint overview and moving items.
+    fn load_board(&self) {
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        self.spawn(async move {
+            Message::TeamBoard(
+                client
+                    .board(&config.organization, &config.project, &config.team)
+                    .await,
+            )
+        });
     }
 
     fn load_work_item_types(&mut self) {
@@ -674,6 +708,11 @@ impl App {
 
         let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
         self.spawn(async move {
+            Message::Builds(c.my_builds(&cfg.organization, &cfg.project, &user_id).await)
+        });
+
+        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
+        self.spawn(async move {
             Message::Mentions(
                 c.mentioned_work_items(&cfg.organization, &cfg.project, &cfg.team, &user_id)
                     .await,
@@ -862,6 +901,7 @@ impl App {
             Message::Connected(Ok(user)) => {
                 self.user = Some(user);
                 self.screen = Screen::Main;
+                self.load_board();
                 self.refresh();
             }
             Message::MyPullRequests(result) => match result {
@@ -885,11 +925,21 @@ impl App {
             Message::SprintWorkItems(result) => match result {
                 Ok(sprint) => {
                     self.data.sprint_name = Some(sprint.iteration_name);
+                    self.data.sprint_start = sprint.start_date;
+                    self.data.sprint_finish = sprint.finish_date;
                     self.data.my_work_items = Some(sprint.mine);
                     self.data.ready_work_items = Some(sprint.ready);
                     self.last_updated = Some(Instant::now());
                 }
                 Err(err) => self.report_error(err),
+            },
+            Message::Builds(result) => match result {
+                Ok(builds) => self.data.builds = Some(builds),
+                Err(err) => self.report_error(err),
+            },
+            Message::TeamBoard(result) => match result {
+                Ok(board) => self.board = Some(board),
+                Err(err) => tracing::warn!("failed to load board: {err:#}"),
             },
             Message::Mentions(result) => match result {
                 Ok(mentions) => self.data.mentions = Some(mentions),
@@ -1140,6 +1190,16 @@ impl App {
                     Message::WorkItemDetails { id, result }
                 });
             }
+            Detail::Build(_) => {}
+        }
+    }
+
+    /// Back to the sprint overview.
+    fn close_detail(&mut self) {
+        self.detail = None;
+        self.detail_info = None;
+        if self.focus == Panel::Detail {
+            self.focus = self.last_left;
         }
     }
 
@@ -1212,7 +1272,7 @@ impl App {
                     cancelable: true, ..
                 }) => self.screen = Screen::Main,
                 Screen::Setup(_) => self.should_quit = true,
-                Screen::Main => {}
+                Screen::Main => self.close_detail(),
             },
             Action::Help => self.show_help = matches!(self.screen, Screen::Main),
             Action::ChangeToken => match self.screen {
@@ -1439,7 +1499,7 @@ mod tests {
         for _ in 0..5 {
             ctrl(&mut app, 'j');
         }
-        assert_eq!(app.focus, Panel::ReadyWorkItems);
+        assert_eq!(app.focus, Panel::Builds);
     }
 
     #[test]
@@ -1573,6 +1633,7 @@ mod tests {
             threads: Vec::new(),
             statuses: Vec::new(),
             policies: Vec::new(),
+            work_items: Vec::new(),
         };
 
         app.handle_message(Message::PullRequestDetails {
@@ -1864,6 +1925,7 @@ mod tests {
             .unwrap(),
             statuses: Vec::new(),
             policies: Vec::new(),
+            work_items: Vec::new(),
         };
 
         app.handle_message(Message::PullRequestSignals {

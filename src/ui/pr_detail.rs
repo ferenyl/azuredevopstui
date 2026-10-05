@@ -1,7 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{badge, empty, field, heading, loading, short_date, wrap};
+use super::{badge, empty, field, heading, loading, short_date, state_color, type_color, wrap};
 use crate::api::{PullRequest, PullRequestDetails, Thread};
 use crate::app::{App, DetailTab};
 
@@ -13,14 +13,19 @@ pub fn lines(
     width: u16,
 ) -> Vec<Line<'static>> {
     match (tab, details) {
-        (DetailTab::Overview, _) => overview(app, pr, width),
+        (DetailTab::Overview, _) => overview(app, pr, details, width),
         (_, None) => loading(app),
         (DetailTab::Comments, Some(details)) => comments(app, details, width),
         (_, Some(details)) => checks(app, details, width),
     }
 }
 
-fn overview(app: &App, pr: &PullRequest, width: u16) -> Vec<Line<'static>> {
+fn overview(
+    app: &App,
+    pr: &PullRequest,
+    details: Option<&PullRequestDetails>,
+    width: u16,
+) -> Vec<Line<'static>> {
     let theme = &app.theme;
     let muted = Style::new().fg(theme.muted);
     let status_color = match pr.status.as_str() {
@@ -90,6 +95,29 @@ fn overview(app: &App, pr: &PullRequest, width: u16) -> Vec<Line<'static>> {
             spans.push(Span::styled("  required", muted));
         }
         lines.push(Line::from(spans));
+    }
+
+    if let Some(details) = details {
+        lines.push(Line::default());
+        lines.push(heading(app, "Work items", width));
+        if details.work_items.is_empty() {
+            lines.push(Line::styled(
+                "  ∅ no linked work items",
+                Style::new().fg(theme.pr_waiting),
+            ));
+        }
+        for item in &details.work_items {
+            let fields = &item.fields;
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  #{} ", item.id),
+                    Style::new().fg(type_color(app, &fields.work_item_type)),
+                ),
+                Span::raw(fields.title.clone()),
+                Span::raw("  "),
+                badge(&fields.state, state_color(app, &fields.state)),
+            ]));
+        }
     }
 
     if let Some(description) = pr.description.as_deref().filter(|d| !d.trim().is_empty()) {
