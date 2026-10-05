@@ -2,7 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::{badge, empty, field, heading, loading, short_date, wrap};
-use crate::api::{PullRequest, PullRequestDetails};
+use crate::api::{PullRequest, PullRequestDetails, Thread};
 use crate::app::{App, DetailTab};
 
 pub fn lines(
@@ -106,55 +106,74 @@ fn comments(app: &App, details: &PullRequestDetails, width: u16) -> Vec<Line<'st
     if details.threads.is_empty() {
         return empty(app, "No comments");
     }
+    let latest = |thread: &&Thread| {
+        thread
+            .comments
+            .iter()
+            .filter_map(|comment| comment.published_date.clone())
+            .max()
+    };
+    let (mut unresolved, mut resolved): (Vec<&Thread>, Vec<&Thread>) = details
+        .threads
+        .iter()
+        .partition(|thread| matches!(thread.status.as_deref(), None | Some("active" | "pending")));
+    unresolved.sort_by_key(|thread| std::cmp::Reverse(latest(thread)));
+    resolved.sort_by_key(|thread| std::cmp::Reverse(latest(thread)));
     let bar = Span::styled("  │ ", Style::new().fg(theme.border));
     let mut lines = Vec::new();
-    for thread in &details.threads {
-        let status = thread.status.as_deref().unwrap_or("-");
-        let color = match status {
-            "active" | "pending" => theme.pr_waiting,
-            "fixed" | "closed" | "byDesign" => theme.pr_approved,
-            _ => theme.muted,
-        };
-        let file = thread
-            .thread_context
-            .as_ref()
-            .and_then(|context| context.file_path.clone())
-            .unwrap_or_default();
-        lines.push(Line::from(vec![
-            badge(status, color),
-            Span::styled(format!("  {file}"), muted),
-        ]));
-        for (index, comment) in thread.comments.iter().enumerate() {
-            if index > 0 {
-                lines.push(Line::from(bar.clone()));
-            }
-            lines.push(Line::from(vec![
-                bar.clone(),
-                Span::styled(
-                    comment.author.display_name.clone(),
-                    Style::new()
-                        .fg(theme.comment_author)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!(
-                        " · {}",
-                        comment
-                            .published_date
-                            .as_deref()
-                            .map(short_date)
-                            .unwrap_or_default()
-                    ),
-                    muted,
-                ),
-            ]));
-            lines.extend(wrap(
-                comment.content.as_deref().unwrap_or_default(),
-                width,
-                bar.clone(),
-            ));
+    for (title, threads) in [("Not resolved", unresolved), ("Resolved", resolved)] {
+        if threads.is_empty() {
+            continue;
         }
-        lines.push(Line::default());
+        lines.push(heading(app, title, width));
+        for thread in threads {
+            let status = thread.status.as_deref().unwrap_or("-");
+            let color = match status {
+                "active" | "pending" => theme.pr_waiting,
+                "fixed" | "closed" | "byDesign" => theme.pr_approved,
+                _ => theme.muted,
+            };
+            let file = thread
+                .thread_context
+                .as_ref()
+                .and_then(|context| context.file_path.clone())
+                .unwrap_or_default();
+            lines.push(Line::from(vec![
+                badge(status, color),
+                Span::styled(format!("  {file}"), muted),
+            ]));
+            for (index, comment) in thread.comments.iter().enumerate() {
+                if index > 0 {
+                    lines.push(Line::from(bar.clone()));
+                }
+                lines.push(Line::from(vec![
+                    bar.clone(),
+                    Span::styled(
+                        comment.author.display_name.clone(),
+                        Style::new()
+                            .fg(theme.comment_author)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(
+                            " · {}",
+                            comment
+                                .published_date
+                                .as_deref()
+                                .map(short_date)
+                                .unwrap_or_default()
+                        ),
+                        muted,
+                    ),
+                ]));
+                lines.extend(wrap(
+                    comment.content.as_deref().unwrap_or_default(),
+                    width,
+                    bar.clone(),
+                ));
+            }
+            lines.push(Line::default());
+        }
     }
     lines
 }

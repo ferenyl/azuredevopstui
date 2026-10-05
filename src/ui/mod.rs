@@ -425,10 +425,10 @@ fn panel_items(app: &App, panel: Panel) -> Option<Vec<Line<'static>>> {
         Panel::MyPrs => data
             .my_prs
             .as_ref()
-            .map(|prs| prs.iter().map(|pr| pr_line(app, pr, false)).collect()),
+            .map(|prs| pr_lines(app, prs.iter(), false)),
         Panel::OtherPrs => data
             .shown_other_prs()
-            .map(|prs| prs.into_iter().map(|pr| pr_line(app, pr, true)).collect()),
+            .map(|prs| pr_lines(app, prs.into_iter(), true)),
         Panel::MyWorkItems => data
             .my_work_items
             .as_ref()
@@ -441,11 +441,59 @@ fn panel_items(app: &App, panel: Panel) -> Option<Vec<Line<'static>>> {
     }
 }
 
-fn pr_line(app: &App, pr: &PullRequest, show_author: bool) -> Line<'static> {
+/// PR lines with the id and signal columns padded to the same width.
+fn pr_lines<'a>(
+    app: &App,
+    prs: impl Iterator<Item = &'a PullRequest>,
+    show_author: bool,
+) -> Vec<Line<'static>> {
+    let rows: Vec<_> = prs
+        .map(|pr| {
+            let signals = app
+                .data
+                .pr_signals
+                .get(&pr.pull_request_id)
+                .map(|signals| signal_spans(app, signals))
+                .unwrap_or_default();
+            (pr, signals)
+        })
+        .collect();
+    let width = |spans: &[Span]| spans.iter().map(|span| span.content.chars().count()).sum();
+    let id_width = rows
+        .iter()
+        .map(|(pr, _)| pr.pull_request_id.to_string().len())
+        .max()
+        .unwrap_or(0);
+    let signal_width = rows
+        .iter()
+        .map(|(_, signals)| width(signals))
+        .max()
+        .unwrap_or(0);
+    rows.into_iter()
+        .map(|(pr, signals)| {
+            let padding = signal_width - width(&signals);
+            pr_line(app, pr, signals, id_width, padding, show_author)
+        })
+        .collect()
+}
+
+fn pr_line(
+    app: &App,
+    pr: &PullRequest,
+    signals: Vec<Span<'static>>,
+    id_width: usize,
+    padding: usize,
+    show_author: bool,
+) -> Line<'static> {
     let muted = Style::new().fg(app.theme.muted);
-    let mut spans = vec![Span::styled(format!("!{} ", pr.pull_request_id), muted)];
-    if let Some(signals) = app.data.pr_signals.get(&pr.pull_request_id) {
-        spans.extend(signal_spans(app, signals));
+    let mut spans = vec![Span::styled(
+        format!("!{:<id_width$}  ", pr.pull_request_id),
+        muted,
+    )];
+    let has_column = padding > 0 || !signals.is_empty();
+    spans.extend(signals);
+    if has_column {
+        spans.push(Span::raw(" ".repeat(padding + 1)));
     }
     spans.push(Span::raw(pr.title.clone()));
     if pr.is_draft {
@@ -483,6 +531,9 @@ fn signal_spans(app: &App, signals: &Signals) -> Vec<Span<'static>> {
     }
     if signals.conflicts {
         push("⇄".into(), theme.error);
+    }
+    if signals.ready {
+        push("✔".into(), theme.pr_approved);
     }
     spans
 }
@@ -683,7 +734,7 @@ mod tests {
         assert!(screen.contains("My work items (1) · priority"));
         assert!(screen.contains("Others' PRs (0)"));
         assert!(screen.contains("Ready – Sprint 41"));
-        assert!(screen.contains("!1 Add order filter"));
+        assert!(screen.contains("!1  Add order filter"));
         assert!(screen.contains("#10 Order list"));
         assert!(screen.contains("Loading…"));
         assert!(screen.contains("Select an item and press enter"));
@@ -836,12 +887,27 @@ mod tests {
                 rejected: true,
                 failed_checks: true,
                 conflicts: true,
+                ready: false,
             },
         );
 
         let screen = screen(&app);
 
-        assert!(screen.contains("!1 ✎2 ◔ ⊘ ✖ ⇄ Add order filter"));
+        assert!(screen.contains("!1  ✎2 ◔ ⊘ ✖ ⇄  Add order filter"));
+    }
+
+    #[test]
+    fn ready_pull_request_shows_check() {
+        let mut app = main_app();
+        app.data.pr_signals.insert(
+            1,
+            Signals {
+                ready: true,
+                ..Signals::default()
+            },
+        );
+
+        assert!(screen(&app).contains("!1  ✔  Add order filter"));
     }
 
     #[test]

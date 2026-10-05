@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use super::setup::Selection;
-use crate::api::{ColumnTarget, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails};
+use crate::api::{
+    ColumnTarget, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails, is_approved,
+    is_reviewer_policy,
+};
 use crate::config::{PrSort, SortConfig, WorkItemSort};
 
 #[derive(Clone)]
@@ -117,19 +120,22 @@ pub struct Signals {
     pub rejected: bool,
     pub failed_checks: bool,
     pub conflicts: bool,
+    /// Approved and nothing blocks the merge.
+    pub ready: bool,
 }
 
 impl Signals {
     pub fn new(pr: &PullRequest, details: &PullRequestDetails) -> Self {
         let failed_policy = details.policies.iter().any(|policy| {
             policy.configuration.is_blocking
+                && !is_reviewer_policy(policy)
                 && matches!(policy.status.as_str(), "rejected" | "broken")
         });
         let failed_status = details
             .statuses
             .iter()
             .any(|status| matches!(status.state.as_deref(), Some("failed" | "error")));
-        Self {
+        let mut signals = Self {
             unresolved: details
                 .threads
                 .iter()
@@ -139,7 +145,18 @@ impl Signals {
             rejected: pr.reviewers.iter().any(|reviewer| reviewer.vote == -10),
             failed_checks: failed_policy || failed_status,
             conflicts: matches!(pr.merge_status.as_deref(), Some("conflicts" | "failure")),
-        }
+            ready: false,
+        };
+        let blocking_approved = details
+            .policies
+            .iter()
+            .filter(|policy| policy.configuration.is_blocking)
+            .all(|policy| policy.status == "approved");
+        signals.ready = !pr.is_draft
+            && blocking_approved
+            && is_approved(pr, &details.policies)
+            && signals == Self::default();
+        signals
     }
 }
 
@@ -535,7 +552,27 @@ mod tests {
             json!([policy("approved", true), policy("rejected", false)]),
         );
 
-        assert_eq!(Signals::new(&pr, &details), Signals::default());
+        assert_eq!(
+            Signals::new(&pr, &details),
+            Signals {
+                ready: true,
+                ..Signals::default()
+            }
+        );
+    }
+
+    #[test]
+    fn draft_or_unapproved_pull_request_is_not_ready() {
+        let mut draft = pull_request(1, "PR", "me", "2026-10-01");
+        draft.is_draft = true;
+        let mut unapproved = pull_request(2, "PR", "me", "2026-10-01");
+        unapproved.reviewers[0].vote = 0;
+        let pending_policy = details(json!([]), json!([]), json!([policy("queued", true)]));
+        let no_details = details(json!([]), json!([]), json!([]));
+
+        assert!(!Signals::new(&draft, &no_details).ready);
+        assert!(!Signals::new(&unapproved, &no_details).ready);
+        assert!(!Signals::new(&pull_request(3, "PR", "me", "2026-10-01"), &pending_policy).ready);
     }
 
     #[test]

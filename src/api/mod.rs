@@ -6,8 +6,10 @@ mod work_items;
 
 pub use boards::ColumnTarget;
 pub use models::{
-    Board, CurrentUser, PullRequest, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
+    Board, CurrentUser, PullRequest, PullRequestDetails, SprintWorkItems, Thread, WorkItem,
+    WorkItemDetails,
 };
+pub use pull_requests::{is_approved, is_reviewer_policy};
 
 use std::fmt;
 

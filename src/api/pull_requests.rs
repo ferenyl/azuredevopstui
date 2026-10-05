@@ -177,18 +177,19 @@ fn without_own(mut pull_requests: Vec<PullRequest>, user_id: &str) -> Vec<PullRe
 }
 
 /// Blocking reviewer policies are all approved, or without such policies, someone approved.
-fn is_approved(pr: &PullRequest, policies: &[PolicyEvaluation]) -> bool {
+pub fn is_approved(pr: &PullRequest, policies: &[PolicyEvaluation]) -> bool {
     let mut reviewer_policies = policies
         .iter()
-        .filter(|policy| {
-            policy.configuration.is_blocking
-                && REVIEWER_POLICIES.contains(&policy.configuration.kind.display_name.as_str())
-        })
+        .filter(|policy| policy.configuration.is_blocking && is_reviewer_policy(policy))
         .peekable();
     if reviewer_policies.peek().is_none() {
         return pr.reviewers.iter().any(|reviewer| reviewer.vote >= 5);
     }
     reviewer_policies.all(|policy| policy.status == "approved")
+}
+
+pub fn is_reviewer_policy(policy: &PolicyEvaluation) -> bool {
+    REVIEWER_POLICIES.contains(&policy.configuration.kind.display_name.as_str())
 }
 
 /// Threads with their deleted and system comments removed; empty threads are dropped.
