@@ -23,10 +23,11 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 
 ## Features
 
-- **Four lists** on the left:
+- **Five lists** on the left:
+  - **Inbox**: everything that waits on you, oldest first: your PRs with markers, others' PRs that need your vote or answer, and work items where someone mentioned you. Entries that showed up since the first refresh get a `•` until you open them.
   - **My PRs**: active pull requests you created, across all repositories in the project, marked with what needs your attention. See [PR markers](#pr-markers).
   - **My work items**: open items assigned to you in the current sprint, limited to the chosen work item types.
-  - **Others' PRs**: active pull requests created by someone else. You can filter them by reviewer or creator.
+  - **Others' PRs**: active pull requests created by someone else, marked with what waits on you. See [Review markers](#review-markers). You can filter them by reviewer or creator.
   - **Ready**: items in the current sprint that sit in your *ready* board column and are not assigned to you.
 - **Detail panel** with tabs:
   - **Pull request**:
@@ -43,6 +44,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - Move a work item to another board column. The columns come from your team's board, and split columns (for example *Active → Doing / Done*) are supported.
   - Assign a work item to yourself.
   - Unassign yourself from a work item and pick its new board column in the same step.
+  - Complete one of your PRs once it shows `✔`. You pick a merge strategy among the ones the branch policies allow, and the last one you used is preselected. `esc` cancels without completing.
 - **Sorting** per list type. The choice is saved to the config.
 - **Work item type filter**: pick which types (User Story, Bug, Feature, …) the work item lists show. The list of types comes from the project, and the choice is saved to the config.
 - **Auto refresh** at a configurable interval. The open detail view refreshes too.
@@ -405,6 +407,7 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
+| `c` | Complete your ready PR: pick the merge strategy, then `enter`. `esc` cancels and nothing is completed |
 | `o` | Open the PR or work item in the browser |
 | `r` | Reload everything |
 | `t` | Enter a new PAT |
@@ -426,7 +429,22 @@ Each pull request in *My PRs* shows markers right after its ID when something ne
 | `✖` | A blocking policy failed, for example the build, or a status check failed |
 | `⇄` | Merge conflicts |
 
+| `✔` | Approved and nothing blocks the merge; press `c` to complete |
+
 No marker means nothing is waiting on you. The markers are refreshed together with the lists.
+
+## Review markers
+
+Others' PRs show what waits on you:
+
+| Marker | Meaning |
+|---|---|
+| `◉` | You are a reviewer and have not voted |
+| `↻` | New commits were pushed after you voted |
+| `↩2` | Unresolved threads you started where someone else wrote last, here 2 |
+| `@1` | Unresolved threads that mention you and that you have not answered, here 1 |
+
+Work items in the inbox are marked `@` when a comment from the last 30 days mentions you and you have not commented after it.
 
 ## Images
 

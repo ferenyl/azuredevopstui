@@ -31,6 +31,9 @@ pub struct Config {
     pub work_item_types: Vec<String>,
     #[serde(default)]
     pub sort: SortConfig,
+    /// Last merge strategy used to complete a pull request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_strategy: Option<MergeStrategy>,
     /// Detect terminal graphics and draw images. Off skips the terminal query entirely.
     #[serde(default = "default_true")]
     pub show_images: bool,
@@ -151,6 +154,34 @@ impl WorkItemSort {
     }
 }
 
+/// Serialized names match the Azure DevOps API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeStrategy {
+    NoFastForward,
+    Squash,
+    Rebase,
+    RebaseMerge,
+}
+
+impl MergeStrategy {
+    pub const ALL: [Self; 4] = [
+        Self::NoFastForward,
+        Self::Squash,
+        Self::Rebase,
+        Self::RebaseMerge,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NoFastForward => "Merge (no fast-forward)",
+            Self::Squash => "Squash commit",
+            Self::Rebase => "Rebase and fast-forward",
+            Self::RebaseMerge => "Semi-linear merge",
+        }
+    }
+}
+
 impl Config {
     pub fn new(organization: String, project: String, team: String) -> Self {
         Self {
@@ -164,6 +195,7 @@ impl Config {
             ready_column: None,
             work_item_types: Vec::new(),
             sort: SortConfig::default(),
+            merge_strategy: None,
             show_images: true,
             colors: Theme::default(),
         }

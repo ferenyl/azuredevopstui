@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
+use serde_json::Value;
+
+use crate::config::MergeStrategy;
 
 #[derive(Deserialize)]
 pub struct ListResponse<T> {
@@ -144,14 +147,41 @@ pub struct PullRequest {
     pub description: Option<String>,
     #[serde(default)]
     pub reviewers: Vec<Reviewer>,
+    pub last_merge_source_commit: Option<CommitRef>,
     /// Reviewer policies met; only set for others' PRs.
     #[serde(skip)]
     pub approved: bool,
+    /// What the user needs to do; only set for others' PRs.
+    #[serde(skip)]
+    pub review: ReviewSignals,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitRef {
+    pub commit_id: String,
+}
+
+/// What waits on the user in someone else's pull request.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReviewSignals {
+    /// The user is a reviewer and has not voted.
+    pub needs_vote: bool,
+    /// New commits were pushed after the user voted.
+    pub changed_since_vote: bool,
+    /// Unresolved threads started by the user where someone else wrote last.
+    pub replies: usize,
+    /// Unresolved threads mentioning the user without a later answer from them.
+    pub mentions: usize,
+    /// When the oldest of the above started waiting; `None` when nothing waits.
+    pub since: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Reviewer {
+    #[serde(default)]
+    pub id: String,
     pub display_name: String,
     pub vote: i32,
     pub is_required: Option<bool>,
@@ -171,6 +201,18 @@ pub struct Thread {
     pub is_deleted: bool,
     pub thread_context: Option<ThreadContext>,
     pub comments: Vec<Comment>,
+    pub properties: Option<Value>,
+}
+
+impl Thread {
+    /// System thread kind such as `VoteUpdate` or `RefUpdate`.
+    pub fn kind(&self) -> Option<&str> {
+        self.properties
+            .as_ref()?
+            .get("CodeReviewThreadType")?
+            .get("$value")?
+            .as_str()
+    }
 }
 
 #[derive(Deserialize)]
@@ -229,6 +271,25 @@ pub struct PolicyType {
 #[serde(rename_all = "camelCase")]
 pub struct PolicySettings {
     pub display_name: Option<String>,
+    pub allow_no_fast_forward: Option<bool>,
+    pub allow_squash: Option<bool>,
+    pub allow_rebase: Option<bool>,
+    pub allow_rebase_merge: Option<bool>,
+    /// Older squash-only setting.
+    pub use_squash_merge: Option<bool>,
+}
+
+impl PolicySettings {
+    /// For a merge strategy policy: whether it allows `strategy`.
+    pub fn allows(&self, strategy: MergeStrategy) -> bool {
+        let allowed = match strategy {
+            MergeStrategy::NoFastForward => self.allow_no_fast_forward,
+            MergeStrategy::Squash => self.allow_squash.or(self.use_squash_merge),
+            MergeStrategy::Rebase => self.allow_rebase,
+            MergeStrategy::RebaseMerge => self.allow_rebase_merge,
+        };
+        allowed.unwrap_or(false)
+    }
 }
 
 #[derive(Deserialize)]
@@ -274,6 +335,12 @@ pub struct WorkItemFields {
     pub created_date: String,
     #[serde(rename = "System.AssignedTo")]
     pub assigned_to: Option<IdentityRef>,
+}
+
+/// A work item with a comment mentioning the user that they have not answered.
+pub struct Mention {
+    pub item: WorkItem,
+    pub date: String,
 }
 
 pub struct SprintWorkItems {

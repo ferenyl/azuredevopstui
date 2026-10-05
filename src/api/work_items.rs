@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
+use futures::{StreamExt, TryStreamExt, stream};
 use serde_json::json;
 
 use super::AdoClient;
 use super::models::{
-    CommentList, DetailComment, Iteration, ListResponse, Relation, SprintWorkItems, WiqlResult,
-    WorkItem, WorkItemDetails, WorkItemResponse, WorkItemTypeCategory,
+    CommentList, DetailComment, Iteration, ListResponse, Mention, Relation, SprintWorkItems,
+    WiqlResult, WorkItem, WorkItemComment, WorkItemDetails, WorkItemResponse,
+    WorkItemTypeCategory,
 };
 
 const MAX_WORK_ITEMS: &str = "200";
@@ -71,30 +73,21 @@ impl AdoClient {
         project: &str,
         id: u32,
     ) -> Result<WorkItemDetails> {
-        let id = id.to_string();
-        let item_path = [organization, project, "_apis", "wit", "workitems", &id];
-        let comments_path = [
+        let item_path = [
             organization,
             project,
             "_apis",
             "wit",
-            "workItems",
-            &id,
-            "comments",
+            "workitems",
+            &id.to_string(),
         ];
-        let comments_query = [("$top", MAX_COMMENTS), ("order", "desc")];
-        let (item, comments): (WorkItemResponse, CommentList) = tokio::try_join!(
+        let (item, comments): (WorkItemResponse, _) = tokio::try_join!(
             self.get(
                 &self.urls.dev_azure,
                 &item_path,
                 &[("$expand", "relations")]
             ),
-            self.get_versioned(
-                &self.urls.dev_azure,
-                &comments_path,
-                &comments_query,
-                COMMENTS_API_VERSION,
-            ),
+            self.comments(organization, project, id),
         )?;
         let children = self
             .work_items_batch(organization, project, &child_ids(&item.relations))
@@ -122,6 +115,52 @@ impl AdoClient {
                 })
                 .collect(),
         })
+    }
+
+    /// Open work items recently mentioning the user in a comment they have not answered.
+    pub async fn mentioned_work_items(
+        &self,
+        organization: &str,
+        project: &str,
+        team: &str,
+        user_id: &str,
+    ) -> Result<Vec<Mention>> {
+        let wiql = "SELECT [System.Id] FROM WorkItems \
+                    WHERE [System.Id] IN (@RecentMentions) \
+                    AND [System.State] NOT IN ('Closed', 'Removed') \
+                    ORDER BY [System.ChangedDate] DESC";
+        let items = self
+            .query_work_items(organization, project, team, wiql)
+            .await?;
+        let mentions: Vec<Option<Mention>> = stream::iter(items)
+            .map(|item| async move {
+                let comments = self.comments(organization, project, item.id).await?;
+                let date = unanswered_mention(&comments.comments, user_id);
+                Ok::<_, anyhow::Error>(date.map(|date| Mention { item, date }))
+            })
+            .buffered(8)
+            .try_collect()
+            .await?;
+        Ok(mentions.into_iter().flatten().collect())
+    }
+
+    /// The newest comments first.
+    async fn comments(&self, organization: &str, project: &str, id: u32) -> Result<CommentList> {
+        self.get_versioned(
+            &self.urls.dev_azure,
+            &[
+                organization,
+                project,
+                "_apis",
+                "wit",
+                "workItems",
+                &id.to_string(),
+                "comments",
+            ],
+            &[("$top", MAX_COMMENTS), ("order", "desc")],
+            COMMENTS_API_VERSION,
+        )
+        .await
     }
 
     /// Work item types in the project, without hidden ones like test plans and code reviews.
@@ -223,6 +262,16 @@ fn type_filter(types: &[String]) -> String {
     }
     let types: Vec<String> = types.iter().map(|t| quote(t)).collect();
     format!("AND [System.WorkItemType] IN ({}) ", types.join(", "))
+}
+
+/// Date of the newest comment by someone else mentioning the user, unless the user wrote later.
+fn unanswered_mention(newest_first: &[WorkItemComment], user_id: &str) -> Option<String> {
+    let user_id = user_id.to_lowercase();
+    newest_first
+        .iter()
+        .take_while(|comment| !comment.created_by.id.eq_ignore_ascii_case(&user_id))
+        .find(|comment| comment.text.to_lowercase().contains(&user_id))
+        .map(|comment| comment.created_date.clone())
 }
 
 fn child_ids(relations: &[Relation]) -> Vec<u32> {

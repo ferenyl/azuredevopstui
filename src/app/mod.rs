@@ -6,7 +6,8 @@ mod state;
 pub use action::{Action, HELP};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
-    ColumnPicker, Data, Detail, DetailInfo, DetailTab, LEFT_PANELS, Panel, Popup, Signals, SortKind,
+    ColumnPicker, CompletePicker, Data, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS,
+    Panel, Popup, Signals, SortKind,
 };
 
 use std::time::{Duration, Instant};
@@ -21,7 +22,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::api::{self, AdoClient, Board, CurrentUser, PullRequest, WorkItem};
 use crate::auth::Auth;
-use crate::config::{AuthMethod, Config, PrSort, WorkItemSort};
+use crate::config::{AuthMethod, Config, MergeStrategy, PrSort, WorkItemSort};
 use crate::images::{Images, image_urls};
 use crate::theme::Theme;
 use message::Message;
@@ -69,7 +70,7 @@ impl App {
                 .unwrap_or_default(),
             config,
             screen: Screen::Setup(SetupStep::Loading("Signing in…")),
-            focus: Panel::MyPrs,
+            focus: Panel::Inbox,
             user: None,
             data: Data::default(),
             selections: [0; LEFT_PANELS.len()],
@@ -82,7 +83,7 @@ impl App {
             last_updated: None,
             last_refresh: Instant::now(),
             board: None,
-            last_left: Panel::MyPrs,
+            last_left: Panel::Inbox,
             error: None,
             images: Images::new(picker),
             client: None,
@@ -148,6 +149,19 @@ impl App {
                 &[Action::Down, Action::Confirm, Action::Cancel]
             }
             Screen::Main => match self.current_item() {
+                Some(Detail::PullRequest(pr)) if self.can_complete(&pr) => &[
+                    Action::Down,
+                    Action::FocusRight,
+                    Action::NextTab,
+                    Action::Confirm,
+                    Action::Complete,
+                    Action::OpenInBrowser,
+                    Action::Sort,
+                    Action::Filter,
+                    Action::Reload,
+                    Action::Help,
+                    Action::Quit,
+                ],
                 Some(Detail::PullRequest(_)) => &[
                     Action::Down,
                     Action::FocusRight,
@@ -343,6 +357,80 @@ impl App {
         }));
     }
 
+    /// My PR with nothing blocking the merge.
+    fn can_complete(&self, pr: &PullRequest) -> bool {
+        self.data
+            .pr_signals
+            .get(&pr.pull_request_id)
+            .is_some_and(|signals| signals.ready)
+    }
+
+    /// Asks for the merge strategy first; nothing is completed until it is confirmed.
+    fn complete(&mut self) {
+        let Some(Detail::PullRequest(pr)) = self.current_item() else {
+            return;
+        };
+        if !self.can_complete(&pr) {
+            self.error = Some(format!("!{} is not ready to complete", pr.pull_request_id));
+            return;
+        }
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        self.spawn(async move {
+            let result = client
+                .merge_strategies(&config.organization, &config.project, &pr)
+                .await;
+            Message::MergeStrategies { pr, result }
+        });
+    }
+
+    fn open_complete_picker(&mut self, pr: Box<PullRequest>, strategies: Vec<MergeStrategy>) {
+        if strategies.is_empty() {
+            self.error = Some(format!(
+                "no merge strategy is allowed for !{}",
+                pr.pull_request_id
+            ));
+            return;
+        }
+        let labels = strategies.iter().map(|s| s.label().into()).collect();
+        let mut selection = Selection::new(labels);
+        let last = self.config.as_ref().and_then(|c| c.merge_strategy);
+        selection.selected = strategies
+            .iter()
+            .position(|s| Some(*s) == last)
+            .unwrap_or(0);
+        self.popup = Some(Popup::Complete(CompletePicker {
+            pr,
+            strategies,
+            selection,
+        }));
+    }
+
+    fn confirm_complete(&mut self, picker: CompletePicker) {
+        let Some(strategy) = picker.strategies.get(picker.selection.selected).copied() else {
+            return;
+        };
+        let (Some(client), Some(config)) = (self.client.clone(), &mut self.config) else {
+            return;
+        };
+        config.merge_strategy = Some(strategy);
+        let saved = config.save();
+        let (config, pr) = (config.clone(), picker.pr);
+        self.spawn(async move {
+            let result = client
+                .complete_pull_request(&config.organization, &config.project, &pr, strategy)
+                .await;
+            Message::PullRequestCompleted {
+                id: pr.pull_request_id,
+                result,
+            }
+        });
+        if let Err(err) = saved {
+            self.report_error(err);
+        }
+    }
+
     fn open_sort_picker(&mut self) {
         let (Some(kind), Some(config)) = (self.focus.sort_kind(), &self.config) else {
             return;
@@ -369,6 +457,7 @@ impl App {
     fn confirm_popup(&mut self) {
         match self.popup.take() {
             Some(Popup::Column(picker)) => self.confirm_column(picker),
+            Some(Popup::Complete(picker)) => self.confirm_complete(picker),
             Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
             Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
             Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
@@ -568,6 +657,10 @@ impl App {
         };
         self.error = None;
         self.last_refresh = Instant::now();
+        if self.data.inbox_seen.is_none() && self.last_updated.is_some() {
+            let seen = self.data.inbox().iter().map(|e| e.detail.key()).collect();
+            self.data.inbox_seen = Some(seen);
+        }
         self.data.show_approved = config.other_prs_filter.show_approved;
         self.data.show_drafts = config.other_prs_filter.show_drafts;
 
@@ -575,6 +668,14 @@ impl App {
         self.spawn(async move {
             Message::MyPullRequests(
                 c.my_pull_requests(&cfg.organization, &cfg.project, &user_id)
+                    .await,
+            )
+        });
+
+        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
+        self.spawn(async move {
+            Message::Mentions(
+                c.mentioned_work_items(&cfg.organization, &cfg.project, &cfg.team, &user_id)
                     .await,
             )
         });
@@ -790,6 +891,21 @@ impl App {
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::Mentions(result) => match result {
+                Ok(mentions) => self.data.mentions = Some(mentions),
+                Err(err) => self.report_error(err),
+            },
+            Message::MergeStrategies { pr, result } => match result {
+                Ok(strategies) => self.open_complete_picker(pr, strategies),
+                Err(err) => self.report_error(err),
+            },
+            Message::PullRequestCompleted { id, result } => match result {
+                Ok(()) => {
+                    tracing::info!(id, "pull request completed");
+                    self.refresh();
+                }
+                Err(err) => self.report_error(err),
+            },
             Message::Connected(Err(err)) => self.fail(err, Retry::Continue),
             Message::PullRequestDetails { id, result } => {
                 if self.detail.as_ref().is_some_and(|d| d.is_pull_request(id)) {
@@ -925,6 +1041,9 @@ impl App {
             return;
         };
         self.load_detail(&detail);
+        if let Some(seen) = &mut self.data.inbox_seen {
+            seen.insert(detail.key());
+        }
         self.detail = Some(detail);
         self.load_images();
         self.detail_info = None;
@@ -1063,6 +1182,7 @@ impl App {
         if let Some(popup) = &mut self.popup {
             let selection = match popup {
                 Popup::Column(picker) => &mut picker.selection,
+                Popup::Complete(picker) => &mut picker.selection,
                 Popup::Sort { selection, .. }
                 | Popup::Types { selection, .. }
                 | Popup::PrFilter { selection, .. } => selection,
@@ -1134,6 +1254,7 @@ impl App {
             | Action::AssignToMe
             | Action::Unassign
             | Action::ChangeColumn
+            | Action::Complete
             | Action::Sort
             | Action::Filter
             | Action::Toggle
@@ -1150,6 +1271,7 @@ impl App {
             Action::NextTab | Action::PrevTab => self.switch_tab(action == Action::NextTab),
             Action::AssignToMe => self.assign_to_me(),
             Action::ChangeColumn => self.change_column(false),
+            Action::Complete => self.complete(),
             Action::Unassign => self.unassign(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
@@ -1274,6 +1396,7 @@ mod tests {
     fn app() -> App {
         let mut app = App::new(Some(config()), None);
         app.screen = Screen::Main;
+        app.focus = Panel::MyPrs;
         app.data = Data {
             my_prs: Some(vec![
                 pull_request(1, "First", "me", "2026-10-03T10:00:00Z"),
@@ -1310,7 +1433,9 @@ mod tests {
         let mut app = app();
 
         ctrl(&mut app, 'k');
-        assert_eq!(app.focus, Panel::MyPrs);
+        assert_eq!(app.focus, Panel::Inbox);
+        ctrl(&mut app, 'k');
+        assert_eq!(app.focus, Panel::Inbox);
         for _ in 0..5 {
             ctrl(&mut app, 'j');
         }
@@ -1335,17 +1460,17 @@ mod tests {
         let mut app = app();
 
         press(&mut app, KeyCode::Char('k'));
-        assert_eq!(app.selections[0], 0);
+        assert_eq!(app.selections[1], 0);
         for _ in 0..5 {
             press(&mut app, KeyCode::Char('j'));
         }
-        assert_eq!(app.selections[0], 2);
+        assert_eq!(app.selections[1], 2);
     }
 
     #[test]
     fn selection_is_clamped_when_list_shrinks() {
         let mut app = app();
-        app.selections[0] = 2;
+        app.selections[1] = 2;
 
         app.handle_message(Message::MyPullRequests(Ok(vec![pull_request(
             1,
@@ -1354,7 +1479,7 @@ mod tests {
             "2026-10-01T10:00:00Z",
         )])));
 
-        assert_eq!(app.selections[0], 0);
+        assert_eq!(app.selections[1], 0);
     }
 
     #[test]
@@ -1396,7 +1521,7 @@ mod tests {
         press(&mut app, KeyCode::Char('k'));
 
         assert_eq!(app.detail_scroll, 1);
-        assert_eq!(app.selections[0], 0);
+        assert_eq!(app.selections[1], 0);
     }
 
     #[test]
@@ -1469,7 +1594,7 @@ mod tests {
         press(&mut app, KeyCode::Char('?'));
         assert!(app.show_help);
         press(&mut app, KeyCode::Char('j'));
-        assert_eq!(app.selections[0], 0);
+        assert_eq!(app.selections[1], 0);
         press(&mut app, KeyCode::Esc);
 
         assert!(!app.show_help);
@@ -1516,7 +1641,7 @@ mod tests {
             panic!("sort picker not open");
         };
         assert_eq!(selection.current(), Some("oldest"));
-        assert_eq!(app.selections[0], 0);
+        assert_eq!(app.selections[1], 0);
     }
 
     #[test]

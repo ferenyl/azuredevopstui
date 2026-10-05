@@ -2,17 +2,19 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt, stream};
+use serde_json::{Value, json};
 
 use super::AdoClient;
 use super::models::{
-    Identity, ListResponse, PolicyEvaluation, PullRequest, PullRequestDetails, PullRequestStatus,
-    Thread,
+    Comment, Identity, ListResponse, PolicyEvaluation, PullRequest, PullRequestDetails,
+    PullRequestStatus, ReviewSignals, Thread,
 };
-use crate::config::OtherPrsFilter;
+use crate::config::{MergeStrategy, OtherPrsFilter};
 use crate::images::markdown_images;
 
 const POLICY_API_VERSION: &str = "7.1-preview";
 const REVIEWER_POLICIES: [&str; 2] = ["Minimum number of reviewers", "Required reviewers"];
+const MERGE_STRATEGY_POLICY: &str = "Require a merge strategy";
 
 impl AdoClient {
     pub async fn my_pull_requests(
@@ -63,8 +65,12 @@ impl AdoClient {
         }
         stream::iter(without_own(pull_requests, user_id))
             .map(|mut pr| async move {
-                let policies = self.policy_evaluations(organization, project, &pr).await?;
+                let (policies, threads) = tokio::try_join!(
+                    self.policy_evaluations(organization, project, &pr),
+                    self.threads(organization, project, &pr),
+                )?;
                 pr.approved = is_approved(&pr, &policies);
+                pr.review = review_signals(&pr, &threads, user_id);
                 Ok::<_, anyhow::Error>(pr)
             })
             .buffered(8)
@@ -79,33 +85,68 @@ impl AdoClient {
         pr: &PullRequest,
     ) -> Result<PullRequestDetails> {
         let id = pr.pull_request_id.to_string();
-        let pr_path = [
-            organization,
-            project,
-            "_apis",
-            "git",
-            "repositories",
-            &pr.repository.id,
-            "pullRequests",
-            &id,
-        ];
-        let threads_path = [&pr_path[..], &["threads"]].concat();
-        let statuses_path = [&pr_path[..], &["statuses"]].concat();
-        let (threads, statuses, policies): (
-            ListResponse<Thread>,
-            ListResponse<PullRequestStatus>,
-            _,
-        ) = tokio::try_join!(
-            self.get(&self.urls.dev_azure, &threads_path, &[]),
+        let statuses_path = [&pr_path(organization, project, pr, &id)[..], &["statuses"]].concat();
+        let (threads, statuses, policies): (_, ListResponse<PullRequestStatus>, _) = tokio::try_join!(
+            self.threads(organization, project, pr),
             self.get(&self.urls.dev_azure, &statuses_path, &[]),
             self.policy_evaluations(organization, project, pr),
         )?;
 
         Ok(PullRequestDetails {
-            threads: visible_threads(threads.value),
+            threads: visible_threads(threads),
             statuses: latest_statuses(statuses.value),
             policies,
         })
+    }
+
+    /// Merge strategies the target branch policies allow.
+    pub async fn merge_strategies(
+        &self,
+        organization: &str,
+        project: &str,
+        pr: &PullRequest,
+    ) -> Result<Vec<MergeStrategy>> {
+        let policies = self.policy_evaluations(organization, project, pr).await?;
+        Ok(allowed_merge_strategies(&policies))
+    }
+
+    pub async fn complete_pull_request(
+        &self,
+        organization: &str,
+        project: &str,
+        pr: &PullRequest,
+        strategy: MergeStrategy,
+    ) -> Result<()> {
+        let commit = pr
+            .last_merge_source_commit
+            .as_ref()
+            .context("pull request has no source commit")?;
+        let id = pr.pull_request_id.to_string();
+        let _: Value = self
+            .patch(
+                &self.urls.dev_azure,
+                &pr_path(organization, project, pr, &id),
+                &json!({
+                    "status": "completed",
+                    "lastMergeSourceCommit": { "commitId": commit.commit_id },
+                    "completionOptions": { "mergeStrategy": strategy }
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// All threads, including system threads such as votes and pushes.
+    async fn threads(
+        &self,
+        organization: &str,
+        project: &str,
+        pr: &PullRequest,
+    ) -> Result<Vec<Thread>> {
+        let id = pr.pull_request_id.to_string();
+        let path = [&pr_path(organization, project, pr, &id)[..], &["threads"]].concat();
+        let threads: ListResponse<Thread> = self.get(&self.urls.dev_azure, &path, &[]).await?;
+        Ok(threads.value)
     }
 
     async fn policy_evaluations(
@@ -169,6 +210,24 @@ impl AdoClient {
     }
 }
 
+fn pr_path<'a>(
+    organization: &'a str,
+    project: &'a str,
+    pr: &'a PullRequest,
+    id: &'a str,
+) -> [&'a str; 8] {
+    [
+        organization,
+        project,
+        "_apis",
+        "git",
+        "repositories",
+        &pr.repository.id,
+        "pullRequests",
+        id,
+    ]
+}
+
 /// Drops duplicates and the user's own PRs.
 fn without_own(mut pull_requests: Vec<PullRequest>, user_id: &str) -> Vec<PullRequest> {
     let mut seen = HashSet::new();
@@ -190,6 +249,92 @@ pub fn is_approved(pr: &PullRequest, policies: &[PolicyEvaluation]) -> bool {
 
 pub fn is_reviewer_policy(policy: &PolicyEvaluation) -> bool {
     REVIEWER_POLICIES.contains(&policy.configuration.kind.display_name.as_str())
+}
+
+/// Strategies allowed by every blocking merge strategy policy.
+fn allowed_merge_strategies(policies: &[PolicyEvaluation]) -> Vec<MergeStrategy> {
+    let limits: Vec<_> = policies
+        .iter()
+        .filter(|policy| {
+            policy.configuration.is_blocking
+                && policy.configuration.kind.display_name == MERGE_STRATEGY_POLICY
+        })
+        .map(|policy| &policy.configuration.settings)
+        .collect();
+    MergeStrategy::ALL
+        .into_iter()
+        .filter(|strategy| limits.iter().all(|settings| settings.allows(*strategy)))
+        .collect()
+}
+
+/// What waits on the user in someone else's PR, from its raw threads.
+fn review_signals(pr: &PullRequest, threads: &[Thread], user_id: &str) -> ReviewSignals {
+    let is_me = |comment: &Comment| comment.author.id.eq_ignore_ascii_case(user_id);
+    let latest = |kind: &str, by_me: bool| {
+        threads
+            .iter()
+            .filter(|thread| thread.kind() == Some(kind))
+            .flat_map(|thread| &thread.comments)
+            .filter(|comment| !by_me || is_me(comment))
+            .filter_map(|comment| comment.published_date.clone())
+            .max()
+    };
+    let my_vote = pr
+        .reviewers
+        .iter()
+        .find(|reviewer| reviewer.id.eq_ignore_ascii_case(user_id))
+        .map(|reviewer| reviewer.vote);
+    let mention = format!("@<{}>", user_id.to_lowercase());
+    let mut signals = ReviewSignals::default();
+    let mut waiting = Vec::new();
+
+    if !pr.is_draft && my_vote == Some(0) {
+        signals.needs_vote = true;
+        waiting.push(Some(pr.creation_date.clone()));
+    }
+    let (voted, pushed) = (latest("VoteUpdate", true), latest("RefUpdate", false));
+    if my_vote.is_some_and(|vote| vote != 0) && voted.is_some() && pushed > voted {
+        signals.changed_since_vote = true;
+        waiting.push(pushed);
+    }
+    for thread in threads
+        .iter()
+        .filter(|thread| !thread.is_deleted)
+        .filter(|thread| matches!(thread.status.as_deref(), Some("active" | "pending")))
+    {
+        let comments: Vec<&Comment> = thread
+            .comments
+            .iter()
+            .filter(|comment| {
+                !comment.is_deleted && comment.comment_type.as_deref() != Some("system")
+            })
+            .collect();
+        let (Some(first), Some(last)) = (comments.first(), comments.last()) else {
+            continue;
+        };
+        if is_me(first) && !is_me(last) {
+            signals.replies += 1;
+            waiting.push(last.published_date.clone());
+        }
+        let last_mine = comments.iter().rposition(|comment| is_me(comment));
+        let unanswered = comments.iter().enumerate().find(|(index, comment)| {
+            !is_me(comment)
+                && last_mine.is_none_or(|mine| mine < *index)
+                && comment
+                    .content
+                    .as_deref()
+                    .is_some_and(|content| content.to_lowercase().contains(&mention))
+        });
+        if let Some((_, comment)) = unanswered {
+            signals.mentions += 1;
+            waiting.push(comment.published_date.clone());
+        }
+    }
+    signals.since = waiting
+        .into_iter()
+        .map(|date| date.unwrap_or_else(|| pr.creation_date.clone()))
+        .min();
+    signals
 }
 
 /// Threads with their deleted and system comments removed; empty threads are dropped.
@@ -222,7 +367,7 @@ fn latest_statuses(mut statuses: Vec<PullRequestStatus>) -> Vec<PullRequestStatu
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{method, path, path_regex, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -249,6 +394,14 @@ mod tests {
             "context": { "name": name, "genre": "ci" }
         }))
         .unwrap()
+    }
+
+    async fn mount_empty_threads(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path_regex(r"/pullRequests/\d+/threads$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .mount(server)
+            .await;
     }
 
     #[test]
@@ -317,6 +470,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
+        mount_empty_threads(&server).await;
         let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
 
         let prs = client
@@ -354,6 +508,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
+        mount_empty_threads(&server).await;
         let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
         let filter = OtherPrsFilter {
             reviewers: vec!["[MyProject]\\Developers".into()],

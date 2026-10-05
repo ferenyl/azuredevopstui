@@ -6,8 +6,8 @@ mod work_items;
 
 pub use boards::ColumnTarget;
 pub use models::{
-    Board, CurrentUser, PullRequest, PullRequestDetails, SprintWorkItems, Thread, WorkItem,
-    WorkItemDetails,
+    Board, CurrentUser, Mention, PullRequest, PullRequestDetails, ReviewSignals, SprintWorkItems,
+    Thread, WorkItem, WorkItemDetails,
 };
 pub use pull_requests::{is_approved, is_reviewer_policy};
 
@@ -207,9 +207,9 @@ impl AdoClient {
         url: &Url,
         body: Option<&Value>,
     ) -> Result<reqwest::Response> {
-        let is_patch = method == Method::PATCH;
+        let is_json_patch = method == Method::PATCH && body.is_some_and(Value::is_array);
         let mut request = self.http.request(method, url.clone());
-        if is_patch {
+        if is_json_patch {
             request = request.header(CONTENT_TYPE, "application/json-patch+json");
         }
         if let Some(body) = body {

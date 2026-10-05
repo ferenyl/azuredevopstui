@@ -1,9 +1,11 @@
 use anyhow::Result;
 
 use crate::api::{
-    Board, CurrentUser, PullRequest, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
+    Board, CurrentUser, Mention, PullRequest, PullRequestDetails, SprintWorkItems, WorkItem,
+    WorkItemDetails,
 };
 use crate::auth::Auth;
+use crate::config::MergeStrategy;
 
 pub enum Message {
     Authenticated(Result<Option<Auth>>),
@@ -23,6 +25,7 @@ pub enum Message {
     MyPullRequests(Result<Vec<PullRequest>>),
     OtherPullRequests(Result<Vec<PullRequest>>),
     SprintWorkItems(Result<SprintWorkItems>),
+    Mentions(Result<Vec<Mention>>),
     PullRequestDetails {
         id: u32,
         result: Result<PullRequestDetails>,
@@ -45,6 +48,14 @@ pub enum Message {
         result: Result<image::DynamicImage>,
     },
     WorkItemUpdated {
+        id: u32,
+        result: Result<()>,
+    },
+    MergeStrategies {
+        pr: Box<PullRequest>,
+        result: Result<Vec<MergeStrategy>>,
+    },
+    PullRequestCompleted {
         id: u32,
         result: Result<()>,
     },

@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::setup::Selection;
 use crate::api::{
-    ColumnTarget, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails, is_approved,
-    is_reviewer_policy,
+    ColumnTarget, Mention, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails,
+    is_approved, is_reviewer_policy,
 };
-use crate::config::{PrSort, SortConfig, WorkItemSort};
+use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 
 #[derive(Clone)]
 pub enum Detail {
@@ -18,6 +18,14 @@ impl Detail {
         match self {
             Self::PullRequest(pr) => pr.pull_request_id,
             Self::WorkItem(item) => item.id,
+        }
+    }
+
+    /// Identifies the item across PRs and work items.
+    pub fn key(&self) -> String {
+        match self {
+            Self::PullRequest(pr) => format!("!{}", pr.pull_request_id),
+            Self::WorkItem(item) => format!("#{}", item.id),
         }
     }
 
@@ -69,6 +77,7 @@ pub enum SortKind {
 
 pub enum Popup {
     Column(ColumnPicker),
+    Complete(CompletePicker),
     Sort {
         kind: SortKind,
         selection: Selection,
@@ -91,6 +100,12 @@ pub struct ColumnPicker {
     pub unassign: bool,
 }
 
+pub struct CompletePicker {
+    pub pr: Box<PullRequest>,
+    pub strategies: Vec<MergeStrategy>,
+    pub selection: Selection,
+}
+
 pub enum DetailInfo {
     PullRequest(PullRequestDetails),
     WorkItem(WorkItemDetails),
@@ -110,6 +125,17 @@ pub struct Data {
     pub sprint_name: Option<String>,
     /// Things to act on in my PRs, by PR id.
     pub pr_signals: HashMap<u32, Signals>,
+    /// Work items with unanswered mentions of the user.
+    pub mentions: Option<Vec<Mention>>,
+    /// Inbox entries already seen; `None` until the first refresh after loading.
+    pub inbox_seen: Option<HashSet<String>>,
+}
+
+/// Something that waits on the user.
+pub struct InboxEntry {
+    pub detail: Detail,
+    /// When it started waiting.
+    pub since: String,
 }
 
 /// What needs attention in a pull request.
@@ -162,6 +188,7 @@ impl Signals {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
+    Inbox,
     MyPrs,
     MyWorkItems,
     OtherPrs,
@@ -169,7 +196,8 @@ pub enum Panel {
     Detail,
 }
 
-pub const LEFT_PANELS: [Panel; 4] = [
+pub const LEFT_PANELS: [Panel; 5] = [
+    Panel::Inbox,
     Panel::MyPrs,
     Panel::MyWorkItems,
     Panel::OtherPrs,
@@ -179,6 +207,7 @@ pub const LEFT_PANELS: [Panel; 4] = [
 impl Data {
     pub fn len(&self, panel: Panel) -> usize {
         match panel {
+            Panel::Inbox => self.inbox().len(),
             Panel::MyPrs => self.my_prs.as_ref().map_or(0, Vec::len),
             Panel::OtherPrs => self.shown_other_prs().map_or(0, |prs| prs.len()),
             Panel::MyWorkItems => self.my_work_items.as_ref().map_or(0, Vec::len),
@@ -198,6 +227,43 @@ impl Data {
         })
     }
 
+    /// Everything waiting on the user, oldest first.
+    pub fn inbox(&self) -> Vec<InboxEntry> {
+        let pr_entry = |pr: &PullRequest, since: &str| InboxEntry {
+            detail: Detail::PullRequest(Box::new(pr.clone())),
+            since: since.to_string(),
+        };
+        let mine = self
+            .my_prs
+            .iter()
+            .flatten()
+            .filter(|pr| {
+                self.pr_signals
+                    .get(&pr.pull_request_id)
+                    .is_some_and(|signals| *signals != Signals::default())
+            })
+            .map(|pr| pr_entry(pr, &pr.creation_date));
+        let others = self
+            .other_prs
+            .iter()
+            .flatten()
+            .filter_map(|pr| Some(pr_entry(pr, pr.review.since.as_deref()?)));
+        let mentions = self.mentions.iter().flatten().map(|mention| InboxEntry {
+            detail: Detail::WorkItem(mention.item.clone()),
+            since: mention.date.clone(),
+        });
+        let mut entries: Vec<InboxEntry> = mine.chain(others).chain(mentions).collect();
+        entries.sort_by(|a, b| a.since.cmp(&b.since));
+        entries
+    }
+
+    /// In the inbox since the last look at it.
+    pub fn is_new(&self, detail: &Detail) -> bool {
+        self.inbox_seen
+            .as_ref()
+            .is_some_and(|seen| !seen.contains(&detail.key()))
+    }
+
     /// The freshly loaded version of a shown detail, if it is still listed.
     pub fn find(&self, detail: &Detail) -> Option<Detail> {
         match detail {
@@ -211,6 +277,7 @@ impl Data {
                 .into_iter()
                 .flatten()
                 .flatten()
+                .chain(self.mentions.iter().flatten().map(|mention| &mention.item))
                 .find(|item| item.id == current.id)
                 .cloned()
                 .map(Detail::WorkItem),
@@ -243,6 +310,7 @@ impl Data {
             items.as_ref()?.get(index).cloned().map(Detail::WorkItem)
         };
         match panel {
+            Panel::Inbox => self.inbox().into_iter().nth(index).map(|entry| entry.detail),
             Panel::MyPrs => pr(&self.my_prs),
             Panel::OtherPrs => self
                 .shown_other_prs()?
@@ -302,6 +370,7 @@ impl Panel {
 
     pub fn title(self) -> &'static str {
         match self {
+            Self::Inbox => "Inbox",
             Self::MyPrs => "My PRs",
             Self::MyWorkItems => "My work items",
             Self::OtherPrs => "Others' PRs",
@@ -314,7 +383,7 @@ impl Panel {
         match self {
             Self::MyPrs | Self::OtherPrs => Some(SortKind::PullRequests),
             Self::MyWorkItems | Self::ReadyWorkItems => Some(SortKind::WorkItems),
-            Self::Detail => None,
+            Self::Inbox | Self::Detail => None,
         }
     }
 }
@@ -512,8 +581,8 @@ mod tests {
 
     #[test]
     fn panel_index_and_sort_kind() {
-        assert_eq!(Panel::MyPrs.index(), Some(0));
-        assert_eq!(Panel::ReadyWorkItems.index(), Some(3));
+        assert_eq!(Panel::MyPrs.index(), Some(1));
+        assert_eq!(Panel::ReadyWorkItems.index(), Some(4));
         assert_eq!(Panel::Detail.index(), None);
         assert_eq!(Panel::OtherPrs.sort_kind(), Some(SortKind::PullRequests));
         assert_eq!(Panel::MyWorkItems.sort_kind(), Some(SortKind::WorkItems));

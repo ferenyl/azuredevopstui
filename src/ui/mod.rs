@@ -4,7 +4,7 @@ mod setup;
 mod toolbar;
 mod workitem_detail;
 
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, Utc};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -13,10 +13,10 @@ use ratatui::widgets::{Block, List, ListState, Padding, Paragraph, Tabs, Wrap};
 
 use ratatui_image::StatefulImage;
 
-use crate::api::{PullRequest, WorkItem};
+use crate::api::{PullRequest, ReviewSignals, WorkItem};
 use crate::app::{
-    App, Detail, DetailInfo, DetailTab, LEFT_PANELS, Panel, Popup, Screen, Selection, Signals,
-    SortKind,
+    App, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS, Panel, Popup, Screen, Selection,
+    Signals, SortKind,
 };
 use crate::images::{ImageState, file_name, image_marker};
 
@@ -39,7 +39,9 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(25), Constraint::Percentage(75)]).areas(main);
-    let left_areas = Layout::vertical([Constraint::Ratio(1, 4); 4]).split(left);
+    let left_areas =
+        Layout::vertical([Constraint::Ratio(1, LEFT_PANELS.len() as u32); LEFT_PANELS.len()])
+            .split(left);
 
     for (panel, area) in LEFT_PANELS.iter().zip(left_areas.iter()) {
         render_panel(frame, app, *panel, *area);
@@ -52,6 +54,10 @@ pub fn render(frame: &mut Frame, app: &App) {
             } else {
                 format!(" Move #{} ", picker.work_item_id)
             };
+            popup::render_picker(frame, app, &title, &picker.selection, main);
+        }
+        Some(Popup::Complete(picker)) => {
+            let title = format!(" Complete !{} ", picker.pr.pull_request_id);
             popup::render_picker(frame, app, &title, &picker.selection, main);
         }
         Some(Popup::Sort { kind, selection }) => {
@@ -422,6 +428,12 @@ fn short_date(date: &str) -> String {
 fn panel_items(app: &App, panel: Panel) -> Option<Vec<Line<'static>>> {
     let data = &app.data;
     match panel {
+        Panel::Inbox => (data.my_prs.is_some() && data.other_prs.is_some()).then(|| {
+            data.inbox()
+                .iter()
+                .map(|entry| inbox_line(app, entry))
+                .collect()
+        }),
         Panel::MyPrs => data
             .my_prs
             .as_ref()
@@ -447,17 +459,7 @@ fn pr_lines<'a>(
     prs: impl Iterator<Item = &'a PullRequest>,
     show_author: bool,
 ) -> Vec<Line<'static>> {
-    let rows: Vec<_> = prs
-        .map(|pr| {
-            let signals = app
-                .data
-                .pr_signals
-                .get(&pr.pull_request_id)
-                .map(|signals| signal_spans(app, signals))
-                .unwrap_or_default();
-            (pr, signals)
-        })
-        .collect();
+    let rows: Vec<_> = prs.map(|pr| (pr, pr_markers(app, pr))).collect();
     let width = |spans: &[Span]| spans.iter().map(|span| span.content.chars().count()).sum();
     let id_width = rows
         .iter()
@@ -507,16 +509,88 @@ fn pr_line(
     Line::from(spans)
 }
 
+/// Markers for my PR's signals or for what waits on me in someone else's PR.
+fn pr_markers(app: &App, pr: &PullRequest) -> Vec<Span<'static>> {
+    let mut spans = app
+        .data
+        .pr_signals
+        .get(&pr.pull_request_id)
+        .map(|signals| signal_spans(app, signals))
+        .unwrap_or_default();
+    spans.extend(review_spans(app, &pr.review));
+    spans
+}
+
+fn marker(text: String, color: Color) -> Span<'static> {
+    Span::styled(
+        format!("{text} "),
+        Style::new().fg(color).add_modifier(Modifier::BOLD),
+    )
+}
+
+fn review_spans(app: &App, review: &ReviewSignals) -> Vec<Span<'static>> {
+    let theme = &app.theme;
+    let mut spans = Vec::new();
+    if review.needs_vote {
+        spans.push(marker("◉".into(), theme.pr_waiting));
+    }
+    if review.changed_since_vote {
+        spans.push(marker("↻".into(), theme.build_running));
+    }
+    if review.replies > 0 {
+        spans.push(marker(format!("↩{}", review.replies), theme.comment_author));
+    }
+    if review.mentions > 0 {
+        spans.push(marker(format!("@{}", review.mentions), theme.title));
+    }
+    spans
+}
+
+fn inbox_line(app: &App, entry: &InboxEntry) -> Line<'static> {
+    let theme = &app.theme;
+    let muted = Style::new().fg(theme.muted);
+    let mut spans = vec![if app.data.is_new(&entry.detail) {
+        marker("•".into(), theme.title)
+    } else {
+        Span::raw("  ")
+    }];
+    match &entry.detail {
+        Detail::PullRequest(pr) => {
+            spans.push(Span::styled(format!("!{} ", pr.pull_request_id), muted));
+            spans.extend(pr_markers(app, pr));
+            spans.push(Span::raw(pr.title.clone()));
+        }
+        Detail::WorkItem(item) => {
+            spans.push(Span::styled(
+                format!("#{} ", item.id),
+                Style::new().fg(type_color(app, &item.fields.work_item_type)),
+            ));
+            spans.push(marker("@".into(), theme.title));
+            spans.push(Span::raw(item.fields.title.clone()));
+        }
+    }
+    spans.push(Span::styled(format!("  {}", age(&entry.since)), muted));
+    Line::from(spans)
+}
+
+/// Time since `date` as `5m`, `3h` or `2d`.
+fn age(date: &str) -> String {
+    let Ok(date) = DateTime::parse_from_rfc3339(date) else {
+        return String::new();
+    };
+    let minutes = (Utc::now() - date.with_timezone(&Utc)).num_minutes().max(0);
+    match minutes {
+        0..60 => format!("{minutes}m"),
+        60..1440 => format!("{}h", minutes / 60),
+        _ => format!("{}d", minutes / 1440),
+    }
+}
+
 /// Compact markers for what needs attention, each followed by a space.
 fn signal_spans(app: &App, signals: &Signals) -> Vec<Span<'static>> {
     let theme = &app.theme;
     let mut spans = Vec::new();
-    let mut push = |text: String, color: Color| {
-        spans.push(Span::styled(
-            format!("{text} "),
-            Style::new().fg(color).add_modifier(Modifier::BOLD),
-        ));
-    };
+    let mut push = |text: String, color: Color| spans.push(marker(text, color));
     if signals.unresolved > 0 {
         push(format!("✎{}", signals.unresolved), theme.pr_waiting);
     }

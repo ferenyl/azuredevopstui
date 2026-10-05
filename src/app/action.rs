@@ -16,6 +16,7 @@ pub enum Action {
     AssignToMe,
     Unassign,
     ChangeColumn,
+    Complete,
     ChangeToken,
     Sort,
     Filter,
@@ -26,7 +27,7 @@ pub enum Action {
 }
 
 /// Actions listed in the help popup.
-pub const HELP: [Action; 15] = [
+pub const HELP: [Action; 16] = [
     Action::Down,
     Action::FocusRight,
     Action::NextTab,
@@ -36,6 +37,7 @@ pub const HELP: [Action; 15] = [
     Action::ChangeColumn,
     Action::AssignToMe,
     Action::Unassign,
+    Action::Complete,
     Action::OpenInBrowser,
     Action::Reload,
     Action::ChangeToken,
@@ -62,6 +64,7 @@ impl Action {
             (KeyCode::Char('a'), _) => Some(Self::AssignToMe),
             (KeyCode::Char('u'), _) => Some(Self::Unassign),
             (KeyCode::Char('s'), _) => Some(Self::ChangeColumn),
+            (KeyCode::Char('c'), _) => Some(Self::Complete),
             (KeyCode::Char('S'), _) => Some(Self::Sort),
             (KeyCode::Char('f'), _) => Some(Self::Filter),
             (KeyCode::Char(' '), _) => Some(Self::Toggle),
@@ -89,6 +92,7 @@ impl Action {
             Self::AssignToMe => "a",
             Self::Unassign => "u",
             Self::ChangeColumn => "s",
+            Self::Complete => "c",
             Self::ChangeToken => "t",
             Self::Sort => "S",
             Self::Filter => "f",
@@ -115,6 +119,7 @@ impl Action {
             Self::AssignToMe => "assign to me",
             Self::Unassign => "unassign",
             Self::ChangeColumn => "change status",
+            Self::Complete => "complete PR",
             Self::ChangeToken => "set PAT",
             Self::Sort => "sort",
             Self::Filter => "filter",
