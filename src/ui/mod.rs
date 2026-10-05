@@ -21,6 +21,7 @@ use crate::app::{
     Signals, SortKind,
 };
 use crate::images::{ImageState, file_name, image_marker};
+use crate::rich_text::{Marks, RichText};
 
 const LABEL_WIDTH: usize = 13;
 
@@ -61,6 +62,29 @@ pub fn render(frame: &mut Frame, app: &App) {
         Some(Popup::Complete(picker)) => {
             let title = format!(" Complete !{} ", picker.pr.pull_request_id);
             popup::render_picker(frame, app, &title, &picker.selection, main);
+        }
+        Some(Popup::Tags(picker)) => {
+            let items = picker
+                .selection
+                .items
+                .iter()
+                .enumerate()
+                .map(|(index, tag)| {
+                    if picker.is_new(index) {
+                        format!("+ create \"{tag}\"")
+                    } else if picker.is_current(index) {
+                        format!("✓ {tag}")
+                    } else {
+                        format!("  {tag}")
+                    }
+                })
+                .collect();
+            let selection = Selection {
+                items,
+                selected: picker.selection.selected,
+            };
+            let title = format!(" Tag #{}: {}▏", picker.work_item_id, picker.query);
+            popup::render_picker(frame, app, &title, &selection, main);
         }
         Some(Popup::Sort { kind, selection }) => {
             let title = match kind {
@@ -363,34 +387,127 @@ fn badge(text: &str, color: Color) -> Span<'static> {
 }
 
 /// Word-wraps `text` to `width`, starting every line with `prefix` and keeping each line's indent.
+#[cfg(test)]
 fn wrap(text: &str, width: u16, prefix: Span<'static>) -> Vec<Line<'static>> {
+    let lines = text.lines().map(|line| Line::raw(line.to_string()));
+    wrap_lines(lines, width, prefix)
+}
+
+/// Formatted text styled with the theme and wrapped to `width`.
+fn rich_lines(app: &App, text: &RichText, width: u16, prefix: Span<'static>) -> Vec<Line<'static>> {
+    let lines = text.lines.iter().map(|segments| {
+        Line::from(
+            segments
+                .iter()
+                .map(|segment| Span::styled(segment.text.clone(), rich_style(app, segment.marks)))
+                .collect::<Vec<_>>(),
+        )
+    });
+    wrap_lines(lines, width, prefix)
+}
+
+fn rich_style(app: &App, marks: Marks) -> Style {
+    let theme = &app.theme;
+    let mut style = Style::new();
+    if marks.heading {
+        style = style.fg(theme.title).add_modifier(Modifier::BOLD);
+    }
+    if marks.strong {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if marks.emphasis {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if marks.strike {
+        style = style.add_modifier(Modifier::CROSSED_OUT);
+    }
+    if marks.code {
+        style = style.fg(theme.toolbar_key);
+    }
+    if marks.link {
+        style = style
+            .fg(theme.build_running)
+            .add_modifier(Modifier::UNDERLINED);
+    }
+    if marks.muted {
+        style = style.fg(theme.muted);
+    }
+    style
+}
+
+/// Word-wraps styled lines, keeping each line's indent (plus list bullet) on continuation lines.
+fn wrap_lines(
+    lines: impl Iterator<Item = Line<'static>>,
+    width: u16,
+    prefix: Span<'static>,
+) -> Vec<Line<'static>> {
     let available = (width as usize).saturating_sub(prefix.width()).max(10);
-    let mut lines = Vec::new();
-    let mut push = |text: String| lines.push(Line::from(vec![prefix.clone(), Span::raw(text)]));
-    for source in text.lines() {
-        if image_marker(source).is_some() {
-            push(source.trim().to_string());
+    let mut out = Vec::new();
+    let mut push = |chars: Vec<(char, Style)>| {
+        let mut spans = vec![prefix.clone()];
+        let mut current = String::new();
+        let mut current_style = Style::new();
+        for (c, style) in chars {
+            if style != current_style && !current.is_empty() {
+                spans.push(Span::styled(std::mem::take(&mut current), current_style));
+            }
+            current_style = style;
+            current.push(c);
+        }
+        if !current.is_empty() {
+            spans.push(Span::styled(current, current_style));
+        }
+        if spans.len() == 1 {
+            spans.push(Span::raw(""));
+        }
+        out.push(Line::from(spans));
+    };
+    for line in lines {
+        let source = line.to_string();
+        if image_marker(&source).is_some() {
+            push(source.trim().chars().map(|c| (c, Style::new())).collect());
+            continue;
+        }
+        let chars: Vec<(char, Style)> = line
+            .spans
+            .iter()
+            .flat_map(|span| span.content.chars().map(move |c| (c, span.style)))
+            .collect();
+        let end = chars
+            .iter()
+            .rposition(|(c, _)| !c.is_whitespace())
+            .map_or(0, |i| i + 1);
+        if end <= available {
+            push(chars[..end].to_vec());
             continue;
         }
         let indent = source.chars().take_while(|c| c.is_whitespace()).count();
-        let padding = " ".repeat(indent.min(available / 2));
-        let mut current = padding.clone();
-        for word in source.split_whitespace() {
-            let mut word: Vec<char> = word.chars().collect();
+        let bullet = if source.trim_start().starts_with("• ") {
+            2
+        } else {
+            0
+        };
+        let padding = vec![(' ', Style::new()); (indent + bullet).min(available / 2)];
+        let mut current = vec![(' ', Style::new()); indent.min(available / 2)];
+        for word in chars.split(|(c, _)| c.is_whitespace()) {
+            if word.is_empty() {
+                continue;
+            }
+            let mut word = word.to_vec();
             loop {
-                let used = current.chars().count();
-                let blank = current.trim().is_empty();
+                let used = current.len();
+                let blank = current.iter().all(|(c, _)| c.is_whitespace());
                 let space = usize::from(!blank);
                 if used + space + word.len() <= available {
                     if !blank {
-                        current.push(' ');
+                        current.push((' ', Style::new()));
                     }
-                    current.extend(&word);
+                    current.extend(word);
                     break;
                 }
                 if blank {
                     let rest = word.split_off(available - used);
-                    current.extend(&word);
+                    current.extend(word);
                     push(std::mem::replace(&mut current, padding.clone()));
                     word = rest;
                     if word.is_empty() {
@@ -403,7 +520,7 @@ fn wrap(text: &str, width: u16, prefix: Span<'static>) -> Vec<Line<'static>> {
         }
         push(current);
     }
-    lines
+    out
 }
 
 fn type_color(app: &App, work_item_type: &str) -> Color {
@@ -753,7 +870,7 @@ mod tests {
             assigned_to: Some("Anna".into()),
             iteration_path: Some("MyProject\\Sprint 41".into()),
             tags: Some("backend; urgent".into()),
-            description: Some("Show the orders".into()),
+            description: Some(RichText::from_html("Show the orders")),
             acceptance_criteria: None,
             repro_steps: None,
             comment_count: 0,

@@ -3,6 +3,7 @@ mod app;
 mod auth;
 mod config;
 mod images;
+mod rich_text;
 mod theme;
 mod ui;
 

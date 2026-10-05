@@ -39,6 +39,9 @@ pub struct Config {
     pub show_images: bool,
     #[serde(default)]
     pub colors: Theme,
+    /// Tags added by the user, most recent first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_tags: Vec<String>,
 }
 
 fn default_refresh_interval_secs() -> u64 {
@@ -198,6 +201,7 @@ impl Config {
             merge_strategy: None,
             show_images: true,
             colors: Theme::default(),
+            recent_tags: Vec::new(),
         }
     }
 

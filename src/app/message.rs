@@ -53,6 +53,10 @@ pub enum Message {
         id: u32,
         result: Result<()>,
     },
+    Tags {
+        item: WorkItem,
+        result: Result<Vec<String>>,
+    },
     MergeStrategies {
         pr: Box<PullRequest>,
         result: Result<Vec<MergeStrategy>>,

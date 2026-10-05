@@ -10,9 +10,16 @@ const KEY_WIDTH: usize = 15;
 
 pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
-    let lines: Vec<Line> = HELP
-        .iter()
-        .map(|action| {
+    let mut lines: Vec<Line> = Vec::new();
+    for (heading, actions) in HELP {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        lines.push(Line::styled(
+            format!(" {heading}"),
+            Style::new().fg(theme.title),
+        ));
+        lines.extend(actions.iter().map(|action| {
             Line::from(vec![
                 Span::styled(
                     format!(" {:<KEY_WIDTH$}", action.key_label()),
@@ -20,8 +27,8 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
                 ),
                 Span::raw(action.label()),
             ])
-        })
-        .collect();
+        }));
+    }
     let area = centered(area, 44, lines.len() as u16 + 2);
     let block = Block::bordered()
         .title(" Keys ")

@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::config::MergeStrategy;
+use crate::rich_text::RichText;
 
 #[derive(Deserialize)]
 pub struct ListResponse<T> {
@@ -351,6 +352,8 @@ pub struct WorkItemFields {
     pub created_date: String,
     #[serde(rename = "System.AssignedTo")]
     pub assigned_to: Option<IdentityRef>,
+    #[serde(rename = "System.Tags")]
+    pub tags: Option<String>,
 }
 
 /// A work item with a comment mentioning the user that they have not answered.
@@ -368,10 +371,14 @@ pub struct SprintWorkItems {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkItemResponse {
     pub fields: WorkItemDetailFields,
     #[serde(default)]
     pub relations: Vec<Relation>,
+    /// Field reference name to `"markdown"` or `"html"`; missing fields are HTML.
+    #[serde(default)]
+    pub multiline_fields_format: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -422,9 +429,10 @@ pub struct WorkItemComment {
     pub created_by: IdentityRef,
     pub created_date: String,
     pub text: String,
+    pub format: Option<String>,
 }
 
-/// Work item fields not included in the list query, with HTML converted to text.
+/// Work item fields not included in the list query, with HTML and markdown formatted.
 pub struct WorkItemDetails {
     pub state: String,
     pub board_column: Option<String>,
@@ -432,9 +440,9 @@ pub struct WorkItemDetails {
     pub assigned_to: Option<String>,
     pub iteration_path: Option<String>,
     pub tags: Option<String>,
-    pub description: Option<String>,
-    pub acceptance_criteria: Option<String>,
-    pub repro_steps: Option<String>,
+    pub description: Option<RichText>,
+    pub acceptance_criteria: Option<RichText>,
+    pub repro_steps: Option<RichText>,
     pub comment_count: u32,
     pub comments: Vec<DetailComment>,
     pub children: Vec<WorkItem>,
@@ -444,7 +452,7 @@ pub struct WorkItemDetails {
 pub struct DetailComment {
     pub author: String,
     pub date: String,
-    pub text: String,
+    pub text: RichText,
 }
 
 #[derive(Debug, Clone, Deserialize)]

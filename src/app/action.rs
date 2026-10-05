@@ -15,6 +15,7 @@ pub enum Action {
     OpenInBrowser,
     AssignToMe,
     Unassign,
+    Tag,
     ChangeColumn,
     Complete,
     ChangeToken,
@@ -26,24 +27,34 @@ pub enum Action {
     Help,
 }
 
-/// Actions listed in the help popup.
-pub const HELP: [Action; 16] = [
-    Action::Down,
-    Action::FocusRight,
-    Action::NextTab,
-    Action::Confirm,
-    Action::Sort,
-    Action::Filter,
-    Action::ChangeColumn,
-    Action::AssignToMe,
-    Action::Unassign,
-    Action::Complete,
-    Action::OpenInBrowser,
-    Action::Reload,
-    Action::ChangeToken,
-    Action::Help,
-    Action::Cancel,
-    Action::Quit,
+/// Actions listed in the help popup, by where they apply.
+pub const HELP: [(&str, &[Action]); 4] = [
+    (
+        "General",
+        &[
+            Action::Down,
+            Action::FocusRight,
+            Action::NextTab,
+            Action::Confirm,
+            Action::OpenInBrowser,
+            Action::Reload,
+            Action::ChangeToken,
+            Action::Help,
+            Action::Cancel,
+            Action::Quit,
+        ],
+    ),
+    ("Lists", &[Action::Sort, Action::Filter]),
+    (
+        "Work items",
+        &[
+            Action::ChangeColumn,
+            Action::AssignToMe,
+            Action::Unassign,
+            Action::Tag,
+        ],
+    ),
+    ("Pull requests", &[Action::Complete]),
 ];
 
 impl Action {
@@ -66,11 +77,12 @@ impl Action {
             (KeyCode::Char('s'), _) => Some(Self::ChangeColumn),
             (KeyCode::Char('c'), _) => Some(Self::Complete),
             (KeyCode::Char('S'), _) => Some(Self::Sort),
+            (KeyCode::Char('t'), _) => Some(Self::Tag),
             (KeyCode::Char('f'), _) => Some(Self::Filter),
             (KeyCode::Char(' '), _) => Some(Self::Toggle),
             (KeyCode::Tab, _) => Some(Self::NextTab),
             (KeyCode::BackTab, _) => Some(Self::PrevTab),
-            (KeyCode::Char('t'), _) => Some(Self::ChangeToken),
+            (KeyCode::Char('T'), _) => Some(Self::ChangeToken),
             (KeyCode::Char('?'), _) => Some(Self::Help),
             _ => None,
         }
@@ -91,9 +103,10 @@ impl Action {
             Self::OpenInBrowser => "o",
             Self::AssignToMe => "a",
             Self::Unassign => "u",
+            Self::Tag => "t",
             Self::ChangeColumn => "s",
             Self::Complete => "c",
-            Self::ChangeToken => "t",
+            Self::ChangeToken => "T",
             Self::Sort => "S",
             Self::Filter => "f",
             Self::Toggle => "space",
@@ -118,6 +131,7 @@ impl Action {
             Self::OpenInBrowser => "open in browser",
             Self::AssignToMe => "assign to me",
             Self::Unassign => "unassign",
+            Self::Tag => "edit tags",
             Self::ChangeColumn => "change status",
             Self::Complete => "complete PR",
             Self::ChangeToken => "set PAT",
@@ -212,7 +226,7 @@ mod tests {
 
     #[test]
     fn help_entries_have_labels() {
-        for action in HELP {
+        for action in HELP.iter().flat_map(|(_, actions)| actions.iter()) {
             assert!(!action.key_label().is_empty(), "{action:?}");
             assert!(!action.label().is_empty(), "{action:?}");
         }

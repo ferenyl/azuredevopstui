@@ -20,6 +20,7 @@ html2text = "0.17.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 keyring = "4.2.0"
 open = "5.4.4"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 ratatui = { version = "0.30.2", features = ["serde", "unstable-rendered-line-info"] }
 ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 reqwest = { version = "0.13.5", features = ["json"] }

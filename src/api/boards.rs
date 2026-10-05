@@ -2,9 +2,11 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use super::AdoClient;
-use super::models::{Backlog, Board, BoardResponse, ListResponse};
+use super::models::{Backlog, Board, BoardResponse, ListResponse, Named};
+use super::sorted_names;
 
 const REQUIREMENT_BACKLOG: &str = "requirement";
+const TAGS_API_VERSION: &str = "7.1-preview.1";
 
 impl AdoClient {
     /// Columns of the team's requirement-level board, in board order.
@@ -96,6 +98,36 @@ impl AdoClient {
         .await
     }
 
+    /// Tags used in the project.
+    pub async fn tags(&self, organization: &str, project: &str) -> Result<Vec<String>> {
+        let tags: ListResponse<Named> = self
+            .get_versioned(
+                &self.urls.dev_azure,
+                &[organization, project, "_apis", "wit", "tags"],
+                &[],
+                TAGS_API_VERSION,
+            )
+            .await?;
+        Ok(sorted_names(tags.value.into_iter().map(|tag| tag.name)))
+    }
+
+    pub async fn set_work_item_tags(
+        &self,
+        organization: &str,
+        project: &str,
+        id: u32,
+        tags: &[String],
+    ) -> Result<()> {
+        // `add` merges tags, so the list is replaced; removing the last tag clears the field.
+        let operation = if tags.is_empty() {
+            json!({ "op": "remove", "path": "/fields/System.Tags" })
+        } else {
+            json!({ "op": "replace", "path": "/fields/System.Tags", "value": tags.join("; ") })
+        };
+        self.patch_work_item(organization, project, id, vec![operation])
+            .await
+    }
+
     async fn update_work_item(
         &self,
         organization: &str,
@@ -107,6 +139,17 @@ impl AdoClient {
             .iter()
             .map(|(field, value)| json!({ "op": "add", "path": format!("/fields/{field}"), "value": value }))
             .collect();
+        self.patch_work_item(organization, project, id, operations)
+            .await
+    }
+
+    async fn patch_work_item(
+        &self,
+        organization: &str,
+        project: &str,
+        id: u32,
+        operations: Vec<Value>,
+    ) -> Result<()> {
         let id = id.to_string();
         let _: serde::de::IgnoredAny = self
             .patch(

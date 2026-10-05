@@ -7,7 +7,7 @@ pub use action::{Action, HELP};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
     ColumnPicker, CompletePicker, Data, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS,
-    Panel, Popup, Signals, SortKind,
+    Panel, Popup, Signals, SortKind, TagPicker,
 };
 
 use std::time::{Duration, Instant};
@@ -24,9 +24,12 @@ use crate::api::{self, AdoClient, Board, CurrentUser, PullRequest, WorkItem};
 use crate::auth::Auth;
 use crate::config::{AuthMethod, Config, MergeStrategy, PrSort, WorkItemSort};
 use crate::images::{Images, image_urls};
+use crate::rich_text::RichText;
 use crate::theme::Theme;
 use message::Message;
 use setup::organization_name;
+
+const MAX_RECENT_TAGS: usize = 20;
 
 pub enum Screen {
     Setup(SetupStep),
@@ -181,6 +184,7 @@ impl App {
                     Action::Confirm,
                     Action::ChangeColumn,
                     Action::Unassign,
+                    Action::Tag,
                     Action::OpenInBrowser,
                     Action::Sort,
                     Action::Filter,
@@ -273,7 +277,7 @@ impl App {
 
     fn current_work_item(&self) -> Option<WorkItem> {
         match self.current_item()? {
-            Detail::WorkItem(item) => Some(item),
+            Detail::WorkItem(item) => Some(*item),
             Detail::PullRequest(_) | Detail::Build(_) => None,
         }
     }
@@ -313,6 +317,83 @@ impl App {
         } else {
             self.error = Some(format!("#{} is not assigned to you", item.id));
         }
+    }
+
+    fn tag(&mut self) {
+        let Some(item) = self.current_work_item() else {
+            return;
+        };
+        if !self.is_assigned_to_me(&item) {
+            self.error = Some(format!("#{} is not assigned to you", item.id));
+            return;
+        }
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        self.spawn(async move {
+            let result = client.tags(&config.organization, &config.project).await;
+            Message::Tags { item, result }
+        });
+    }
+
+    fn open_tag_picker(&mut self, item: &WorkItem, mut tags: Vec<String>) {
+        let recent = self
+            .config
+            .as_ref()
+            .map(|config| config.recent_tags.as_slice())
+            .unwrap_or_default();
+        tags.sort_by_key(|tag| {
+            recent
+                .iter()
+                .position(|r| r.eq_ignore_ascii_case(tag))
+                .unwrap_or(usize::MAX)
+        });
+        let current = item
+            .fields
+            .tags
+            .as_deref()
+            .unwrap_or_default()
+            .split(';')
+            .map(str::trim)
+            .filter(|tag| !tag.is_empty())
+            .map(String::from)
+            .collect();
+        self.popup = Some(Popup::Tags(TagPicker::new(item.id, current, tags)));
+    }
+
+    fn confirm_tags(&mut self, picker: TagPicker) {
+        let Some(tag) = picker
+            .selection
+            .items
+            .get(picker.selection.selected)
+            .cloned()
+        else {
+            return;
+        };
+        let (Some(client), Some(config)) = (self.client.clone(), &mut self.config) else {
+            return;
+        };
+        let (organization, project) = (config.organization.clone(), config.project.clone());
+        let id = picker.work_item_id;
+        let mut tags = picker.current.clone();
+        if picker.has(&tag) {
+            tags.retain(|current| !current.eq_ignore_ascii_case(&tag));
+        } else {
+            config.recent_tags.retain(|r| !r.eq_ignore_ascii_case(&tag));
+            config.recent_tags.insert(0, tag.clone());
+            config.recent_tags.truncate(MAX_RECENT_TAGS);
+            let result = config.save();
+            if let Err(err) = result {
+                self.report_error(err);
+            }
+            tags.push(tag);
+        }
+        self.spawn(async move {
+            let result = client
+                .set_work_item_tags(&organization, &project, id, &tags)
+                .await;
+            Message::WorkItemUpdated { id, result }
+        });
     }
 
     fn change_column(&mut self, unassign: bool) {
@@ -478,6 +559,7 @@ impl App {
         match self.popup.take() {
             Some(Popup::Column(picker)) => self.confirm_column(picker),
             Some(Popup::Complete(picker)) => self.confirm_complete(picker),
+            Some(Popup::Tags(picker)) => self.confirm_tags(picker),
             Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
             Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
             Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
@@ -1003,6 +1085,10 @@ impl App {
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::Tags { item, result } => match result {
+                Ok(tags) => self.open_tag_picker(&item, tags),
+                Err(err) => self.report_error(err),
+            },
             Message::WorkItemDetails { id, result } => {
                 if self.detail.as_ref().is_some_and(|d| d.is_work_item(id)) {
                     match result {
@@ -1107,6 +1193,7 @@ impl App {
             return;
         };
         let mut texts: Vec<&str> = Vec::new();
+        let mut rich: Vec<&RichText> = Vec::new();
         if let Some(Detail::PullRequest(pr)) = &self.detail {
             texts.extend(pr.description.as_deref());
         }
@@ -1118,20 +1205,24 @@ impl App {
                     .filter_map(|comment| comment.content.as_deref()),
             ),
             Some(DetailInfo::WorkItem(info)) => {
-                texts.extend(
+                rich.extend(
                     [
                         &info.description,
                         &info.repro_steps,
                         &info.acceptance_criteria,
                     ]
                     .into_iter()
-                    .filter_map(|text| text.as_deref()),
+                    .flatten(),
                 );
-                texts.extend(info.comments.iter().map(|comment| comment.text.as_str()));
+                rich.extend(info.comments.iter().map(|comment| &comment.text));
             }
             None => {}
         }
-        let urls = texts.into_iter().flat_map(image_urls).collect();
+        let urls = texts
+            .into_iter()
+            .flat_map(image_urls)
+            .chain(rich.into_iter().flat_map(RichText::image_urls))
+            .collect();
         for url in self.images.start_loading(urls) {
             let client = client.clone();
             self.spawn(async move {
@@ -1225,6 +1316,21 @@ impl App {
                 _ => {}
             }
         }
+        if let Some(Popup::Tags(picker)) = &mut self.popup {
+            match key.code {
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    picker.query.push(c);
+                    picker.filter();
+                    return;
+                }
+                KeyCode::Backspace => {
+                    picker.query.pop();
+                    picker.filter();
+                    return;
+                }
+                _ => {}
+            }
+        }
         if let Some(action) = Action::from_key(key) {
             self.apply(action);
         }
@@ -1243,6 +1349,7 @@ impl App {
             let selection = match popup {
                 Popup::Column(picker) => &mut picker.selection,
                 Popup::Complete(picker) => &mut picker.selection,
+                Popup::Tags(picker) => &mut picker.selection,
                 Popup::Sort { selection, .. }
                 | Popup::Types { selection, .. }
                 | Popup::PrFilter { selection, .. } => selection,
@@ -1313,6 +1420,7 @@ impl App {
             Action::OpenInBrowser
             | Action::AssignToMe
             | Action::Unassign
+            | Action::Tag
             | Action::ChangeColumn
             | Action::Complete
             | Action::Sort
@@ -1333,6 +1441,7 @@ impl App {
             Action::ChangeColumn => self.change_column(false),
             Action::Complete => self.complete(),
             Action::Unassign => self.unassign(),
+            Action::Tag => self.tag(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);
@@ -1769,7 +1878,7 @@ mod tests {
     fn esc_in_cancelable_pat_dialog_returns_to_main() {
         let mut app = app();
 
-        press(&mut app, KeyCode::Char('t'));
+        press(&mut app, KeyCode::Char('T'));
         assert!(matches!(
             app.screen,
             Screen::Setup(SetupStep::EnterPat { .. })
@@ -1783,7 +1892,7 @@ mod tests {
     #[test]
     fn text_input_takes_letters_instead_of_actions() {
         let mut app = app();
-        press(&mut app, KeyCode::Char('t'));
+        press(&mut app, KeyCode::Char('T'));
 
         for c in "qj?".chars() {
             press(&mut app, KeyCode::Char(c));

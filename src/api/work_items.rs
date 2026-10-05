@@ -8,9 +8,10 @@ use super::models::{
     SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails, WorkItemResponse,
     WorkItemTypeCategory,
 };
+use crate::rich_text::RichText;
 
 const MAX_WORK_ITEMS: &str = "200";
-const FIELDS: [&str; 9] = [
+const FIELDS: [&str; 10] = [
     "System.Title",
     "System.WorkItemType",
     "System.State",
@@ -20,6 +21,7 @@ const FIELDS: [&str; 9] = [
     "System.ChangedDate",
     "System.CreatedDate",
     "System.AssignedTo",
+    "System.Tags",
 ];
 const CHILD_LINK: &str = "System.LinkTypes.Hierarchy-Forward";
 const ARTIFACT_LINK: &str = "ArtifactLink";
@@ -27,7 +29,6 @@ const PULL_REQUEST_ARTIFACT: &str = "vstfs:///Git/PullRequestId/";
 const HIDDEN_CATEGORY: &str = "Microsoft.HiddenCategory";
 const COMMENTS_API_VERSION: &str = "7.1-preview.4";
 const MAX_COMMENTS: &str = "10";
-const HTML_TEXT_WIDTH: usize = 10_000;
 
 impl AdoClient {
     pub async fn sprint_work_items(
@@ -98,6 +99,10 @@ impl AdoClient {
             self.work_items_batch(organization, project, &child_ids),
             self.linked_pull_requests(organization, &item.relations),
         );
+        let formats = item.multiline_fields_format;
+        let rich_text = |name: &str, value: Option<String>| {
+            value.map(|value| to_rich_text(&value, formats.get(name).map(String::as_str)))
+        };
         let fields = item.fields;
         Ok(WorkItemDetails {
             children: children?,
@@ -108,9 +113,12 @@ impl AdoClient {
             assigned_to: fields.assigned_to.map(|identity| identity.display_name),
             iteration_path: fields.iteration_path,
             tags: fields.tags,
-            description: fields.description.as_deref().map(html_to_text),
-            acceptance_criteria: fields.acceptance_criteria.as_deref().map(html_to_text),
-            repro_steps: fields.repro_steps.as_deref().map(html_to_text),
+            description: rich_text("System.Description", fields.description),
+            acceptance_criteria: rich_text(
+                "Microsoft.VSTS.Common.AcceptanceCriteria",
+                fields.acceptance_criteria,
+            ),
+            repro_steps: rich_text("Microsoft.VSTS.TCM.ReproSteps", fields.repro_steps),
             comment_count: comments.total_count,
             comments: comments
                 .comments
@@ -118,7 +126,7 @@ impl AdoClient {
                 .map(|comment| DetailComment {
                     author: comment.created_by.display_name,
                     date: comment.created_date,
-                    text: html_to_text(&comment.text),
+                    text: to_rich_text(&comment.text, comment.format.as_deref()),
                 })
                 .collect(),
         })
@@ -350,16 +358,12 @@ fn visible_types(categories: Vec<WorkItemTypeCategory>) -> Vec<String> {
     types
 }
 
-/// Plain text with `<img>` tags turned into image marker lines.
-fn html_to_text(html: &str) -> String {
-    let html = crate::images::extract_html_images(html);
-    let text = html2text::from_read(html.as_bytes(), HTML_TEXT_WIDTH).unwrap_or(html);
-    text.lines()
-        .map(str::trim_end)
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string()
+fn to_rich_text(value: &str, format: Option<&str>) -> RichText {
+    if format.is_some_and(|format| format.eq_ignore_ascii_case("markdown")) {
+        RichText::from_markdown(value)
+    } else {
+        RichText::from_html(value)
+    }
 }
 
 fn quote(value: &str) -> String {
@@ -399,7 +403,11 @@ mod tests {
 
     #[test]
     fn html_to_text_strips_markup() {
-        let text = html_to_text("<div>Hello <b>world</b> &amp; more</div><p>Second</p>");
+        let text = to_rich_text(
+            "<div>Hello <b>world</b> &amp; more</div><p>Second</p>",
+            None,
+        )
+        .plain();
 
         assert!(text.contains("Hello"));
         assert!(text.contains("world"));
@@ -580,11 +588,14 @@ mod tests {
         assert_eq!(details.state, "Active");
         assert!(details.board_column_done);
         assert_eq!(details.assigned_to.as_deref(), Some("Anna"));
-        assert_eq!(details.description.as_deref(), Some("Do the **thing**"));
+        assert_eq!(
+            details.description.map(|text| text.plain()).as_deref(),
+            Some("Do the thing")
+        );
         assert_eq!(ids_of_items(&details.children), [11, 12]);
         assert_eq!(details.comment_count, 3);
         assert_eq!(details.comments[0].author, "Bo");
-        assert_eq!(details.comments[0].text, "Looks good");
+        assert_eq!(details.comments[0].text.plain(), "Looks good");
     }
 
     #[tokio::test]

@@ -195,7 +195,7 @@ The app runs natively on Windows. Use Windows Terminal; the old console host lac
 
 When there is no config file, the app runs a setup:
 
-1. **Sign in**: uses the Azure CLI token. If that fails, the error is shown and you can press `r` to try again (for example after `az login`) or `t` to enter a PAT. The PAT is saved in the OS keyring.
+1. **Sign in**: uses the Azure CLI token. If that fails, the error is shown and you can press `r` to try again (for example after `az login`) or `T` to enter a PAT. The PAT is saved in the OS keyring.
 2. **Organization**: picked from the organizations your account belongs to. If the list cannot be fetched (for example with a PAT that is limited to one organization), you type the name or paste the URL, such as `https://dev.azure.com/myorg`.
 3. **Project** and then **team**: picked from lists.
 4. **Ready column**: picked from your team's board columns.
@@ -287,7 +287,7 @@ Create a PAT in Azure DevOps (*User settings → Personal access tokens*) with t
 - **Project and Team**: Read
 - **Identity**: Read, needed only if you use `other_prs_filter`
 
-The token is stored in the OS keyring under the service `azuredevopstui`. If Azure DevOps rejects it, the app removes it and asks for a new one. Press `t` to replace it at any time.
+The token is stored in the OS keyring under the service `azuredevopstui`. If Azure DevOps rejects it, the app removes it and asks for a new one. Press `T` to replace it at any time.
 
 ## Configuration
 
@@ -410,10 +410,11 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
+| `t` | Edit tags on your work item: type to search, `enter` adds the tag or removes it if it is already set (✓). A tag that does not exist is created |
 | `c` | Complete your ready PR: pick the merge strategy, then `enter`. `esc` cancels and nothing is completed |
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `r` | Reload everything |
-| `t` | Enter a new PAT |
+| `T` | Enter a new PAT |
 | `?` | Show all keys |
 | `esc` | Close a popup or cancel, or close the open item to show the sprint overview |
 | `q`, `ctrl+c` | Quit |

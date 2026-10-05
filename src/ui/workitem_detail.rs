@@ -1,7 +1,9 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{badge, empty, field, heading, loading, short_date, state_color, type_color, wrap};
+use super::{
+    badge, empty, field, heading, loading, rich_lines, short_date, state_color, type_color,
+};
 use crate::api::{WorkItem, WorkItemDetails};
 use crate::app::{App, DetailTab};
 
@@ -123,10 +125,10 @@ fn overview(
         ("Repro steps", &details.repro_steps),
         ("Acceptance criteria", &details.acceptance_criteria),
     ] {
-        if let Some(text) = text.as_deref().filter(|t| !t.is_empty()) {
+        if let Some(text) = text.as_ref().filter(|t| !t.is_empty()) {
             lines.push(Line::default());
             lines.push(heading(app, title, width));
-            lines.extend(wrap(text, width, Span::raw("  ")));
+            lines.extend(rich_lines(app, text, width, Span::raw("  ")));
         }
     }
     lines
@@ -193,7 +195,7 @@ fn comments(app: &App, details: &WorkItemDetails, width: u16) -> Vec<Line<'stati
             ),
             Span::styled(format!(" · {}", short_date(&comment.date)), muted),
         ]));
-        lines.extend(wrap(&comment.text, width, bar.clone()));
+        lines.extend(rich_lines(app, &comment.text, width, bar.clone()));
         lines.push(Line::default());
     }
     let shown = details.comments.len();

@@ -1,9 +1,12 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::{badge, empty, field, heading, loading, short_date, state_color, type_color, wrap};
+use super::{
+    badge, empty, field, heading, loading, rich_lines, short_date, state_color, type_color,
+};
 use crate::api::{PullRequest, PullRequestDetails, Thread};
 use crate::app::{App, DetailTab};
+use crate::rich_text::RichText;
 
 pub fn lines(
     app: &App,
@@ -123,7 +126,12 @@ fn overview(
     if let Some(description) = pr.description.as_deref().filter(|d| !d.trim().is_empty()) {
         lines.push(Line::default());
         lines.push(heading(app, "Description", width));
-        lines.extend(wrap(description, width, Span::raw("  ")));
+        lines.extend(rich_lines(
+            app,
+            &RichText::from_markdown(description),
+            width,
+            Span::raw("  "),
+        ));
     }
     lines
 }
@@ -194,8 +202,9 @@ fn comments(app: &App, details: &PullRequestDetails, width: u16) -> Vec<Line<'st
                         muted,
                     ),
                 ]));
-                lines.extend(wrap(
-                    comment.content.as_deref().unwrap_or_default(),
+                lines.extend(rich_lines(
+                    app,
+                    &RichText::from_markdown(comment.content.as_deref().unwrap_or_default()),
                     width,
                     bar.clone(),
                 ));

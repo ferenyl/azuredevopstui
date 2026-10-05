@@ -10,7 +10,7 @@ use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 #[derive(Clone)]
 pub enum Detail {
     PullRequest(Box<PullRequest>),
-    WorkItem(WorkItem),
+    WorkItem(Box<WorkItem>),
     Build(Box<Build>),
 }
 
@@ -82,6 +82,7 @@ pub enum SortKind {
 pub enum Popup {
     Column(ColumnPicker),
     Complete(CompletePicker),
+    Tags(TagPicker),
     Sort {
         kind: SortKind,
         selection: Selection,
@@ -108,6 +109,69 @@ pub struct CompletePicker {
     pub pr: Box<PullRequest>,
     pub strategies: Vec<MergeStrategy>,
     pub selection: Selection,
+}
+
+pub struct TagPicker {
+    pub work_item_id: u32,
+    pub current: Vec<String>,
+    /// Existing tags, most recently used first.
+    pub tags: Vec<String>,
+    pub query: String,
+    /// Matching tags on the item, then other matching tags, then the query when it would be a new tag.
+    pub selection: Selection,
+}
+
+impl TagPicker {
+    pub fn new(work_item_id: u32, current: Vec<String>, tags: Vec<String>) -> Self {
+        let mut picker = Self {
+            work_item_id,
+            current,
+            tags,
+            query: String::new(),
+            selection: Selection::new(Vec::new()),
+        };
+        picker.filter();
+        picker
+    }
+
+    pub fn filter(&mut self) {
+        let query = self.query.trim().to_lowercase();
+        let others = self.tags.iter().filter(|tag| !self.has(tag));
+        let mut items: Vec<String> = self
+            .current
+            .iter()
+            .chain(others)
+            .filter(|tag| tag.to_lowercase().contains(&query))
+            .cloned()
+            .collect();
+        let exists = self.tags.iter().any(|tag| tag.to_lowercase() == query);
+        if !query.is_empty() && !exists && !self.has(&query) {
+            items.push(self.query.trim().to_string());
+        }
+        self.selection = Selection::new(items);
+    }
+
+    /// Whether `index` is the query offered as a new tag.
+    pub fn is_new(&self, index: usize) -> bool {
+        self.selection
+            .items
+            .get(index)
+            .is_some_and(|item| !self.tags.contains(item) && !self.has(item))
+    }
+
+    /// Whether `index` is a tag already on the item.
+    pub fn is_current(&self, index: usize) -> bool {
+        self.selection
+            .items
+            .get(index)
+            .is_some_and(|item| self.has(item))
+    }
+
+    pub fn has(&self, tag: &str) -> bool {
+        self.current
+            .iter()
+            .any(|current| current.eq_ignore_ascii_case(tag))
+    }
 }
 
 pub enum DetailInfo {
@@ -264,7 +328,7 @@ impl Data {
             .flatten()
             .filter_map(|pr| Some(pr_entry(pr, pr.review.since.as_deref()?)));
         let mentions = self.mentions.iter().flatten().map(|mention| InboxEntry {
-            detail: Detail::WorkItem(mention.item.clone()),
+            detail: Detail::WorkItem(Box::new(mention.item.clone())),
             since: mention.date.clone(),
         });
         let builds = self
@@ -309,7 +373,7 @@ impl Data {
                 .chain(self.mentions.iter().flatten().map(|mention| &mention.item))
                 .find(|item| item.id == current.id)
                 .cloned()
-                .map(Detail::WorkItem),
+                .map(|item| Detail::WorkItem(Box::new(item))),
             Detail::Build(current) => self
                 .builds
                 .iter()
@@ -342,7 +406,11 @@ impl Data {
                 .map(|pr| Detail::PullRequest(Box::new(pr)))
         };
         let item = |items: &Option<Vec<WorkItem>>| {
-            items.as_ref()?.get(index).cloned().map(Detail::WorkItem)
+            items
+                .as_ref()?
+                .get(index)
+                .cloned()
+                .map(|item| Detail::WorkItem(Box::new(item)))
         };
         match panel {
             Panel::Inbox => self
@@ -597,7 +665,7 @@ mod tests {
     #[test]
     fn detail_kind_matches_only_same_type_and_id() {
         let pr = Detail::PullRequest(Box::new(pull_request(5, "PR", "u", "2026-10-01")));
-        let item = Detail::WorkItem(work_item(5, "Item", "Bug", "New"));
+        let item = Detail::WorkItem(Box::new(work_item(5, "Item", "Bug", "New")));
 
         assert!(pr.is_pull_request(5));
         assert!(!pr.is_work_item(5));
@@ -608,7 +676,7 @@ mod tests {
     #[test]
     fn tabs_depend_on_detail_kind() {
         let pr = Detail::PullRequest(Box::new(pull_request(5, "PR", "u", "2026-10-01")));
-        let item = Detail::WorkItem(work_item(5, "Item", "Bug", "New"));
+        let item = Detail::WorkItem(Box::new(work_item(5, "Item", "Bug", "New")));
 
         assert_eq!(
             pr.tabs(),
