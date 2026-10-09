@@ -12,6 +12,7 @@ pub use state::{
 
 use std::time::{Duration, Instant};
 
+use crossterm::clipboard::CopyToClipboard;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::DefaultTerminal;
@@ -30,6 +31,7 @@ use message::Message;
 use setup::organization_name;
 
 const MAX_RECENT_TAGS: usize = 20;
+const NOTICE_DURATION: Duration = Duration::from_secs(3);
 
 pub enum Screen {
     Setup(SetupStep),
@@ -56,6 +58,8 @@ pub struct App {
     board: Option<Board>,
     last_left: Panel,
     pub error: Option<String>,
+    /// Short confirmation shown in the toolbar until it expires.
+    notice: Option<(String, Instant)>,
     pub images: Images,
     client: Option<AdoClient>,
     tx: UnboundedSender<Message>,
@@ -88,6 +92,7 @@ impl App {
             board: None,
             last_left: Panel::Inbox,
             error: None,
+            notice: None,
             images: Images::new(picker),
             client: None,
             tx,
@@ -148,6 +153,9 @@ impl App {
                     Action::Cancel,
                 ]
             }
+            Screen::Main if matches!(self.popup, Some(Popup::Comment { .. })) => {
+                &[Action::Confirm, Action::Cancel]
+            }
             Screen::Main if self.popup.is_some() => {
                 &[Action::Down, Action::Confirm, Action::Cancel]
             }
@@ -159,6 +167,8 @@ impl App {
                     Action::Confirm,
                     Action::Complete,
                     Action::OpenInBrowser,
+                    Action::Copy,
+                    Action::CopyLink,
                     Action::Sort,
                     Action::Filter,
                     Action::Reload,
@@ -171,6 +181,8 @@ impl App {
                     Action::NextTab,
                     Action::Confirm,
                     Action::OpenInBrowser,
+                    Action::Copy,
+                    Action::CopyLink,
                     Action::Sort,
                     Action::Filter,
                     Action::Reload,
@@ -185,7 +197,10 @@ impl App {
                     Action::ChangeColumn,
                     Action::Unassign,
                     Action::Tag,
+                    Action::Comment,
                     Action::OpenInBrowser,
+                    Action::Copy,
+                    Action::CopyLink,
                     Action::Sort,
                     Action::Filter,
                     Action::Reload,
@@ -197,6 +212,7 @@ impl App {
                     Action::FocusRight,
                     Action::Confirm,
                     Action::OpenInBrowser,
+                    Action::CopyLink,
                     Action::Reload,
                     Action::Help,
                     Action::Quit,
@@ -207,7 +223,10 @@ impl App {
                     Action::Confirm,
                     Action::ChangeColumn,
                     Action::AssignToMe,
+                    Action::Comment,
                     Action::OpenInBrowser,
+                    Action::Copy,
+                    Action::CopyLink,
                     Action::Sort,
                     Action::Filter,
                     Action::Reload,
@@ -234,10 +253,8 @@ impl App {
         }
     }
 
-    fn open_in_browser(&mut self) {
-        let (Some(item), Some(config)) = (self.current_item(), &self.config) else {
-            return;
-        };
+    fn current_url(&self) -> Option<String> {
+        let (item, config) = (self.current_item()?, self.config.as_ref()?);
         let url = match &item {
             Detail::PullRequest(pr) => api::pull_request_url(
                 &config.organization,
@@ -251,6 +268,13 @@ impl App {
             Detail::Build(build) => {
                 api::build_results_url(&config.organization, &config.project, build.id)
             }
+        };
+        Some(url.to_string())
+    }
+
+    fn open_in_browser(&mut self) {
+        let (Some(url), Some(config)) = (self.current_url(), &self.config) else {
+            return;
         };
         let result = match &config.browser_command {
             Some(command) => {
@@ -273,6 +297,36 @@ impl App {
             tracing::warn!("failed to open browser: {err}");
             self.error = Some(format!("failed to open browser: {err}"));
         }
+    }
+
+    fn copy_number(&mut self) {
+        let id = match self.current_item() {
+            Some(Detail::PullRequest(pr)) => format!("!{}", pr.pull_request_id),
+            Some(Detail::WorkItem(item)) => format!("#{}", item.id),
+            Some(Detail::Build(_)) | None => return,
+        };
+        self.copy(id);
+    }
+
+    fn copy_link(&mut self) {
+        if let Some(url) = self.current_url() {
+            self.copy(url);
+        }
+    }
+
+    fn copy(&mut self, text: String) {
+        let copy = CopyToClipboard::to_clipboard_from(text.as_str());
+        match crossterm::execute!(std::io::stdout(), copy) {
+            Ok(()) => self.notice = Some((format!("copied {text}"), Instant::now())),
+            Err(err) => self.error = Some(format!("failed to copy: {err}")),
+        }
+    }
+
+    pub fn notice(&self) -> Option<&str> {
+        self.notice
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() < NOTICE_DURATION)
+            .map(|(text, _)| text.as_str())
     }
 
     fn current_work_item(&self) -> Option<WorkItem> {
@@ -391,6 +445,33 @@ impl App {
         self.spawn(async move {
             let result = client
                 .set_work_item_tags(&organization, &project, id, &tags)
+                .await;
+            Message::WorkItemUpdated { id, result }
+        });
+    }
+
+    fn open_comment(&mut self) {
+        if let Some(item) = self.current_work_item() {
+            self.popup = Some(Popup::Comment {
+                work_item_id: item.id,
+                text: String::new(),
+            });
+        }
+    }
+
+    fn confirm_comment(&mut self, id: u32, text: String) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        // Markdown joins single newlines; trailing spaces make them line breaks.
+        let text = text.replace('\n', "  \n");
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        self.spawn(async move {
+            let result = client
+                .add_work_item_comment(&config.organization, &config.project, id, &text)
                 .await;
             Message::WorkItemUpdated { id, result }
         });
@@ -560,6 +641,7 @@ impl App {
             Some(Popup::Column(picker)) => self.confirm_column(picker),
             Some(Popup::Complete(picker)) => self.confirm_complete(picker),
             Some(Popup::Tags(picker)) => self.confirm_tags(picker),
+            Some(Popup::Comment { work_item_id, text }) => self.confirm_comment(work_item_id, text),
             Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
             Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
             Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
@@ -1331,6 +1413,27 @@ impl App {
                 _ => {}
             }
         }
+        if let Some(Popup::Comment { text, .. }) = &mut self.popup {
+            match key.code {
+                KeyCode::Enter
+                    if key
+                        .modifiers
+                        .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+                {
+                    text.push('\n');
+                    return;
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    text.push(c);
+                    return;
+                }
+                KeyCode::Backspace => {
+                    text.pop();
+                    return;
+                }
+                _ => {}
+            }
+        }
         if let Some(action) = Action::from_key(key) {
             self.apply(action);
         }
@@ -1345,11 +1448,21 @@ impl App {
             }
             return;
         }
+        if matches!(self.popup, Some(Popup::Comment { .. })) {
+            match action {
+                Action::Confirm => self.confirm_popup(),
+                Action::Cancel => self.popup = None,
+                Action::Quit => self.should_quit = true,
+                _ => {}
+            }
+            return;
+        }
         if let Some(popup) = &mut self.popup {
             let selection = match popup {
                 Popup::Column(picker) => &mut picker.selection,
                 Popup::Complete(picker) => &mut picker.selection,
                 Popup::Tags(picker) => &mut picker.selection,
+                Popup::Comment { .. } => return,
                 Popup::Sort { selection, .. }
                 | Popup::Types { selection, .. }
                 | Popup::PrFilter { selection, .. } => selection,
@@ -1418,9 +1531,12 @@ impl App {
                 Screen::Setup(_) => self.confirm_setup_step(),
             },
             Action::OpenInBrowser
+            | Action::Copy
+            | Action::CopyLink
             | Action::AssignToMe
             | Action::Unassign
             | Action::Tag
+            | Action::Comment
             | Action::ChangeColumn
             | Action::Complete
             | Action::Sort
@@ -1430,6 +1546,8 @@ impl App {
             | Action::PrevTab
                 if !matches!(self.screen, Screen::Main) => {}
             Action::OpenInBrowser => self.open_in_browser(),
+            Action::Copy => self.copy_number(),
+            Action::CopyLink => self.copy_link(),
             Action::Sort => self.open_sort_picker(),
             Action::Filter => match self.current_item() {
                 Some(Detail::PullRequest(_)) => self.open_pr_filter(),
@@ -1442,6 +1560,7 @@ impl App {
             Action::Complete => self.complete(),
             Action::Unassign => self.unassign(),
             Action::Tag => self.tag(),
+            Action::Comment => self.open_comment(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);

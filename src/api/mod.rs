@@ -158,7 +158,19 @@ impl AdoClient {
         query: &[(&str, &str)],
         body: &Value,
     ) -> Result<T> {
-        let url = build_url(base, segments, query, API_VERSION)?;
+        self.post_versioned(base, segments, query, body, API_VERSION)
+            .await
+    }
+
+    async fn post_versioned<T: DeserializeOwned>(
+        &self,
+        base: &str,
+        segments: &[&str],
+        query: &[(&str, &str)],
+        body: &Value,
+        api_version: &str,
+    ) -> Result<T> {
+        let url = build_url(base, segments, query, api_version)?;
         self.request(Method::POST, url, Some(body)).await
     }
 

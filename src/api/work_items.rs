@@ -180,6 +180,33 @@ impl AdoClient {
         Ok(mentions.into_iter().flatten().collect())
     }
 
+    pub async fn add_work_item_comment(
+        &self,
+        organization: &str,
+        project: &str,
+        id: u32,
+        text: &str,
+    ) -> Result<()> {
+        let _: serde_json::Value = self
+            .post_versioned(
+                &self.urls.dev_azure,
+                &[
+                    organization,
+                    project,
+                    "_apis",
+                    "wit",
+                    "workItems",
+                    &id.to_string(),
+                    "comments",
+                ],
+                &[("format", "markdown")],
+                &json!({ "text": text }),
+                COMMENTS_API_VERSION,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// The newest comments first.
     async fn comments(&self, organization: &str, project: &str, id: u32) -> Result<CommentList> {
         self.get_versioned(

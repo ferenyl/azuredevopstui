@@ -26,6 +26,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             Style::new().fg(theme.error),
         ));
     }
+    if let Some(notice) = app.notice() {
+        spans.push(Span::styled(
+            format!("  {notice}"),
+            Style::new().fg(theme.build_succeeded),
+        ));
+    }
     let updated = app
         .last_updated
         .map(|at| format!("updated {} · ", ago(at.elapsed().as_secs())))

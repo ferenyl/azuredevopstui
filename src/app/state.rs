@@ -83,6 +83,10 @@ pub enum Popup {
     Column(ColumnPicker),
     Complete(CompletePicker),
     Tags(TagPicker),
+    Comment {
+        work_item_id: u32,
+        text: String,
+    },
     Sort {
         kind: SortKind,
         selection: Selection,

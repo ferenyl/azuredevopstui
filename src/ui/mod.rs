@@ -86,6 +86,10 @@ pub fn render(frame: &mut Frame, app: &App) {
             let title = format!(" Tag #{}: {}▏", picker.work_item_id, picker.query);
             popup::render_picker(frame, app, &title, &selection, main);
         }
+        Some(Popup::Comment { work_item_id, text }) => {
+            let title = format!(" Comment #{work_item_id} · shift/alt+enter: new line ");
+            popup::render_text_input(frame, app, &title, text, main);
+        }
         Some(Popup::Sort { kind, selection }) => {
             let title = match kind {
                 SortKind::PullRequests => " Sort PRs ",
