@@ -7,7 +7,7 @@ use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
-    let mut spans: Vec<Span> = app
+    let spans: Vec<Span> = app
         .actions()
         .iter()
         .flat_map(|action| {
@@ -20,18 +20,6 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             ]
         })
         .collect();
-    if let Some(error) = &app.error {
-        spans.push(Span::styled(
-            format!("  {error}"),
-            Style::new().fg(theme.error),
-        ));
-    }
-    if let Some(notice) = app.notice() {
-        spans.push(Span::styled(
-            format!("  {notice}"),
-            Style::new().fg(theme.build_succeeded),
-        ));
-    }
     let updated = app
         .last_updated
         .map(|at| format!("updated {} · ", ago(at.elapsed().as_secs())))
@@ -41,15 +29,31 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .as_ref()
         .map(|user| format!("{updated}{} ", user.provider_display_name))
         .unwrap_or_default();
-    let [actions_area, user_area] = Layout::horizontal([
+    // Status sits on the right so it stays visible when the actions overflow.
+    let mut status = Vec::new();
+    if let Some(error) = &app.error {
+        status.push(Span::styled(
+            format!("{error}  "),
+            Style::new().fg(theme.error),
+        ));
+    }
+    if let Some(notice) = app.notice() {
+        status.push(Span::styled(
+            format!("{notice}  "),
+            Style::new().fg(theme.build_succeeded),
+        ));
+    }
+    status.push(Span::styled(user, Style::new().fg(theme.muted)));
+    let status = Line::from(status);
+    let [actions_area, status_area] = Layout::horizontal([
         Constraint::Min(0),
-        Constraint::Length(user.chars().count() as u16),
+        Constraint::Length(status.width() as u16),
     ])
     .areas(area);
 
     let style = Style::new().bg(theme.toolbar_bg);
     frame.render_widget(Line::from(spans).style(style), actions_area);
-    frame.render_widget(Line::from(user).style(style.fg(theme.muted)), user_area);
+    frame.render_widget(status.style(style), status_area);
 }
 
 fn ago(secs: u64) -> String {

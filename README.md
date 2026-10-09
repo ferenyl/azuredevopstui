@@ -4,22 +4,7 @@ A terminal UI for keeping track of your work in Azure DevOps. It shows your pull
 
 Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 
-```
-┌ My PRs (3) · newest ┐┌ !1234 Add order filter ──────────────────────────────────┐
-│!1234 Add order filt ││  Overview │ Comments (2) │ Checks (5)                    │
-│!1230 Fix login      ││ ──────────────────────────────────────────────────────── │
-└─────────────────────┘│ Status       ● active                                    │
-┌ My work items (4) · ┐│ Repo         myapp-api                                   │
-│#5678 Order list  P1 ││ Branch       feature/1234 → main                         │
-└─────────────────────┘│ Merge        succeeded                                   │
-┌ Others' PRs (12) ·  ┐│                                                          │
-│!1240 Bump packages  ││ ▍Reviewers ───────────────────────────────────────────── │
-└─────────────────────┘│   ✔ Anna Andersson  approved  required                   │
-┌ Ready – Sprint 41 ( ┐│   ○ Bo Bengtsson    no vote                              │
-│#5700 Export to CSV  ││                                                          │
-└─────────────────────┘└──────────────────────────────────────────────────────────┘
- [j/k/↑/↓] move/scroll [ctrl+hjkl] change box/column [tab] next tab …   updated 8s ago
-```
+![Pull request overview](docs/screenshots/pull-request.png)
 
 ## Features
 
@@ -53,6 +38,34 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 - **Auto refresh** at a configurable interval. The open detail view refreshes too.
 - **Setup wizard** on first start. Organization, project, team and the ready column are picked from lists fetched from Azure DevOps.
 - **Authentication** uses the Azure CLI first and falls back to a Personal Access Token stored in the OS keyring.
+
+## Screenshots
+
+All screenshots use made-up data.
+
+**Pull request comments**, grouped by status with file paths:
+
+![Pull request comments](docs/screenshots/pr-comments.png)
+
+**Pull request checks**: branch policies and statuses:
+
+![Pull request checks](docs/screenshots/pr-checks.png)
+
+**Work item** with tags, linked pull requests, description and acceptance criteria:
+
+![Work item](docs/screenshots/work-item.png)
+
+**Commenting** on a work item:
+
+![Comment popup](docs/screenshots/comment.png)
+
+**Tag picker**: type to search, or create a new tag:
+
+![Tag picker](docs/screenshots/tags.png)
+
+**Help** with all keys:
+
+![Help](docs/screenshots/help.png)
 
 ## Requirements
 
@@ -411,8 +424,11 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
 | `t` | Edit tags on your work item: type to search, `enter` adds the tag or removes it if it is already set (✓). A tag that does not exist is created |
+| `m` | Comment on a work item: type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels |
 | `c` | Complete your ready PR: pick the merge strategy, then `enter`. `esc` cancels and nothing is completed |
 | `o` | Open the PR, work item or pipeline run in the browser |
+| `y` | Copy the PR (`!1234`) or work item (`#5678`) number |
+| `Y` | Copy the link to the PR, work item or pipeline run |
 | `r` | Reload everything |
 | `T` | Enter a new PAT |
 | `?` | Show all keys |
