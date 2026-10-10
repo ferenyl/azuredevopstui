@@ -51,7 +51,11 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 
 pub fn render_picker(frame: &mut Frame, app: &App, title: &str, selection: &Selection, area: Rect) {
     let theme = &app.theme;
-    let longest = selection.items.iter().map(|item| item.chars().count()).max();
+    let longest = selection
+        .items
+        .iter()
+        .map(|item| item.chars().count())
+        .max();
     let width = (longest.unwrap_or(0) as u16 + 4).max(36);
     let area = centered(area, width, selection.items.len() as u16 + 2);
 
