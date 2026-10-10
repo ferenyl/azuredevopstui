@@ -86,6 +86,41 @@ pub fn render(frame: &mut Frame, app: &App) {
             let title = format!(" Tag #{}: {}▏", picker.work_item_id, picker.query);
             popup::render_picker(frame, app, &title, &selection, main);
         }
+        Some(Popup::Sprint(picker)) => {
+            let items = picker
+                .selection
+                .items
+                .iter()
+                .map(|path| {
+                    let Some(sprint) = picker.sprint(path) else {
+                        return path.clone();
+                    };
+                    let day = |date: &Option<String>| {
+                        date.as_deref()
+                            .map(|date| short_date(date).get(..10).unwrap_or_default().to_string())
+                    };
+                    let dates = match (
+                        day(&sprint.attributes.start_date),
+                        day(&sprint.attributes.finish_date),
+                    ) {
+                        (Some(start), Some(finish)) => format!("  {start} – {finish}"),
+                        _ => String::new(),
+                    };
+                    let current = if sprint.is_current() {
+                        "  (current)"
+                    } else {
+                        ""
+                    };
+                    format!("{}{dates}{current}", sprint.name)
+                })
+                .collect();
+            let selection = Selection {
+                items,
+                selected: picker.selection.selected,
+            };
+            let title = format!(" Sprint: {}▏", picker.query);
+            popup::render_picker(frame, app, &title, &selection, main);
+        }
         Some(Popup::Comment { work_item_id, text }) => {
             let title = format!(" Comment #{work_item_id} · shift/alt+enter: new line ");
             popup::render_text_input(frame, app, &title, text, main);

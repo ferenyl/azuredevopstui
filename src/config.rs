@@ -26,6 +26,9 @@ pub struct Config {
     pub other_prs_filter: OtherPrsFilter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready_column: Option<String>,
+    /// Iteration path shown instead of the team's current sprint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_sprint: Option<String>,
     /// Empty shows all types.
     #[serde(default)]
     pub work_item_types: Vec<String>,
@@ -196,6 +199,7 @@ impl Config {
             auth: AuthConfig::default(),
             other_prs_filter: OtherPrsFilter::default(),
             ready_column: None,
+            default_sprint: None,
             work_item_types: Vec::new(),
             sort: SortConfig::default(),
             merge_strategy: None,

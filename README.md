@@ -16,6 +16,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - **Ready**: items in the current sprint that sit in your *ready* board column and are not assigned to you. The title shows the work days left in the sprint.
   - **My pipelines**: the latest run per pipeline and branch that you triggered in the last 14 days, also for branches without a PR. Pull request runs are left out; they show up in the PR's checks.
 - **Sprint overview** in the detail panel when nothing is open: the sprint dates, the work days left and your items per board column. `esc` closes an open item and brings it back.
+- **Sprint picker**: press `i` to show another sprint than the current one. See [Sprint](#sprint).
 - **Detail panel** with tabs:
   - **Pipeline run**: pipeline, run number, branch, status, reason, times and duration.
   - **Pull request**:
@@ -319,6 +320,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
     "creators": []
   },
   "ready_column": "Ready",
+  "default_sprint": "MyProject\\Sprint 42",
   "work_item_types": [],
   "show_images": true,
   "sort": {
@@ -343,6 +345,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `other_prs_filter.show_approved` | `false` | Also show PRs whose reviewer policies are approved (set with `f`). |
 | `other_prs_filter.show_drafts` | `false` | Also show draft PRs (set with `f`). |
 | `ready_column` | set by setup | The board column treated as *ready*. |
+| `default_sprint` | not set | Iteration path of the sprint shown at start instead of the team's current sprint, for example `"MyProject\\Sprint 42"`. See [Sprint](#sprint). |
 | `work_item_types` | `[]` | Work item types shown in *My work items* and *Ready*, for example `["User Story", "Bug"]`. An empty array shows all types. |
 | `show_images` | `true` | Draw images in the detail panel when the terminal supports graphics. Set it to `false` to skip the terminal graphics query at startup. |
 | `sort.pull_requests` | `"newest"` | Sort order for both PR lists. |
@@ -379,6 +382,10 @@ Press `S` on a list to choose the order. PR lists and work item lists each have 
 Press `f` to open a list of all work item types used in the project. Hidden types such as test plans and code reviews are left out. Use `space` to tick or untick a type, and `enter` to save the choice to `work_item_types` and reload the lists. The filter applies to both work item lists. All types are shown by default, and ticking every type (or none) also shows all of them.
 
 On a PR, `f` instead opens the filter for others' PRs: tick *Show approved* and *Show drafts* to list those too. Both are hidden by default. A PR counts as approved when all its blocking reviewer policies are approved, or, without such policies, when someone has approved it. Your own PRs are always all shown.
+
+### Sprint
+
+The work item lists and the sprint overview show the team's current sprint, or `default_sprint` when it is set. Press `i` to pick another sprint: the list shows all of the team's sprints with their dates, furthest in the future first, and marks the current one. Type to search by iteration path and press `enter` to show that sprint. The choice lasts until the app is restarted; set `default_sprint` to keep it.
 
 ### Colors
 
@@ -420,6 +427,7 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `S` | Choose the sort order for the focused list |
 | `f` | Choose which work item types are shown, or on a PR, filter others' PRs |
 | `space` | Tick or untick an item in the type list |
+| `i` | Pick the sprint to show: type to search, `enter` selects |
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
@@ -490,8 +498,8 @@ If startup hangs for a moment or the first key press is lost, the terminal does 
 
 - **My PRs**: `status=active` with you as the creator, across all repositories in the project.
 - **Others' PRs**: `status=active`, filtered by `other_prs_filter` and with your own PRs excluded.
-- **My work items**: `AssignedTo = @Me`, a state other than *Closed* or *Removed*, a type in `work_item_types` (all types when it is empty), and the team's current sprint.
-- **Ready**: `BoardColumn = <ready_column>`, `AssignedTo <> @Me`, a type in `work_item_types` (all types when it is empty), and the team's current sprint.
+- **My work items**: `AssignedTo = @Me`, a state other than *Closed* or *Removed*, a type in `work_item_types` (all types when it is empty), and the shown sprint (see [Sprint](#sprint)).
+- **Ready**: `BoardColumn = <ready_column>`, `AssignedTo <> @Me`, a type in `work_item_types` (all types when it is empty), and the shown sprint.
 
 Moving a work item sets the board column field, the column's *Done* field (for split columns) and the matching `System.State`.
 
@@ -516,7 +524,9 @@ At `debug` level every API request is logged.
 | *az login required, run `…`* | The Azure CLI login has expired or was never made. Run the command shown and press `r`. |
 | *failed to run az* | Azure CLI is not installed or not on `PATH`. On Windows the app runs `az.cmd`. |
 | `$env:RUST_LOG` on Windows | In PowerShell, set it with `$env:RUST_LOG="azuredevopstui=debug"` before you start the app. |
-| *team has no current sprint* | Set the current iteration for the team in *Project settings → Team configuration → Iterations*. |
+| *team has no current sprint* | Set the current iteration for the team in *Project settings → Team configuration → Iterations*, or set `default_sprint`. |
+| *sprint not found: …* | `default_sprint` does not match an iteration path of the team. Press `i` to see the available sprints. |
+| The lists are empty although you have items in the sprint | The team's current iteration is not the sprint you work in, for example a parallel iteration with overlapping dates. Press `i` to pick the sprint or set `default_sprint`. |
 | *X items are not on the board* | The work item type has no column on the team's board, so it cannot be moved. |
 | `ctrl+h` / `ctrl+j` do nothing | Your terminal does not support the kitty keyboard protocol. Use `ctrl+←` / `ctrl+↓`. |
 | Images show as `[image: …]` | The terminal has no graphics protocol, or `show_images` is `false`. See [Images](#images). |

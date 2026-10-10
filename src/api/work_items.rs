@@ -36,10 +36,21 @@ impl AdoClient {
         organization: &str,
         project: &str,
         team: &str,
+        sprint: Option<&str>,
         ready_column: &str,
         types: &[String],
     ) -> Result<SprintWorkItems> {
-        let iteration = self.current_iteration(organization, project, team).await?;
+        let iterations = self.iterations(organization, project, team).await?;
+        let iteration = match sprint {
+            Some(sprint) => iterations
+                .into_iter()
+                .find(|iteration| iteration.path == sprint)
+                .with_context(|| format!("sprint not found: {sprint}"))?,
+            None => iterations
+                .into_iter()
+                .find(Iteration::is_current)
+                .context("team has no current sprint")?,
+        };
         let path = quote(&iteration.path);
         let types = type_filter(types);
         let mine = format!(
@@ -244,12 +255,13 @@ impl AdoClient {
         Ok(visible_types(categories.value))
     }
 
-    async fn current_iteration(
+    /// The team's sprints, furthest in the future first.
+    pub async fn iterations(
         &self,
         organization: &str,
         project: &str,
         team: &str,
-    ) -> Result<Iteration> {
+    ) -> Result<Vec<Iteration>> {
         let iterations: ListResponse<Iteration> = self
             .get(
                 &self.urls.dev_azure,
@@ -262,14 +274,12 @@ impl AdoClient {
                     "teamsettings",
                     "iterations",
                 ],
-                &[("$timeframe", "current")],
+                &[],
             )
             .await?;
-        iterations
-            .value
-            .into_iter()
-            .next()
-            .context("team has no current sprint")
+        let mut iterations = iterations.value;
+        iterations.sort_by(|a, b| b.attributes.start_date.cmp(&a.attributes.start_date));
+        Ok(iterations)
     }
 
     async fn query_work_items(
@@ -496,9 +506,8 @@ mod tests {
             .and(path(
                 "/contoso/MyProject/My%20Team/_apis/work/teamsettings/iterations",
             ))
-            .and(query_param("$timeframe", "current"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
-                { "name": "Sprint 1", "path": "MyProject\\Sprint 1" }
+                { "name": "Sprint 1", "path": "MyProject\\Sprint 1", "attributes": { "timeFrame": "current" } }
             ]})))
             .mount(&server)
             .await;
@@ -535,7 +544,14 @@ mod tests {
         let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
 
         let sprint = client
-            .sprint_work_items("contoso", "MyProject", "My Team", "Ready", &["Bug".into()])
+            .sprint_work_items(
+                "contoso",
+                "MyProject",
+                "My Team",
+                None,
+                "Ready",
+                &["Bug".into()],
+            )
             .await
             .unwrap();
 
@@ -554,7 +570,7 @@ mod tests {
         let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
 
         let err = client
-            .sprint_work_items("contoso", "MyProject", "Team", "Ready", &[])
+            .sprint_work_items("contoso", "MyProject", "Team", None, "Ready", &[])
             .await
             .err()
             .expect("no current sprint");

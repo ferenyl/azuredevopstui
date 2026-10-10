@@ -7,7 +7,7 @@ pub use action::{Action, HELP};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
     ColumnPicker, CompletePicker, Data, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS,
-    Panel, Popup, Signals, SortKind, TagPicker,
+    Panel, Popup, Signals, SortKind, SprintPicker, TagPicker,
 };
 
 use std::time::{Duration, Instant};
@@ -52,6 +52,8 @@ pub struct App {
     pub detail_scroll: u16,
     pub detail_tab: DetailTab,
     pub popup: Option<Popup>,
+    /// Iteration path of the shown sprint; `None` is the team's current sprint.
+    sprint: Option<String>,
     pub show_help: bool,
     pub last_updated: Option<Instant>,
     last_refresh: Instant,
@@ -75,6 +77,7 @@ impl App {
                 .as_ref()
                 .map(|c| c.colors.clone())
                 .unwrap_or_default(),
+            sprint: config.as_ref().and_then(|c| c.default_sprint.clone()),
             config,
             screen: Screen::Setup(SetupStep::Loading("Signing in…")),
             focus: Panel::Inbox,
@@ -641,6 +644,7 @@ impl App {
             Some(Popup::Column(picker)) => self.confirm_column(picker),
             Some(Popup::Complete(picker)) => self.confirm_complete(picker),
             Some(Popup::Tags(picker)) => self.confirm_tags(picker),
+            Some(Popup::Sprint(picker)) => self.confirm_sprint(picker),
             Some(Popup::Comment { work_item_id, text }) => self.confirm_comment(work_item_id, text),
             Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
             Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
@@ -900,21 +904,55 @@ impl App {
             self.load_detail(detail);
         }
 
-        if let Some(ready_column) = config.ready_column.clone() {
-            self.spawn(async move {
-                Message::SprintWorkItems(
-                    client
-                        .sprint_work_items(
-                            &config.organization,
-                            &config.project,
-                            &config.team,
-                            &ready_column,
-                            &config.work_item_types,
-                        )
-                        .await,
-                )
-            });
-        }
+        self.load_sprint();
+    }
+
+    fn load_sprint(&self) {
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        let Some(ready_column) = config.ready_column.clone() else {
+            return;
+        };
+        let sprint = self.sprint.clone();
+        self.spawn(async move {
+            Message::SprintWorkItems(
+                client
+                    .sprint_work_items(
+                        &config.organization,
+                        &config.project,
+                        &config.team,
+                        sprint.as_deref(),
+                        &ready_column,
+                        &config.work_item_types,
+                    )
+                    .await,
+            )
+        });
+    }
+
+    fn load_sprints(&self) {
+        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+            return;
+        };
+        self.spawn(async move {
+            Message::Sprints(
+                client
+                    .iterations(&config.organization, &config.project, &config.team)
+                    .await,
+            )
+        });
+    }
+
+    fn confirm_sprint(&mut self, picker: SprintPicker) {
+        let Some(path) = picker.selection.current() else {
+            return;
+        };
+        self.sprint = Some(path.to_string());
+        self.data.my_work_items = None;
+        self.data.ready_work_items = None;
+        self.data.sprint_name = None;
+        self.load_sprint();
     }
 
     fn retry(&mut self, retry: Retry) {
@@ -1094,6 +1132,13 @@ impl App {
                     self.data.my_work_items = Some(sprint.mine);
                     self.data.ready_work_items = Some(sprint.ready);
                     self.last_updated = Some(Instant::now());
+                }
+                Err(err) => self.report_error(err),
+            },
+            Message::Sprints(result) => match result {
+                Ok(sprints) => {
+                    let picker = SprintPicker::new(sprints, self.sprint.as_deref());
+                    self.popup = Some(Popup::Sprint(picker));
                 }
                 Err(err) => self.report_error(err),
             },
@@ -1413,6 +1458,21 @@ impl App {
                 _ => {}
             }
         }
+        if let Some(Popup::Sprint(picker)) = &mut self.popup {
+            match key.code {
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    picker.query.push(c);
+                    picker.filter();
+                    return;
+                }
+                KeyCode::Backspace => {
+                    picker.query.pop();
+                    picker.filter();
+                    return;
+                }
+                _ => {}
+            }
+        }
         if let Some(Popup::Comment { text, .. }) = &mut self.popup {
             match key.code {
                 KeyCode::Enter
@@ -1462,6 +1522,7 @@ impl App {
                 Popup::Column(picker) => &mut picker.selection,
                 Popup::Complete(picker) => &mut picker.selection,
                 Popup::Tags(picker) => &mut picker.selection,
+                Popup::Sprint(picker) => &mut picker.selection,
                 Popup::Comment { .. } => return,
                 Popup::Sort { selection, .. }
                 | Popup::Types { selection, .. }
@@ -1541,6 +1602,7 @@ impl App {
             | Action::Complete
             | Action::Sort
             | Action::Filter
+            | Action::Sprint
             | Action::Toggle
             | Action::NextTab
             | Action::PrevTab
@@ -1553,6 +1615,7 @@ impl App {
                 Some(Detail::PullRequest(_)) => self.open_pr_filter(),
                 _ => self.load_work_item_types(),
             },
+            Action::Sprint => self.load_sprints(),
             Action::Toggle => {}
             Action::NextTab | Action::PrevTab => self.switch_tab(action == Action::NextTab),
             Action::AssignToMe => self.assign_to_me(),

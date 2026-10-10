@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::api::{
-    Board, Build, CurrentUser, Mention, PullRequest, PullRequestDetails, SprintWorkItems, WorkItem,
-    WorkItemDetails,
+    Board, Build, CurrentUser, Iteration, Mention, PullRequest, PullRequestDetails,
+    SprintWorkItems, WorkItem, WorkItemDetails,
 };
 use crate::auth::Auth;
 use crate::config::MergeStrategy;
@@ -25,6 +25,7 @@ pub enum Message {
     MyPullRequests(Result<Vec<PullRequest>>),
     OtherPullRequests(Result<Vec<PullRequest>>),
     SprintWorkItems(Result<SprintWorkItems>),
+    Sprints(Result<Vec<Iteration>>),
     Mentions(Result<Vec<Mention>>),
     Builds(Result<Vec<Build>>),
     TeamBoard(Result<Board>),

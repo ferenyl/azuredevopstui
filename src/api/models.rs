@@ -294,7 +294,7 @@ impl PolicySettings {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Iteration {
     pub name: String,
     pub path: String,
@@ -302,11 +302,18 @@ pub struct Iteration {
     pub attributes: IterationAttributes,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IterationAttributes {
     pub start_date: Option<String>,
     pub finish_date: Option<String>,
+    pub time_frame: Option<String>,
+}
+
+impl Iteration {
+    pub fn is_current(&self) -> bool {
+        self.attributes.time_frame.as_deref() == Some("current")
+    }
 }
 
 #[derive(Deserialize)]

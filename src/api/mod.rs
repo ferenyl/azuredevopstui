@@ -7,7 +7,7 @@ mod work_items;
 
 pub use boards::ColumnTarget;
 pub use models::{
-    Board, Build, CurrentUser, Mention, PullRequest, PullRequestDetails, ReviewSignals,
+    Board, Build, CurrentUser, Iteration, Mention, PullRequest, PullRequestDetails, ReviewSignals,
     SprintWorkItems, Thread, WorkItem, WorkItemDetails,
 };
 pub use pull_requests::{is_approved, is_reviewer_policy};

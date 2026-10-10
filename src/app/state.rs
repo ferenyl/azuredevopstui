@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::setup::Selection;
 use crate::api::{
-    Build, ColumnTarget, Mention, PullRequest, PullRequestDetails, WorkItem, WorkItemDetails,
-    is_approved, is_reviewer_policy,
+    Build, ColumnTarget, Iteration, Mention, PullRequest, PullRequestDetails, WorkItem,
+    WorkItemDetails, is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 
@@ -83,6 +83,7 @@ pub enum Popup {
     Column(ColumnPicker),
     Complete(CompletePicker),
     Tags(TagPicker),
+    Sprint(SprintPicker),
     Comment {
         work_item_id: u32,
         text: String,
@@ -175,6 +176,46 @@ impl TagPicker {
         self.current
             .iter()
             .any(|current| current.eq_ignore_ascii_case(tag))
+    }
+}
+
+pub struct SprintPicker {
+    /// Furthest in the future first.
+    pub sprints: Vec<Iteration>,
+    pub query: String,
+    /// Paths of the sprints matching the query.
+    pub selection: Selection,
+}
+
+impl SprintPicker {
+    pub fn new(sprints: Vec<Iteration>, selected: Option<&str>) -> Self {
+        let mut picker = Self {
+            sprints,
+            query: String::new(),
+            selection: Selection::new(Vec::new()),
+        };
+        picker.filter();
+        let selected = picker.sprints.iter().position(|sprint| match selected {
+            Some(path) => sprint.path == path,
+            None => sprint.is_current(),
+        });
+        picker.selection.selected = selected.unwrap_or(0);
+        picker
+    }
+
+    pub fn filter(&mut self) {
+        let query = self.query.trim().to_lowercase();
+        let items = self
+            .sprints
+            .iter()
+            .filter(|sprint| sprint.path.to_lowercase().contains(&query))
+            .map(|sprint| sprint.path.clone())
+            .collect();
+        self.selection = Selection::new(items);
+    }
+
+    pub fn sprint(&self, path: &str) -> Option<&Iteration> {
+        self.sprints.iter().find(|sprint| sprint.path == path)
     }
 }
 
