@@ -392,6 +392,13 @@ pub struct WorkItemResponse {
 pub struct Relation {
     pub rel: String,
     pub url: String,
+    #[serde(default)]
+    pub attributes: RelationAttributes,
+}
+
+#[derive(Default, Deserialize)]
+pub struct RelationAttributes {
+    pub name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -454,6 +461,18 @@ pub struct WorkItemDetails {
     pub comments: Vec<DetailComment>,
     pub children: Vec<WorkItem>,
     pub pull_requests: Vec<PullRequest>,
+    /// Relations other than children and pull requests, sorted by category.
+    pub links: Vec<Link>,
+}
+
+pub struct Link {
+    pub category: String,
+    pub target: LinkTarget,
+}
+
+pub enum LinkTarget {
+    WorkItem(Box<WorkItem>),
+    Text(String),
 }
 
 pub struct DetailComment {

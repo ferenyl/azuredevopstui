@@ -46,6 +46,7 @@ impl Detail {
             Self::WorkItem(_) => &[
                 DetailTab::Overview,
                 DetailTab::Children,
+                DetailTab::Links,
                 DetailTab::Comments,
             ],
             Self::Build(_) => &[DetailTab::Overview],
@@ -58,6 +59,7 @@ pub enum DetailTab {
     #[default]
     Overview,
     Children,
+    Links,
     Comments,
     Checks,
 }
@@ -67,6 +69,7 @@ impl DetailTab {
         match self {
             Self::Overview => "Overview",
             Self::Children => "Children",
+            Self::Links => "Links",
             Self::Comments => "Comments",
             Self::Checks => "Checks",
         }
@@ -732,6 +735,7 @@ mod tests {
             [
                 DetailTab::Overview,
                 DetailTab::Children,
+                DetailTab::Links,
                 DetailTab::Comments
             ]
         );

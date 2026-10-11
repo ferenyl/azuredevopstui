@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use super::{
     badge, empty, field, heading, loading, rich_lines, short_date, state_color, type_color,
 };
-use crate::api::{WorkItem, WorkItemDetails};
+use crate::api::{Link, LinkTarget, PullRequest, WorkItem, WorkItemDetails};
 use crate::app::{App, DetailTab};
 
 pub fn lines(
@@ -18,6 +18,9 @@ pub fn lines(
         DetailTab::Overview => overview(app, item, details, width),
         DetailTab::Children => {
             details.map_or_else(|| loading(app), |details| children(app, details, width))
+        }
+        DetailTab::Links => {
+            details.map_or_else(|| loading(app), |details| links(app, details, width))
         }
         _ => details.map_or_else(|| loading(app), |details| comments(app, details, width)),
     }
@@ -100,25 +103,12 @@ fn overview(
         lines.push(Line::default());
         lines.push(heading(app, "Pull requests", width));
     }
-    for pr in &details.pull_requests {
-        let theme = &app.theme;
-        let color = match pr.status.as_str() {
-            "completed" => theme.pr_approved,
-            "abandoned" => theme.muted,
-            _ => theme.build_running,
-        };
-        let mut spans = vec![
-            Span::styled(format!("  !{} ", pr.pull_request_id), muted),
-            Span::raw(pr.title.clone()),
-            Span::raw("  "),
-            badge(&pr.status, color),
-        ];
-        if pr.is_draft {
-            spans.push(Span::styled(" · draft", muted));
-        }
-        spans.push(Span::styled(format!(" · {}", pr.repository.name), muted));
-        lines.push(Line::from(spans));
-    }
+    lines.extend(
+        details
+            .pull_requests
+            .iter()
+            .map(|pr| pull_request_line(app, pr)),
+    );
 
     for (title, text) in [
         ("Description", &details.description),
@@ -135,7 +125,6 @@ fn overview(
 }
 
 fn children(app: &App, details: &WorkItemDetails, width: u16) -> Vec<Line<'static>> {
-    let muted = Style::new().fg(app.theme.muted);
     if details.children.is_empty() {
         return empty(app, "No children");
     }
@@ -157,24 +146,91 @@ fn children(app: &App, details: &WorkItemDetails, width: u16) -> Vec<Line<'stati
             lines.push(Line::default());
         }
         lines.push(heading(app, &format!("{kind} ({})", children.len()), width));
-        for child in children {
-            let fields = &child.fields;
-            let mut spans = vec![
-                Span::styled(
-                    format!("  #{} ", child.id),
-                    Style::new().fg(type_color(app, kind)),
-                ),
-                Span::raw(fields.title.clone()),
-                Span::raw("  "),
-                badge(&fields.state, state_color(app, &fields.state)),
-            ];
-            if let Some(assignee) = &fields.assigned_to {
-                spans.push(Span::styled(format!(" · {}", assignee.display_name), muted));
-            }
-            lines.push(Line::from(spans));
-        }
+        lines.extend(children.into_iter().map(|child| work_item_line(app, child)));
     }
     lines
+}
+
+fn links(app: &App, details: &WorkItemDetails, width: u16) -> Vec<Line<'static>> {
+    if details.links.is_empty() && details.pull_requests.is_empty() {
+        return empty(app, "No links");
+    }
+    let (work_items, others): (Vec<&Link>, Vec<&Link>) = details
+        .links
+        .iter()
+        .partition(|link| matches!(link.target, LinkTarget::WorkItem(_)));
+    let mut lines = Vec::new();
+    link_groups(app, &work_items, width, &mut lines);
+    if !details.pull_requests.is_empty() {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        let title = format!("Pull requests ({})", details.pull_requests.len());
+        lines.push(heading(app, &title, width));
+        lines.extend(
+            details
+                .pull_requests
+                .iter()
+                .map(|pr| pull_request_line(app, pr)),
+        );
+    }
+    link_groups(app, &others, width, &mut lines);
+    lines
+}
+
+fn link_groups(app: &App, links: &[&Link], width: u16, lines: &mut Vec<Line<'static>>) {
+    for group in links.chunk_by(|a, b| a.category == b.category) {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        let title = format!("{} ({})", group[0].category, group.len());
+        lines.push(heading(app, &title, width));
+        lines.extend(group.iter().map(|link| match &link.target {
+            LinkTarget::WorkItem(item) => work_item_line(app, item),
+            LinkTarget::Text(text) => Line::raw(format!("  {text}")),
+        }));
+    }
+}
+
+fn work_item_line(app: &App, item: &WorkItem) -> Line<'static> {
+    let fields = &item.fields;
+    let mut spans = vec![
+        Span::styled(
+            format!("  #{} ", item.id),
+            Style::new().fg(type_color(app, &fields.work_item_type)),
+        ),
+        Span::raw(fields.title.clone()),
+        Span::raw("  "),
+        badge(&fields.state, state_color(app, &fields.state)),
+    ];
+    if let Some(assignee) = &fields.assigned_to {
+        spans.push(Span::styled(
+            format!(" · {}", assignee.display_name),
+            Style::new().fg(app.theme.muted),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn pull_request_line(app: &App, pr: &PullRequest) -> Line<'static> {
+    let theme = &app.theme;
+    let muted = Style::new().fg(theme.muted);
+    let color = match pr.status.as_str() {
+        "completed" => theme.pr_approved,
+        "abandoned" => theme.muted,
+        _ => theme.build_running,
+    };
+    let mut spans = vec![
+        Span::styled(format!("  !{} ", pr.pull_request_id), muted),
+        Span::raw(pr.title.clone()),
+        Span::raw("  "),
+        badge(&pr.status, color),
+    ];
+    if pr.is_draft {
+        spans.push(Span::styled(" · draft", muted));
+    }
+    spans.push(Span::styled(format!(" · {}", pr.repository.name), muted));
+    Line::from(spans)
 }
 
 fn comments(app: &App, details: &WorkItemDetails, width: u16) -> Vec<Line<'static>> {

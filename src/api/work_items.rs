@@ -4,9 +4,9 @@ use serde_json::json;
 
 use super::AdoClient;
 use super::models::{
-    CommentList, DetailComment, Iteration, ListResponse, Mention, PullRequest, Relation,
-    SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails, WorkItemResponse,
-    WorkItemTypeCategory,
+    CommentList, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention, PullRequest,
+    Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails,
+    WorkItemResponse, WorkItemTypeCategory,
 };
 use crate::rich_text::RichText;
 
@@ -25,6 +25,8 @@ const FIELDS: [&str; 10] = [
 ];
 const CHILD_LINK: &str = "System.LinkTypes.Hierarchy-Forward";
 const ARTIFACT_LINK: &str = "ArtifactLink";
+const HYPERLINK: &str = "Hyperlink";
+const ATTACHED_FILE: &str = "AttachedFile";
 const PULL_REQUEST_ARTIFACT: &str = "vstfs:///Git/PullRequestId/";
 const HIDDEN_CATEGORY: &str = "Microsoft.HiddenCategory";
 const COMMENTS_API_VERSION: &str = "7.1-preview.4";
@@ -105,19 +107,28 @@ impl AdoClient {
             ),
             self.comments(organization, project, id),
         )?;
-        let child_ids = child_ids(&item.relations);
-        let (children, pull_requests) = tokio::join!(
-            self.work_items_batch(organization, project, &child_ids),
+        let linked_ids: Vec<u32> = item.relations.iter().filter_map(work_item_id).collect();
+        let (linked, pull_requests) = tokio::join!(
+            self.work_items_batch(organization, project, &linked_ids),
             self.linked_pull_requests(organization, &item.relations),
         );
+        let linked = linked?;
+        let child_ids = child_ids(&item.relations);
+        let children = linked
+            .iter()
+            .filter(|item| child_ids.contains(&item.id))
+            .cloned()
+            .collect();
+        let links = links(&item.relations, &linked);
         let formats = item.multiline_fields_format;
         let rich_text = |name: &str, value: Option<String>| {
             value.map(|value| to_rich_text(&value, formats.get(name).map(String::as_str)))
         };
         let fields = item.fields;
         Ok(WorkItemDetails {
-            children: children?,
+            children,
             pull_requests,
+            links,
             state: fields.state,
             board_column: fields.board_column,
             board_column_done: fields.board_column_done.unwrap_or(false),
@@ -366,6 +377,70 @@ fn pull_request_links(relations: &[Relation]) -> Vec<(String, String, u32)> {
         .collect()
 }
 
+fn work_item_id(relation: &Relation) -> Option<u32> {
+    relation
+        .url
+        .split_once("/_apis/wit/workItems/")?
+        .1
+        .parse()
+        .ok()
+}
+
+/// Relations for the links tab; children and pull requests are shown elsewhere.
+fn links(relations: &[Relation], work_items: &[WorkItem]) -> Vec<Link> {
+    let mut links: Vec<Link> = relations
+        .iter()
+        .filter(|relation| {
+            relation.rel != CHILD_LINK && !relation.url.starts_with(PULL_REQUEST_ARTIFACT)
+        })
+        .filter_map(|relation| {
+            let name = relation.attributes.name.clone();
+            let (category, target) = match relation.rel.as_str() {
+                HYPERLINK => ("Hyperlinks".into(), LinkTarget::Text(relation.url.clone())),
+                ATTACHED_FILE => ("Attachments".into(), LinkTarget::Text(name?)),
+                _ => {
+                    let target = match work_item_id(relation) {
+                        Some(id) => LinkTarget::WorkItem(Box::new(
+                            work_items.iter().find(|item| item.id == id)?.clone(),
+                        )),
+                        None => LinkTarget::Text(artifact_text(&relation.url)),
+                    };
+                    (name.unwrap_or_else(|| relation.rel.clone()), target)
+                }
+            };
+            Some(Link { category, target })
+        })
+        .collect();
+    links.sort_by(|a, b| a.category.cmp(&b.category));
+    links
+}
+
+/// Readable target of an artifact link, such as a short commit hash or branch name.
+fn artifact_text(url: &str) -> String {
+    let url = url.replace("%2F", "/").replace("%2f", "/");
+    let Some(path) = url.strip_prefix("vstfs:///") else {
+        return url;
+    };
+    let mut parts = path.splitn(3, '/');
+    let (Some(_), Some(kind), Some(id)) = (parts.next(), parts.next(), parts.next()) else {
+        return url;
+    };
+    match kind {
+        "Commit" => id
+            .rsplit('/')
+            .next()
+            .unwrap_or(id)
+            .chars()
+            .take(8)
+            .collect(),
+        "Ref" => {
+            let name = id.splitn(3, '/').nth(2).unwrap_or(id);
+            name.strip_prefix("GB").unwrap_or(name).to_string()
+        }
+        _ => id.rsplit('/').next().unwrap_or(id).to_string(),
+    }
+}
+
 fn child_ids(relations: &[Relation]) -> Vec<u32> {
     relations
         .iter()
@@ -414,6 +489,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+    use crate::api::models::RelationAttributes;
     use crate::auth::Auth;
     use crate::test_support::{ids_of_items, work_item_json};
 
@@ -421,6 +497,7 @@ mod tests {
         Relation {
             rel: rel.into(),
             url: url.into(),
+            attributes: RelationAttributes::default(),
         }
     }
 

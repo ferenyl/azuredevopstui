@@ -380,6 +380,9 @@ fn tab_title(app: &App, tab: DetailTab) -> String {
         }
         (DetailTab::Comments, Some(DetailInfo::WorkItem(info))) => info.comment_count.to_string(),
         (DetailTab::Children, Some(DetailInfo::WorkItem(info))) => info.children.len().to_string(),
+        (DetailTab::Links, Some(DetailInfo::WorkItem(info))) => {
+            (info.links.len() + info.pull_requests.len()).to_string()
+        }
         _ => "…".into(),
     };
     format!("{} ({count})", tab.title())
@@ -920,6 +923,7 @@ mod tests {
                 work_item(22, "Write UI", "Task", "Closed"),
             ],
             pull_requests: Vec::new(),
+            links: Vec::new(),
         }
     }
 
@@ -1050,7 +1054,7 @@ mod tests {
 
         let screen = screen(&app);
 
-        assert!(screen.contains("Overview │ Children (3) │ Comments (0)"));
+        assert!(screen.contains("Overview │ Children (3) │ Links (0) │ Comments (0)"));
         assert!(screen.contains("Active · Done"));
         assert!(screen.contains("Assigned to  Anna"));
         assert!(screen.contains(" backend "));
