@@ -490,6 +490,7 @@ pub struct Build {
     pub result: Option<String>,
     pub definition: BuildDefinition,
     pub source_branch: String,
+    pub repository: Option<BuildRepository>,
     pub reason: Option<String>,
     pub queue_time: Option<String>,
     pub start_time: Option<String>,
@@ -506,6 +507,13 @@ impl Build {
 pub struct BuildDefinition {
     pub id: u32,
     pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuildRepository {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
 }
 
 #[cfg(test)]

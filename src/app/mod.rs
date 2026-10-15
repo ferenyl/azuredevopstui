@@ -157,7 +157,12 @@ impl App {
                     Action::Cancel,
                 ]
             }
-            Screen::Main if matches!(self.popup, Some(Popup::Comment { .. })) => {
+            Screen::Main
+                if matches!(
+                    self.popup,
+                    Some(Popup::Comment { .. } | Popup::BuildFilter { .. })
+                ) =>
+            {
                 &[Action::Confirm, Action::Cancel]
             }
             Screen::Main if self.popup.is_some() => {
@@ -217,6 +222,7 @@ impl App {
                     Action::Confirm,
                     Action::OpenInBrowser,
                     Action::CopyLink,
+                    Action::Filter,
                     Action::Reload,
                     Action::Help,
                     Action::Quit,
@@ -232,6 +238,14 @@ impl App {
                     Action::Copy,
                     Action::CopyLink,
                     Action::Sort,
+                    Action::Filter,
+                    Action::Reload,
+                    Action::Help,
+                    Action::Quit,
+                ],
+                None if self.focus == Panel::Builds => &[
+                    Action::Down,
+                    Action::FocusRight,
                     Action::Filter,
                     Action::Reload,
                     Action::Help,
@@ -463,6 +477,19 @@ impl App {
         }
     }
 
+    fn open_build_filter(&mut self) {
+        self.popup = Some(Popup::BuildFilter {
+            text: self.data.build_filter.clone(),
+        });
+    }
+
+    fn confirm_build_filter(&mut self, text: &str) {
+        self.data.build_filter = text.trim().to_string();
+        if let Some(index) = Panel::Builds.index() {
+            self.selections[index] = 0;
+        }
+    }
+
     fn confirm_comment(&mut self, id: u32, text: String) {
         let text = text.trim();
         if text.is_empty() {
@@ -650,6 +677,7 @@ impl App {
             Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
             Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
             Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
+            Some(Popup::BuildFilter { text }) => self.confirm_build_filter(&text),
             None => {}
         }
     }
@@ -1436,6 +1464,7 @@ impl App {
         }
         let line = pasted.lines().next().unwrap_or_default();
         match &mut self.popup {
+            Some(Popup::BuildFilter { text }) => text.push_str(line),
             Some(Popup::Tags(picker)) => {
                 picker.query.push_str(line);
                 picker.filter();
@@ -1521,6 +1550,19 @@ impl App {
                 _ => {}
             }
         }
+        if let Some(Popup::BuildFilter { text }) = &mut self.popup {
+            match key.code {
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    text.push(c);
+                    return;
+                }
+                KeyCode::Backspace => {
+                    text.pop();
+                    return;
+                }
+                _ => {}
+            }
+        }
         if let Some(action) = Action::from_key(key) {
             self.apply(action);
         }
@@ -1535,7 +1577,10 @@ impl App {
             }
             return;
         }
-        if matches!(self.popup, Some(Popup::Comment { .. })) {
+        if matches!(
+            self.popup,
+            Some(Popup::Comment { .. } | Popup::BuildFilter { .. })
+        ) {
             match action {
                 Action::Confirm => self.confirm_popup(),
                 Action::Cancel => self.popup = None,
@@ -1550,7 +1595,7 @@ impl App {
                 Popup::Complete(picker) => &mut picker.selection,
                 Popup::Tags(picker) => &mut picker.selection,
                 Popup::Sprint(picker) => &mut picker.selection,
-                Popup::Comment { .. } => return,
+                Popup::Comment { .. } | Popup::BuildFilter { .. } => return,
                 Popup::Sort { selection, .. }
                 | Popup::Types { selection, .. }
                 | Popup::PrFilter { selection, .. } => selection,
@@ -1639,6 +1684,8 @@ impl App {
             Action::CopyLink => self.copy_link(),
             Action::Sort => self.open_sort_picker(),
             Action::Filter => match self.current_item() {
+                _ if self.focus == Panel::Builds => self.open_build_filter(),
+                Some(Detail::Build(_)) => self.open_build_filter(),
                 Some(Detail::PullRequest(_)) => self.open_pr_filter(),
                 _ => self.load_work_item_types(),
             },

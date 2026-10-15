@@ -103,6 +103,9 @@ pub enum Popup {
         selection: Selection,
         checked: Vec<bool>,
     },
+    BuildFilter {
+        text: String,
+    },
 }
 
 pub struct ColumnPicker {
@@ -243,6 +246,8 @@ pub struct Data {
     pub sprint_finish: Option<String>,
     /// Latest run per pipeline and branch that the user triggered.
     pub builds: Option<Vec<Build>>,
+    /// Only list builds whose pipeline, branch or number contains this, ignoring case.
+    pub build_filter: String,
     /// Things to act on in my PRs, by PR id.
     pub pr_signals: HashMap<u32, Signals>,
     /// Work items with unanswered mentions of the user.
@@ -338,7 +343,7 @@ impl Data {
             Panel::OtherPrs => self.shown_other_prs().map_or(0, |prs| prs.len()),
             Panel::MyWorkItems => self.my_work_items.as_ref().map_or(0, Vec::len),
             Panel::ReadyWorkItems => self.ready_work_items.as_ref().map_or(0, Vec::len),
-            Panel::Builds => self.builds.as_ref().map_or(0, Vec::len),
+            Panel::Builds => self.shown_builds().map_or(0, |builds| builds.len()),
             Panel::Detail => 0,
         }
     }
@@ -349,6 +354,25 @@ impl Data {
             prs.iter()
                 .filter(|pr| {
                     (self.show_approved || !pr.approved) && (self.show_drafts || !pr.is_draft)
+                })
+                .collect()
+        })
+    }
+
+    /// Builds as listed, matching the build filter.
+    pub fn shown_builds(&self) -> Option<Vec<&Build>> {
+        let filter = self.build_filter.to_lowercase();
+        self.builds.as_ref().map(|builds| {
+            builds
+                .iter()
+                .filter(|build| {
+                    [
+                        &build.definition.name,
+                        &build.source_branch,
+                        &build.build_number,
+                    ]
+                    .iter()
+                    .any(|text| text.to_lowercase().contains(&filter))
                 })
                 .collect()
         })
@@ -474,10 +498,9 @@ impl Data {
             Panel::MyWorkItems => item(&self.my_work_items),
             Panel::ReadyWorkItems => item(&self.ready_work_items),
             Panel::Builds => self
-                .builds
-                .as_ref()?
+                .shown_builds()?
                 .get(index)
-                .map(|build| Detail::Build(Box::new(build.clone()))),
+                .map(|build| Detail::Build(Box::new((*build).clone()))),
             Panel::Detail => None,
         }
     }

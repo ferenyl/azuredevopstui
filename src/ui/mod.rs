@@ -125,6 +125,9 @@ pub fn render(frame: &mut Frame, app: &App) {
             let title = format!(" Comment #{work_item_id} · shift/alt+enter: new line ");
             popup::render_text_input(frame, app, &title, text, main);
         }
+        Some(Popup::BuildFilter { text }) => {
+            popup::render_text_input(frame, app, " Filter pipelines ", text, main);
+        }
         Some(Popup::Sort { kind, selection }) => {
             let title = match kind {
                 SortKind::PullRequests => " Sort PRs ",
@@ -190,6 +193,9 @@ fn render_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
     };
     if let Some(items) = &items {
         title.push_str(&format!(" ({})", items.len()));
+    }
+    if panel == Panel::Builds && !app.data.build_filter.is_empty() {
+        title.push_str(&format!(" · \"{}\"", app.data.build_filter));
     }
     if let (Some(kind), Some(config)) = (panel.sort_kind(), &app.config) {
         let sort = match kind {
@@ -621,7 +627,7 @@ fn panel_items(app: &App, panel: Panel) -> Option<Vec<Line<'static>>> {
             .ready_work_items
             .as_ref()
             .map(|items| items.iter().map(|item| work_item_line(app, item)).collect()),
-        Panel::Builds => data.builds.as_ref().map(|builds| {
+        Panel::Builds => data.shown_builds().map(|builds| {
             builds
                 .iter()
                 .map(|build| build_detail::line(app, build))
