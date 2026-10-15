@@ -2,7 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::{
-    badge, empty, field, heading, loading, rich_lines, short_date, state_color, type_color,
+    badge, branch, empty, field, heading, loading, rich_lines, short_date, state_color, type_color,
 };
 use crate::api::{PullRequest, PullRequestDetails, Thread};
 use crate::app::{App, DetailTab};
@@ -296,10 +296,6 @@ fn check_spans(app: &App, state: CheckState, name: String) -> Vec<Span<'static>>
         ),
         Span::raw(name),
     ]
-}
-
-fn branch(ref_name: &str) -> &str {
-    ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name)
 }
 
 fn vote(app: &App, vote: i32) -> (&'static str, &'static str, Color) {

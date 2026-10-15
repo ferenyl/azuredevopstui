@@ -2,7 +2,7 @@ use chrono::DateTime;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
-use super::{badge, field, short_date};
+use super::{badge, branch, field, short_date};
 use crate::api::Build;
 use crate::app::App;
 
@@ -15,7 +15,11 @@ pub fn lines(app: &App, build: &Build) -> Vec<Line<'static>> {
             vec![Span::raw(build.definition.name.clone())],
         ),
         field(app, "Run", vec![Span::raw(build.build_number.clone())]),
-        field(app, "Branch", vec![Span::raw(branch(build).to_string())]),
+        field(
+            app,
+            "Branch",
+            vec![Span::raw(branch(&build.source_branch).to_string())],
+        ),
         field(app, "Status", vec![badge(label, color)]),
     ];
     if let Some(reason) = &build.reason {
@@ -43,7 +47,7 @@ pub fn line(app: &App, build: &Build) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{symbol}  "), Style::new().fg(color)),
         Span::raw(build.definition.name.clone()),
-        Span::styled(format!("  {}", branch(build)), muted),
+        Span::styled(format!("  {}", branch(&build.source_branch)), muted),
     ])
 }
 
@@ -59,13 +63,6 @@ pub fn status(app: &App, build: &Build) -> (&'static str, &'static str, Color) {
         ("completed", _) => ("–", "completed", theme.muted),
         _ => ("○", "queued", theme.muted),
     }
-}
-
-fn branch(build: &Build) -> &str {
-    build
-        .source_branch
-        .strip_prefix("refs/heads/")
-        .unwrap_or(&build.source_branch)
 }
 
 /// `7m 35s` between start and finish.

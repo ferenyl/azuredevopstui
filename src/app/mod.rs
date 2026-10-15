@@ -10,6 +10,7 @@ pub use state::{
     Panel, Popup, Signals, SortKind, SprintPicker, TagPicker,
 };
 
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crossterm::clipboard::CopyToClipboard;
@@ -228,6 +229,7 @@ impl App {
                     Action::Quit,
                 ],
                 Some(Detail::WorkItem(_)) => &[
+                    Action::Down,
                     Action::FocusRight,
                     Action::NextTab,
                     Action::Confirm,
@@ -271,6 +273,10 @@ impl App {
         }
     }
 
+    fn connection(&self) -> Option<(AdoClient, Config)> {
+        Some((self.client.clone()?, self.config.clone()?))
+    }
+
     fn current_url(&self) -> Option<String> {
         let (item, config) = (self.current_item()?, self.config.as_ref()?);
         let url = match &item {
@@ -298,12 +304,12 @@ impl App {
             Some(command) => {
                 let mut parts = command.split_whitespace();
                 match parts.next() {
-                    Some(program) => std::process::Command::new(program)
+                    Some(program) => Command::new(program)
                         .args(parts)
                         .arg(url.as_str())
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
                         .spawn()
                         .map(|_| ()),
                     None => Ok(()),
@@ -399,7 +405,7 @@ impl App {
             self.error = Some(format!("#{} is not assigned to you", item.id));
             return;
         }
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         self.spawn(async move {
@@ -497,7 +503,7 @@ impl App {
         }
         // Markdown joins single newlines; trailing spaces make them line breaks.
         let text = text.replace('\n', "  \n");
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         self.spawn(async move {
@@ -517,7 +523,7 @@ impl App {
             self.open_column_picker(item, &board, unassign);
             return;
         }
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         self.spawn(async move {
@@ -587,7 +593,7 @@ impl App {
             self.error = Some(format!("!{} is not ready to complete", pr.pull_request_id));
             return;
         }
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         self.spawn(async move {
@@ -684,7 +690,7 @@ impl App {
 
     /// Board columns, used for the sprint overview and moving items.
     fn load_board(&self) {
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         self.spawn(async move {
@@ -697,7 +703,7 @@ impl App {
     }
 
     fn load_work_item_types(&mut self) {
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         self.spawn(async move {
@@ -937,7 +943,7 @@ impl App {
     }
 
     fn load_sprint(&self) {
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         let Some(ready_column) = config.ready_column.clone() else {
@@ -961,7 +967,7 @@ impl App {
     }
 
     fn load_sprints(&self) {
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         self.spawn(async move {
@@ -1397,7 +1403,7 @@ impl App {
     }
 
     fn load_signals(&self, prs: &[PullRequest]) {
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         for pr in prs {
@@ -1415,7 +1421,7 @@ impl App {
     }
 
     fn load_detail(&self, detail: &Detail) {
-        let (Some(client), Some(config)) = (self.client.clone(), self.config.clone()) else {
+        let Some((client, config)) = self.connection() else {
             return;
         };
         match detail {
@@ -2319,6 +2325,15 @@ mod tests {
 
         assert!(!app.actions().contains(&Action::Unassign));
         assert!(app.actions().contains(&Action::AssignToMe));
+    }
+
+    #[test]
+    fn toolbar_offers_down_for_unassigned_items() {
+        let mut app = app();
+        ctrl(&mut app, 'j');
+
+        assert!(app.actions().contains(&Action::AssignToMe));
+        assert!(app.actions().contains(&Action::Down));
     }
 
     #[test]

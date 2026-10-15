@@ -434,6 +434,10 @@ fn badge(text: &str, color: Color) -> Span<'static> {
     )
 }
 
+fn branch(ref_name: &str) -> &str {
+    ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name)
+}
+
 /// Word-wraps `text` to `width`, starting every line with `prefix` and keeping each line's indent.
 #[cfg(test)]
 fn wrap(text: &str, width: u16, prefix: Span<'static>) -> Vec<Line<'static>> {
@@ -491,25 +495,7 @@ fn wrap_lines(
 ) -> Vec<Line<'static>> {
     let available = (width as usize).saturating_sub(prefix.width()).max(10);
     let mut out = Vec::new();
-    let mut push = |chars: Vec<(char, Style)>| {
-        let mut spans = vec![prefix.clone()];
-        let mut current = String::new();
-        let mut current_style = Style::new();
-        for (c, style) in chars {
-            if style != current_style && !current.is_empty() {
-                spans.push(Span::styled(std::mem::take(&mut current), current_style));
-            }
-            current_style = style;
-            current.push(c);
-        }
-        if !current.is_empty() {
-            spans.push(Span::styled(current, current_style));
-        }
-        if spans.len() == 1 {
-            spans.push(Span::raw(""));
-        }
-        out.push(Line::from(spans));
-    };
+    let mut push = |chars: Vec<(char, Style)>| out.push(styled_line(&prefix, chars));
     for line in lines {
         let source = line.to_string();
         if image_marker(&source).is_some() {
@@ -569,6 +555,26 @@ fn wrap_lines(
         push(current);
     }
     out
+}
+
+fn styled_line(prefix: &Span<'static>, chars: Vec<(char, Style)>) -> Line<'static> {
+    let mut spans = vec![prefix.clone()];
+    let mut current = String::new();
+    let mut current_style = Style::new();
+    for (c, style) in chars {
+        if style != current_style && !current.is_empty() {
+            spans.push(Span::styled(std::mem::take(&mut current), current_style));
+        }
+        current_style = style;
+        current.push(c);
+    }
+    if !current.is_empty() {
+        spans.push(Span::styled(current, current_style));
+    }
+    if spans.len() == 1 {
+        spans.push(Span::raw(""));
+    }
+    Line::from(spans)
 }
 
 fn type_color(app: &App, work_item_type: &str) -> Color {
@@ -715,17 +721,18 @@ fn marker(text: String, color: Color) -> Span<'static> {
 fn review_spans(app: &App, review: &ReviewSignals) -> Vec<Span<'static>> {
     let theme = &app.theme;
     let mut spans = Vec::new();
+    let mut push = |text: String, color: Color| spans.push(marker(text, color));
     if review.needs_vote {
-        spans.push(marker("◉".into(), theme.pr_waiting));
+        push("◉".into(), theme.pr_waiting);
     }
     if review.changed_since_vote {
-        spans.push(marker("↻".into(), theme.build_running));
+        push("↻".into(), theme.build_running);
     }
     if review.replies > 0 {
-        spans.push(marker(format!("↩{}", review.replies), theme.comment_author));
+        push(format!("↩{}", review.replies), theme.comment_author);
     }
     if review.mentions > 0 {
-        spans.push(marker(format!("@{}", review.mentions), theme.title));
+        push(format!("@{}", review.mentions), theme.title);
     }
     spans
 }
@@ -1050,6 +1057,32 @@ mod tests {
 
         assert!(screen.contains("● active  /src/main.rs"));
         assert!(screen.contains("│ Please rename this"));
+    }
+
+    #[test]
+    fn branch_drops_heads_prefix_only() {
+        assert_eq!(branch("refs/heads/feature/x"), "feature/x");
+        assert_eq!(branch("refs/pull/1/merge"), "refs/pull/1/merge");
+    }
+
+    #[test]
+    fn review_spans_mark_what_waits() {
+        let app = main_app();
+        let review = ReviewSignals {
+            needs_vote: true,
+            changed_since_vote: true,
+            replies: 2,
+            mentions: 1,
+            ..Default::default()
+        };
+
+        let text: String = review_spans(&app, &review)
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert_eq!(text, "◉ ↻ ↩2 @1 ");
+        assert!(review_spans(&app, &ReviewSignals::default()).is_empty());
     }
 
     #[test]
