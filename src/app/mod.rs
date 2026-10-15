@@ -119,6 +119,7 @@ impl App {
             tokio::select! {
                 event = events.next() => match event {
                     Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => self.handle_key(key),
+                    Some(Ok(Event::Paste(text))) => self.handle_paste(&text),
                     Some(Ok(_)) => {}
                     Some(Err(err)) => return Err(err.into()),
                     None => break,
@@ -1427,6 +1428,32 @@ impl App {
         }
     }
 
+    pub(crate) fn handle_paste(&mut self, pasted: &str) {
+        let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
+        if let Some(Popup::Comment { text, .. }) = &mut self.popup {
+            text.push_str(&pasted);
+            return;
+        }
+        let line = pasted.lines().next().unwrap_or_default();
+        match &mut self.popup {
+            Some(Popup::Tags(picker)) => {
+                picker.query.push_str(line);
+                picker.filter();
+            }
+            Some(Popup::Sprint(picker)) => {
+                picker.query.push_str(line);
+                picker.filter();
+            }
+            _ => {
+                if let Screen::Setup(step) = &mut self.screen
+                    && let Some(input) = step.input_mut()
+                {
+                    input.push_str(line);
+                }
+            }
+        }
+    }
+
     fn handle_key(&mut self, key: KeyEvent) {
         if let Screen::Setup(step) = &mut self.screen
             && let Some(input) = step.input_mut()
@@ -2085,6 +2112,47 @@ mod tests {
         assert!(
             matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input == "qj")
         );
+    }
+
+    #[test]
+    fn paste_into_comment_keeps_lines_and_triggers_no_actions() {
+        let mut app = app();
+        app.popup = Some(Popup::Comment {
+            work_item_id: 10,
+            text: String::new(),
+        });
+
+        app.handle_paste("# Title\r\n\r\n- q item\r- j item\n```rust\nfn x() {}\n```");
+
+        assert!(!app.should_quit);
+        assert!(matches!(
+            &app.popup,
+            Some(Popup::Comment { text, .. })
+                if text == "# Title\n\n- q item\n- j item\n```rust\nfn x() {}\n```"
+        ));
+    }
+
+    #[test]
+    fn paste_into_setup_input_takes_first_line() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('T'));
+
+        app.handle_paste("token\nq");
+
+        assert!(!app.should_quit);
+        assert!(
+            matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input == "token")
+        );
+    }
+
+    #[test]
+    fn paste_without_input_is_ignored() {
+        let mut app = app();
+
+        app.handle_paste("q");
+
+        assert!(!app.should_quit);
+        assert!(app.popup.is_none());
     }
 
     #[test]

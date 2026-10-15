@@ -19,7 +19,8 @@ use tracing_subscriber::EnvFilter;
 
 use config::Config;
 use crossterm::event::{
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
@@ -46,7 +47,10 @@ async fn main() -> anyhow::Result<()> {
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
         )
         .is_ok();
+    // Delivers pasted text as one event instead of keystrokes.
+    let _ = execute!(stdout(), EnableBracketedPaste);
     let result = app::App::new(config, picker).run(&mut terminal).await;
+    let _ = execute!(stdout(), DisableBracketedPaste);
     if enhanced {
         let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     }

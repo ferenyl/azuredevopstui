@@ -1193,4 +1193,21 @@ mod tests {
         assert!(screen.contains("[image: shot.png]"));
         assert!(!screen.contains("[[image:"));
     }
+
+    #[test]
+    fn comment_popup_shows_pasted_markdown_lines() {
+        let mut app = main_app();
+        app.popup = Some(Popup::Comment {
+            work_item_id: 10,
+            text: String::new(),
+        });
+
+        app.handle_paste("## Steps\r\n- open **list**\r\n- press q");
+
+        let screen = screen(&app);
+        assert!(screen.contains("Comment #10"));
+        assert!(screen.contains("## Steps"));
+        assert!(screen.contains("- open **list**"));
+        assert!(screen.contains("- press q▏"));
+    }
 }
