@@ -882,6 +882,7 @@ mod tests {
 
     fn pr_details() -> PullRequestDetails {
         PullRequestDetails {
+            description: None,
             threads: vec![
                 serde_json::from_value(json!({
                     "status": "active",

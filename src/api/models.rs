@@ -189,6 +189,8 @@ pub struct Reviewer {
 }
 
 pub struct PullRequestDetails {
+    /// Full text; the list API cuts it off at 400 characters.
+    pub description: Option<String>,
     pub threads: Vec<Thread>,
     pub statuses: Vec<PullRequestStatus>,
     pub policies: Vec<PolicyEvaluation>,

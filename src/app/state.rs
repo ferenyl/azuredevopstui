@@ -776,6 +776,7 @@ mod tests {
 
     fn details(threads: Value, statuses: Value, policies: Value) -> PullRequestDetails {
         PullRequestDetails {
+            description: None,
             threads: serde_json::from_value(threads).unwrap(),
             statuses: serde_json::from_value(statuses).unwrap(),
             policies: serde_json::from_value(policies).unwrap(),

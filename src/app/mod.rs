@@ -1360,12 +1360,15 @@ impl App {
             texts.extend(pr.description.as_deref());
         }
         match &self.detail_info {
-            Some(DetailInfo::PullRequest(info)) => texts.extend(
-                info.threads
-                    .iter()
-                    .flat_map(|thread| &thread.comments)
-                    .filter_map(|comment| comment.content.as_deref()),
-            ),
+            Some(DetailInfo::PullRequest(info)) => {
+                texts.extend(info.description.as_deref());
+                texts.extend(
+                    info.threads
+                        .iter()
+                        .flat_map(|thread| &thread.comments)
+                        .filter_map(|comment| comment.content.as_deref()),
+                );
+            }
             Some(DetailInfo::WorkItem(info)) => {
                 rich.extend(
                     [
@@ -2001,6 +2004,7 @@ mod tests {
         let mut app = app();
         open_pull_request(&mut app);
         let details = || PullRequestDetails {
+            description: None,
             threads: Vec::new(),
             statuses: Vec::new(),
             policies: Vec::new(),
@@ -2340,6 +2344,7 @@ mod tests {
     fn signals_are_stored_for_my_pull_requests() {
         let mut app = app();
         let details = PullRequestDetails {
+            description: None,
             threads: serde_json::from_value(serde_json::json!([
                 { "status": "active", "comments": [] }
             ]))

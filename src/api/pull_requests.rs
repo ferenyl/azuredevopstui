@@ -88,12 +88,14 @@ impl AdoClient {
         let pr_path = pr_path(organization, project, pr, &id);
         let statuses_path = [&pr_path[..], &["statuses"]].concat();
         let work_items_path = [&pr_path[..], &["workitems"]].concat();
-        let (threads, statuses, policies, work_items): (
+        let (full, threads, statuses, policies, work_items): (
+            PullRequest,
             _,
             ListResponse<PullRequestStatus>,
             _,
             ListResponse<ResourceRef>,
         ) = tokio::try_join!(
+            self.get(&self.urls.dev_azure, &pr_path, &[]),
             self.threads(organization, project, pr),
             self.get(&self.urls.dev_azure, &statuses_path, &[]),
             self.policy_evaluations(organization, project, pr),
@@ -106,6 +108,7 @@ impl AdoClient {
             .collect();
 
         Ok(PullRequestDetails {
+            description: full.description.as_deref().map(markdown_images),
             threads: visible_threads(threads),
             statuses: latest_statuses(statuses.value),
             policies,
@@ -590,6 +593,13 @@ mod tests {
     async fn pull_request_details_combine_threads_statuses_and_policies() {
         let server = MockServer::start().await;
         let pr_path = "/contoso/MyProject/_apis/git/repositories/repo-id/pullRequests/7";
+        let mut full = pull_request_json(7, "PR", "other", "2026-10-01T10:00:00Z");
+        full["description"] = json!("x".repeat(500));
+        Mock::given(method("GET"))
+            .and(path(pr_path))
+            .respond_with(ResponseTemplate::new(200).set_body_json(full))
+            .mount(&server)
+            .await;
         Mock::given(method("GET"))
             .and(path(format!("{pr_path}/threads")))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
@@ -633,6 +643,7 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(details.description.map(|d| d.len()), Some(500));
         assert_eq!(details.threads.len(), 1);
         assert_eq!(details.statuses.len(), 1);
         assert_eq!(

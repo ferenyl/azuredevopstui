@@ -123,7 +123,10 @@ fn overview(
         }
     }
 
-    if let Some(description) = pr.description.as_deref().filter(|d| !d.trim().is_empty()) {
+    let description = details
+        .and_then(|details| details.description.as_deref())
+        .or(pr.description.as_deref());
+    if let Some(description) = description.filter(|d| !d.trim().is_empty()) {
         lines.push(Line::default());
         lines.push(heading(app, "Description", width));
         lines.extend(rich_lines(
