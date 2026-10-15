@@ -5,8 +5,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
-      day: tuesday
-      time: "06:00"
+      day: wednesday
+      time: "05:00"
       timezone: Europe/Stockholm
     groups:
       cargo:
@@ -19,8 +19,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
-      day: tuesday
-      time: "06:00"
+      day: wednesday
+      time: "05:00"
       timezone: Europe/Stockholm
     groups:
       github-actions:
