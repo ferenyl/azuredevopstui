@@ -326,8 +326,8 @@ pub struct ProjectApi {
     identities: Arc<Mutex<HashMap<String, String>>>,
     /// Review signals of others' PRs by id, reused while a PR is unchanged.
     reviews: Arc<Mutex<HashMap<u32, pull_requests::CachedReview>>>,
-    /// Unanswered mentions by work item id, reused while an item is unchanged.
-    mentions: Arc<Mutex<HashMap<u32, work_items::CachedMention>>>,
+    /// Changed dates of work items without an unanswered mention, skipped while unchanged.
+    answered_mentions: Arc<Mutex<HashMap<u32, String>>>,
 }
 
 impl ProjectApi {
@@ -356,7 +356,7 @@ impl ProjectApi {
             closed_states: Arc::default(),
             identities: Arc::default(),
             reviews: Arc::default(),
-            mentions: Arc::default(),
+            answered_mentions: Arc::default(),
         }
     }
 }

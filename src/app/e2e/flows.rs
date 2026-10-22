@@ -522,20 +522,21 @@ async fn refresh_of_unchanged_data_skips_cached_requests() {
                     "text": "ping @<me-id>"
                 }]
             })),
-            1,
+            2,
         )
         .await;
     harness.connect().await;
 
     let requests = refresh_requests(&mut harness).await;
 
-    // Only my PR's checks load again; others' PRs, the mention and identities come from the cache.
+    // Only my PR's checks and the unanswered mention load again; others' PRs and identities are cached.
     assert_eq!(count(&requests, "/threads"), 1, "{requests:#?}");
     assert_eq!(count(&requests, "/pullRequests/101/threads"), 1);
     assert_eq!(count(&requests, "/policy/evaluations"), 1);
     assert_eq!(count(&requests, "/pullRequests/101"), 0);
     assert_eq!(count(&requests, "/build/builds"), 2);
-    assert_eq!(requests.len(), 15, "{requests:#?}");
+    assert_eq!(count(&requests, "/workItems/601/comments"), 1);
+    assert_eq!(requests.len(), 16, "{requests:#?}");
     harness.wait_for_text("Mentioned in checkout").await;
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
