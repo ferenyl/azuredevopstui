@@ -130,6 +130,7 @@ pub struct Repository {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProjectRef {
     pub id: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

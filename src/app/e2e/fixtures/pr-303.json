@@ -1,0 +1,40 @@
+{
+  "method": "GET",
+  "path": "/contoso/project-other/_apis/git/repositories/repo-api/pullRequests/303",
+  "body": {
+    "pullRequestId": 303,
+    "title": "Reviewer rejected CSV export",
+    "createdBy": {
+      "id": "other-id",
+      "displayName": "Olle Other"
+    },
+    "repository": {
+      "id": "repo-api",
+      "name": "orders-api",
+      "project": {
+        "id": "project-other",
+        "name": "Other"
+      }
+    },
+    "status": "active",
+    "sourceRefName": "refs/heads/feature/303",
+    "targetRefName": "refs/heads/main",
+    "creationDate": "2026-10-18T09:00:00Z",
+    "mergeStatus": "succeeded",
+    "lastMergeSourceCommit": {
+      "commitId": "c303"
+    },
+    "reviewers": [
+      {
+        "displayName": "Anna Reviewer",
+        "vote": 10,
+        "isRequired": true
+      },
+      {
+        "displayName": "Bo Reviewer",
+        "vote": -10,
+        "isRequired": false
+      }
+    ]
+  }
+}

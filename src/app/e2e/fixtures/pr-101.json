@@ -1,6 +1,6 @@
 {
   "method": "GET",
-  "path": "/contoso/Fabrikam/_apis/git/repositories/repo-api/pullRequests/101",
+  "path": "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/101",
   "body": {
     "pullRequestId": 101,
     "title": "Add order filter",

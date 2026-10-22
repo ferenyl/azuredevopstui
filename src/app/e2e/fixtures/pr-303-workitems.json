@@ -1,0 +1,7 @@
+{
+  "method": "GET",
+  "path": "/contoso/project-other/_apis/git/repositories/repo-api/pullRequests/303/workitems",
+  "body": {
+    "value": []
+  }
+}
