@@ -1,5 +1,7 @@
+use std::time::{Duration, Instant};
+
 use crossterm::event::KeyCode;
-use wiremock::matchers::{body_string_contains, method, path};
+use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, ResponseTemplate};
 
 use super::Harness;
@@ -246,4 +248,76 @@ async fn tagging_is_not_retried_when_unavailable() {
 
     let error = harness.app.error.clone().unwrap_or_default();
     assert!(error.contains("503"), "{error}");
+}
+
+#[tokio::test]
+async fn many_sub_requests_run_in_bounded_waves() {
+    const ITEMS: u32 = 40;
+    const DELAY: Duration = Duration::from_millis(100);
+    let mut harness = Harness::new().await;
+    let ids: Vec<u32> = (500..500 + ITEMS).collect();
+    let work_items: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            serde_json::json!({
+                "id": id,
+                "fields": {
+                    "System.Title": format!("Mentioned {id}"),
+                    "System.WorkItemType": "Task",
+                    "System.State": "Active",
+                    "System.ChangedDate": "2026-10-23T10:00:00Z",
+                    "System.CreatedDate": "2026-10-01T10:00:00Z"
+                }
+            })
+        })
+        .collect();
+    let wiql_items: Vec<_> = ids
+        .iter()
+        .map(|id| serde_json::json!({ "id": id }))
+        .collect();
+    harness
+        .ado
+        .expect(
+            Mock::given(method("POST"))
+                .and(path("/contoso/Fabrikam/Web/_apis/wit/wiql"))
+                .and(body_string_contains("@RecentMentions")),
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "workItems": wiql_items })),
+            1,
+        )
+        .await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("POST"))
+                .and(path("/contoso/Fabrikam/_apis/wit/workitemsbatch"))
+                .and(body_string_contains("\"ids\":[500")),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "value": work_items })),
+            1,
+        )
+        .await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET")).and(path_regex(r"/wit/workItems/5\d\d/comments$")),
+            ResponseTemplate::new(200)
+                .set_delay(DELAY)
+                .set_body_json(serde_json::json!({ "totalCount": 0, "comments": [] })),
+            u64::from(ITEMS),
+        )
+        .await;
+
+    let started = Instant::now();
+    harness.connect().await;
+    while harness.ado.received("GET", "/comments").await < ITEMS as usize {
+        harness.settle().await;
+    }
+
+    // With at most 8 in flight, the last request starts after four full waves of DELAY.
+    assert!(
+        started.elapsed() >= DELAY * 4,
+        "40 delayed requests were not bounded: {:?}",
+        started.elapsed()
+    );
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
