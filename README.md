@@ -451,6 +451,7 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `y` | Copy the PR (`!1234`) or work item (`#5678`) number |
 | `Y` | Copy the link to the PR, work item or pipeline run |
+| `l` / `L` | Select the next / previous link in the description or comments. While one is selected, `o` opens it and `Y` copies it. Switching tab or item clears the selection |
 | `r` | Reload everything |
 | `T` | Enter a new PAT |
 | `?` | Show all keys |

@@ -240,7 +240,7 @@ impl SprintPicker {
 
 pub enum DetailInfo {
     PullRequest(PullRequestDetails),
-    WorkItem(WorkItemDetails),
+    WorkItem(Box<WorkItemDetails>),
 }
 
 /// `None` means not loaded yet.

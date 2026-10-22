@@ -4,6 +4,7 @@
 //! the test, so tests stay offline and deterministic. See `docs/e2e.md`.
 
 mod flows;
+mod links;
 mod notifications;
 mod vote;
 
