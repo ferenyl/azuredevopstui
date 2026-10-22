@@ -534,6 +534,7 @@ At `debug` level every API request is logged.
 | Images show as `[image: …]` | The terminal has no graphics protocol, or `show_images` is `false`. See [Images](#images). |
 | Startup pauses for about 2 seconds, or the first key is ignored | The terminal does not answer the graphics query. Set `"show_images": false`. |
 | Wrong organization, project or team | Edit the config file, or delete it to run the setup again. |
+| A panel stays on *Loading…* or shows a timeout error | Requests time out after 10 seconds to connect and 30 seconds in total, images included. Check your network or proxy and press `r` to retry. Each request sends the User-Agent `azuredevopstui/<version>`. |
 
 ## Project structure
 
