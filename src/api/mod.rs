@@ -99,7 +99,7 @@ impl AdoClient {
     }
 
     #[cfg(test)]
-    fn with_base_url(auth: Auth, url: &str) -> Self {
+    pub(crate) fn with_base_url(auth: Auth, url: &str) -> Self {
         Self {
             http: http_client(REQUEST_TIMEOUT),
             auth,

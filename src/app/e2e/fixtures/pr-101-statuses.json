@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/git/repositories/repo-api/pullRequests/101/statuses",
+  "body": {
+    "value": [
+      {
+        "id": 1,
+        "state": "succeeded",
+        "context": {
+          "name": "build"
+        }
+      }
+    ]
+  }
+}
