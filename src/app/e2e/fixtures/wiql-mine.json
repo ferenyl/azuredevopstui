@@ -1,7 +1,7 @@
 {
   "method": "POST",
   "path": "/contoso/Fabrikam/Web/_apis/wit/wiql",
-  "bodyContains": "[System.AssignedTo] = @Me",
+  "bodyContains": "[System.State] NOT IN ('Closed', 'Done', 'Removed') AND [System.IterationPath]",
   "body": {
     "workItems": [
       {

@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/wit/workitemtypecategories",
+  "body": {
+    "value": [
+      {
+        "referenceName": "Microsoft.RequirementCategory",
+        "workItemTypes": [{ "name": "User Story" }]
+      },
+      {
+        "referenceName": "Microsoft.BugCategory",
+        "workItemTypes": [{ "name": "Bug" }]
+      }
+    ]
+  }
+}
