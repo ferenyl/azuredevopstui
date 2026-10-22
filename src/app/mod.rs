@@ -2,6 +2,7 @@ mod action;
 mod actions;
 mod message;
 mod popups;
+mod refresh;
 mod setup;
 mod state;
 mod toolbar;
@@ -24,12 +25,11 @@ use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::Rect;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::api::{self, AdoClient, Board, CurrentUser, PullRequest, WorkItem};
+use crate::api::{self, AdoClient, Board, CurrentUser, WorkItem};
 use crate::auth::Auth;
 use crate::config::{AuthMethod, Config};
-use crate::images::{Images, image_urls};
+use crate::images::Images;
 use crate::notify;
-use crate::rich_text::RichText;
 use crate::theme::Theme;
 use message::Message;
 use setup::organization_name;
@@ -166,33 +166,6 @@ impl App {
         }
     }
 
-    /// Board columns, used for the sprint overview and moving items.
-    fn load_board(&self) {
-        let Some((client, config)) = self.connection() else {
-            return;
-        };
-        self.spawn(async move {
-            Message::TeamBoard(
-                client
-                    .board(&config.organization, &config.project, &config.team)
-                    .await,
-            )
-        });
-    }
-
-    fn load_work_item_types(&mut self) {
-        let Some((client, config)) = self.connection() else {
-            return;
-        };
-        self.spawn(async move {
-            Message::WorkItemTypes(
-                client
-                    .work_item_types(&config.organization, &config.project)
-                    .await,
-            )
-        });
-    }
-
     fn spawn<F>(&self, future: F)
     where
         F: Future<Output = Message> + Send + 'static,
@@ -238,20 +211,6 @@ impl App {
         tracing::error!("{err:#}");
         if !self.handle_rejected_pat(&err) {
             self.error = Some(format!("{err:#}"));
-        }
-    }
-
-    /// Refreshes on the configured interval while the main view is idle. 0 disables it.
-    fn auto_refresh(&mut self) {
-        let Some(interval) = self.config.as_ref().map(|c| c.refresh_interval_secs) else {
-            return;
-        };
-        if interval > 0
-            && matches!(self.screen, Screen::Main)
-            && self.popup.is_none()
-            && self.last_refresh.elapsed() >= Duration::from_secs(interval)
-        {
-            self.refresh();
         }
     }
 
@@ -329,96 +288,6 @@ impl App {
             );
             self.data.inbox_seen = Some(seen);
         }
-    }
-
-    fn refresh(&mut self) {
-        let (Some(client), Some(config), Some(user)) =
-            (self.client.clone(), self.config.clone(), self.user.clone())
-        else {
-            return;
-        };
-        self.error = None;
-        self.last_refresh = Instant::now();
-        self.track_inbox();
-        self.data.show_approved = config.other_prs_filter.show_approved;
-        self.data.show_drafts = config.other_prs_filter.show_drafts;
-
-        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
-        self.spawn(async move {
-            Message::MyPullRequests(
-                c.my_pull_requests(&cfg.organization, &cfg.project, &user_id)
-                    .await,
-            )
-        });
-
-        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
-        self.spawn(async move {
-            Message::Builds(c.my_builds(&cfg.organization, &cfg.project, &user_id).await)
-        });
-
-        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
-        self.spawn(async move {
-            Message::Mentions(
-                c.mentioned_work_items(&cfg.organization, &cfg.project, &cfg.team, &user_id)
-                    .await,
-            )
-        });
-
-        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id);
-        self.spawn(async move {
-            Message::OtherPullRequests(
-                c.other_pull_requests(
-                    &cfg.organization,
-                    &cfg.project,
-                    &user_id,
-                    &cfg.other_prs_filter,
-                )
-                .await,
-            )
-        });
-
-        if let Some(detail) = &self.detail {
-            self.load_detail(detail);
-        }
-
-        self.load_sprint();
-    }
-
-    fn load_sprint(&self) {
-        let Some((client, config)) = self.connection() else {
-            return;
-        };
-        let Some(ready_column) = config.ready_column.clone() else {
-            return;
-        };
-        let sprint = self.sprint.clone();
-        self.spawn(async move {
-            Message::SprintWorkItems(
-                client
-                    .sprint_work_items(
-                        &config.organization,
-                        &config.project,
-                        &config.team,
-                        sprint.as_deref(),
-                        &ready_column,
-                        &config.work_item_types,
-                    )
-                    .await,
-            )
-        });
-    }
-
-    fn load_sprints(&self) {
-        let Some((client, config)) = self.connection() else {
-            return;
-        };
-        self.spawn(async move {
-            Message::Sprints(
-                client
-                    .iterations(&config.organization, &config.project, &config.team)
-                    .await,
-            )
-        });
     }
 
     fn retry(&mut self, retry: Retry) {
@@ -765,140 +634,6 @@ impl App {
         } else {
             self.detail_scroll.saturating_sub(1)
         };
-    }
-
-    fn open_selected(&mut self) {
-        let Some(index) = self.focus.index() else {
-            return;
-        };
-        let Some(detail) = self.data.detail(self.focus, self.selections[index]) else {
-            return;
-        };
-        self.load_detail(&detail);
-        if let Some(seen) = &mut self.data.inbox_seen {
-            seen.insert(detail.key());
-        }
-        self.detail = Some(detail);
-        self.load_images();
-        self.detail_info = None;
-        self.detail_scroll = 0;
-        self.detail_tab = DetailTab::Overview;
-    }
-
-    /// Starts downloading images in the shown detail that are not cached yet.
-    fn load_images(&self) {
-        let Some(client) = self.client.clone() else {
-            return;
-        };
-        let mut texts: Vec<&str> = Vec::new();
-        let mut rich: Vec<&RichText> = Vec::new();
-        if let Some(Detail::PullRequest(pr)) = &self.detail {
-            texts.extend(pr.description.as_deref());
-        }
-        match &self.detail_info {
-            Some(DetailInfo::PullRequest(info)) => {
-                texts.extend(info.description.as_deref());
-                texts.extend(
-                    info.threads
-                        .iter()
-                        .flat_map(|thread| &thread.comments)
-                        .filter_map(|comment| comment.content.as_deref()),
-                );
-            }
-            Some(DetailInfo::WorkItem(info)) => {
-                rich.extend(
-                    [
-                        &info.description,
-                        &info.repro_steps,
-                        &info.acceptance_criteria,
-                    ]
-                    .into_iter()
-                    .flatten(),
-                );
-                rich.extend(info.comments.iter().map(|comment| &comment.text));
-            }
-            None => {}
-        }
-        let urls = texts
-            .into_iter()
-            .flat_map(image_urls)
-            .chain(rich.into_iter().flat_map(RichText::image_urls))
-            .collect();
-        for url in self.images.start_loading(urls) {
-            let client = client.clone();
-            self.spawn(async move {
-                let result = match client.download(&url).await {
-                    Ok(bytes) => tokio::task::spawn_blocking(move || {
-                        image::load_from_memory(&bytes).map_err(anyhow::Error::from)
-                    })
-                    .await
-                    .map_err(anyhow::Error::from)
-                    .and_then(|result| result),
-                    Err(err) => Err(err),
-                };
-                Message::Image { url, result }
-            });
-        }
-    }
-
-    fn load_signals(&self, prs: &[PullRequest]) {
-        let Some((client, config)) = self.connection() else {
-            return;
-        };
-        for pr in prs {
-            let (client, config, pr) = (client.clone(), config.clone(), pr.clone());
-            self.spawn(async move {
-                let result = client
-                    .pull_request_details(&config.organization, &config.project, &pr)
-                    .await;
-                Message::PullRequestSignals {
-                    id: pr.pull_request_id,
-                    result,
-                }
-            });
-        }
-    }
-
-    fn load_detail(&self, detail: &Detail) {
-        let Some((client, config)) = self.connection() else {
-            return;
-        };
-        match detail {
-            Detail::PullRequest(pr) => {
-                let (id, pr) = (pr.pull_request_id, pr.clone());
-                self.spawn(async move {
-                    let result = client
-                        .pull_request_details(&config.organization, &config.project, &pr)
-                        .await;
-                    Message::PullRequestDetails { id, result }
-                });
-            }
-            Detail::WorkItem(item) => {
-                let id = item.id;
-                self.spawn(async move {
-                    let result = client
-                        .work_item_details(&config.organization, &config.project, id)
-                        .await;
-                    Message::WorkItemDetails { id, result }
-                });
-            }
-            Detail::Build(_) => {}
-        }
-    }
-
-    /// Back to the sprint overview.
-    fn close_detail(&mut self) {
-        self.detail = None;
-        self.detail_info = None;
-        if self.focus == Panel::Detail {
-            self.focus = self.last_left;
-        }
-    }
-
-    fn sync_detail(&mut self) {
-        if let Some(fresh) = self.detail.as_ref().and_then(|d| self.data.find(d)) {
-            self.detail = Some(fresh);
-        }
     }
 
     pub(crate) fn handle_paste(&mut self, pasted: &str) {
