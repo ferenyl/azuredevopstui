@@ -160,10 +160,72 @@ pub enum ImageState {
     Failed,
 }
 
+/// Most decoded images (and their protocol state) kept; the least recently used go first.
+const MAX_CACHED_IMAGES: usize = 64;
+
+/// A map that evicts its least recently used entries beyond a limit.
+struct Lru<V> {
+    entries: HashMap<String, (V, u64)>,
+    tick: u64,
+}
+
+impl<V> Lru<V> {
+    fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+            tick: 0,
+        }
+    }
+
+    fn next_tick(&mut self) -> u64 {
+        self.tick += 1;
+        self.tick
+    }
+
+    fn contains(&self, key: &str) -> bool {
+        self.entries.contains_key(key)
+    }
+
+    fn get_mut(&mut self, key: &str) -> Option<&mut V> {
+        let tick = self.next_tick();
+        self.entries.get_mut(key).map(|(value, used)| {
+            *used = tick;
+            value
+        })
+    }
+
+    fn insert(&mut self, key: String, value: V) {
+        let tick = self.next_tick();
+        self.entries.insert(key, (value, tick));
+    }
+
+    /// Drops the least recently used entries that are not `pinned` until at most `max` of them remain.
+    fn evict_over(&mut self, max: usize, pinned: impl Fn(&V) -> bool) {
+        loop {
+            let mut count = 0;
+            let mut oldest: Option<(&String, u64)> = None;
+            for (key, (value, used)) in &self.entries {
+                if pinned(value) {
+                    continue;
+                }
+                count += 1;
+                if oldest.is_none_or(|(_, oldest_used)| *used < oldest_used) {
+                    oldest = Some((key, *used));
+                }
+            }
+            let Some((key, _)) = oldest.filter(|_| count > max) else {
+                return;
+            };
+            let key = key.clone();
+            self.entries.remove(&key);
+        }
+    }
+}
+
 /// Images shown in the detail panel. Disabled when the terminal has no graphics protocol.
 pub struct Images {
     picker: Option<Picker>,
-    cache: RefCell<HashMap<String, ImageState>>,
+    cache: RefCell<Lru<ImageState>>,
     drawn: RefCell<Vec<Rect>>,
     previous: RefCell<Vec<Rect>>,
 }
@@ -173,7 +235,7 @@ impl Images {
     pub fn new(picker: Option<Picker>) -> Self {
         Self {
             picker: picker.filter(|picker| picker.protocol_type() != ProtocolType::Halfblocks),
-            cache: RefCell::new(HashMap::new()),
+            cache: RefCell::new(Lru::new()),
             drawn: RefCell::default(),
             previous: RefCell::default(),
         }
@@ -191,7 +253,7 @@ impl Images {
         let mut cache = self.cache.borrow_mut();
         let mut started = Vec::new();
         for url in urls {
-            if !cache.contains_key(&url) {
+            if !cache.contains(&url) {
                 cache.insert(url.clone(), ImageState::Loading);
                 started.push(url);
             }
@@ -223,7 +285,11 @@ impl Images {
                 ImageState::Failed
             }
         };
-        self.cache.borrow_mut().insert(url, state);
+        let mut cache = self.cache.borrow_mut();
+        cache.insert(url, state);
+        cache.evict_over(MAX_CACHED_IMAGES, |state| {
+            matches!(state, ImageState::Loading)
+        });
     }
 
     pub fn drawn_at(&self, area: Rect) {
@@ -362,6 +428,60 @@ mod tests {
 
         assert!(!images.enabled());
         assert!(images.start_loading(vec!["a".into()]).is_empty());
+    }
+
+    #[test]
+    fn lru_stays_bounded_and_keeps_most_recently_used() {
+        let mut lru = Lru::new();
+        for i in 0..10 {
+            lru.insert(format!("k{i}"), i);
+            lru.get_mut("k0");
+            lru.evict_over(3, |_| false);
+            assert!(lru.entries.len() <= 3);
+        }
+
+        assert!(lru.contains("k0"));
+        assert!(lru.contains("k9"));
+        assert!(lru.contains("k8"));
+        assert!(!lru.contains("k1"));
+    }
+
+    #[test]
+    fn lru_never_evicts_pinned_entries() {
+        let mut lru = Lru::new();
+        lru.insert("loading".into(), 0);
+        for i in 1..=5 {
+            lru.insert(format!("k{i}"), i);
+        }
+        lru.evict_over(2, |value| *value == 0);
+
+        assert!(lru.contains("loading"));
+        assert_eq!(lru.entries.len(), 3);
+        assert!(lru.contains("k5") && lru.contains("k4"));
+    }
+
+    #[test]
+    fn image_cache_is_bounded() {
+        let mut picker = Picker::halfblocks();
+        picker.set_protocol_type(ProtocolType::Kitty);
+        let images = Images::new(Some(picker));
+        assert!(images.enabled());
+
+        for i in 0..MAX_CACHED_IMAGES * 2 {
+            let url = format!("img{i}");
+            assert_eq!(images.start_loading(vec![url.clone()]).len(), 1);
+            images.insert(url, Ok(DynamicImage::new_rgb8(2, 2)));
+        }
+        images.insert("bad".into(), Err(anyhow::anyhow!("boom")));
+
+        assert_eq!(images.cache.borrow().entries.len(), MAX_CACHED_IMAGES);
+        let last = format!("img{}", MAX_CACHED_IMAGES * 2 - 1);
+        assert!(images.with(&last, |state| matches!(
+            state,
+            Some(ImageState::Ready { .. })
+        )));
+        assert!(images.with("img0", |state| state.is_none()));
+        assert!(images.with("bad", |state| matches!(state, Some(ImageState::Failed))));
     }
 
     #[test]
