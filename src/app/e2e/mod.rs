@@ -16,7 +16,7 @@ use ratatui::backend::TestBackend;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use wiremock::matchers::{any, body_string_contains, method, path, query_param};
-use wiremock::{Mock, MockBuilder, MockServer, Request, Respond, ResponseTemplate};
+use wiremock::{Mock, MockBuilder, MockServer, Request, Respond, ResponseTemplate, Times};
 
 use super::{App, Screen, SetupStep};
 use crate::api::AdoClient;
@@ -149,7 +149,12 @@ impl MockAdo {
     }
 
     /// Mounts `mock` ahead of fixtures; its `expect` is verified when the test ends.
-    pub async fn expect(&self, mock: MockBuilder, response: ResponseTemplate, times: u64) {
+    pub async fn expect(
+        &self,
+        mock: MockBuilder,
+        response: ResponseTemplate,
+        times: impl Into<Times>,
+    ) {
         mock.respond_with(response)
             .with_priority(OVERRIDE_PRIORITY)
             .expect(times)

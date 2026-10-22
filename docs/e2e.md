@@ -31,7 +31,7 @@ async fn server_error_shows_error_and_keeps_other_panels() {
 - `screen()`: the rendered screen as text.
 - `ado.fail(method, path, status)`: answer an endpoint with an error instead of its fixture.
 - `ado.fail_once(method, path, response)`: answer only the first request with `response` (e.g. a 429 with `Retry-After: 0`), then serve the fixture.
-- `ado.expect(mock, response, times)`: answer and assert how often a request arrives, e.g. a `PATCH` with a given body.
+- `ado.expect(mock, response, times)`: answer and assert how often a request arrives (a count or a range), e.g. a `PATCH` with a given body. `ResponseTemplate::set_delay` makes a response slow, to test requests that overlap.
 - `ado.received(method, path_suffix)`: how many requests have reached a path ending in the suffix.
 
 ## Fixtures
