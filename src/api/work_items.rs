@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt, stream};
 use serde_json::json;
@@ -25,6 +27,12 @@ const FIELDS: [&str; 10] = [
     "System.AssignedTo",
     "System.Tags",
 ];
+/// The unanswered mention in a work item's comments as of its last change; a comment changes it.
+pub(super) struct CachedMention {
+    changed_date: String,
+    date: Option<String>,
+}
+
 const CHILD_LINK: &str = "System.LinkTypes.Hierarchy-Forward";
 const ARTIFACT_LINK: &str = "ArtifactLink";
 const HYPERLINK: &str = "Hyperlink";
@@ -176,12 +184,33 @@ impl ProjectApi {
              ORDER BY [System.ChangedDate] DESC"
         );
         let items = self.query_work_items(&wiql).await?;
+        let ids: HashSet<u32> = items.iter().map(|item| item.id).collect();
+        self.mentions
+            .lock()
+            .expect("mention cache")
+            .retain(|id, _| ids.contains(id));
         let results: Vec<Result<Option<Mention>>> = stream::iter(items)
             .map(|item| async move {
-                let comments = self.comments(item.id).await.inspect_err(|err| {
-                    tracing::warn!(id = item.id, "skipped work item without comments: {err:#}");
-                })?;
-                let date = unanswered_mention(&comments.comments, user_id);
+                let date = match self.cached_mention(&item) {
+                    Some(date) => date,
+                    None => {
+                        let comments = self.comments(item.id).await.inspect_err(|err| {
+                            tracing::warn!(
+                                id = item.id,
+                                "skipped work item without comments: {err:#}"
+                            );
+                        })?;
+                        let date = unanswered_mention(&comments.comments, user_id);
+                        self.mentions.lock().expect("mention cache").insert(
+                            item.id,
+                            CachedMention {
+                                changed_date: item.fields.changed_date.clone(),
+                                date: date.clone(),
+                            },
+                        );
+                        date
+                    }
+                };
                 Ok(date.map(|date| Mention { item, date }))
             })
             .buffered(MAX_CONCURRENT_REQUESTS)
@@ -222,6 +251,17 @@ impl ProjectApi {
             )
             .await?;
         Ok(())
+    }
+
+    /// The cached unanswered mention, while the item has not changed since.
+    fn cached_mention(&self, item: &WorkItem) -> Option<Option<String>> {
+        let changed = &item.fields.changed_date;
+        self.mentions
+            .lock()
+            .expect("mention cache")
+            .get(&item.id)
+            .filter(|cached| !changed.is_empty() && cached.changed_date == *changed)
+            .map(|cached| cached.date.clone())
     }
 
     /// The newest comments first.
@@ -1055,6 +1095,51 @@ mod tests {
         assert_eq!(mentions.items.len(), 1);
         assert_eq!(mentions.items[0].item.id, 10);
         assert_eq!(mentions.items[0].date, "2026-10-01T10:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn mention_comments_load_again_only_after_the_item_changed() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/Team/_apis/wit/wiql"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "workItems": [{ "id": 10 }] })),
+            )
+            .mount(&server)
+            .await;
+        let item = work_item_json(10, "Mentioned", "Task", "Active");
+        let mut changed = item.clone();
+        changed["fields"]["System.ChangedDate"] = json!("2026-10-02T10:00:00Z");
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [item] })))
+            .up_to_n_times(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [changed] })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalCount": 1,
+                "comments": [{
+                    "createdBy": { "id": "other", "displayName": "Bo" },
+                    "createdDate": "2026-10-01T10:00:00Z",
+                    "text": "ping @<me-id>"
+                }]
+            })))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        for _ in 0..3 {
+            let mentions = client.mentioned_work_items("me-id").await.unwrap();
+            assert_eq!(mentions.items.len(), 1);
+        }
     }
 
     #[tokio::test]
