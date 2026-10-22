@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
 use reqwest::{Method, StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -32,6 +32,9 @@ const VSSPS_DEV_AZURE: &str = "https://vssps.dev.azure.com";
 const MAX_DOWNLOAD_BYTES: u64 = 20 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_ATTEMPTS: u32 = 3;
+const BACKOFF_BASE: Duration = Duration::from_secs(1);
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 const USER_AGENT: &str = concat!("azuredevopstui/", env!("CARGO_PKG_VERSION"));
 
 /// Service roots, replaceable so tests can point them at a mock server.
@@ -72,6 +75,7 @@ pub struct AdoClient {
     http: reqwest::Client,
     auth: Auth,
     urls: BaseUrls,
+    backoff: Duration,
 }
 
 /// Builds the shared HTTP client. `request_timeout` bounds each whole request, including the body.
@@ -90,6 +94,7 @@ impl AdoClient {
             http: http_client(REQUEST_TIMEOUT),
             auth,
             urls: BaseUrls::default(),
+            backoff: BACKOFF_BASE,
         }
     }
 
@@ -103,6 +108,7 @@ impl AdoClient {
                 vssps: url.into(),
                 vssps_dev_azure: url.into(),
             },
+            backoff: Duration::from_millis(1),
         }
     }
 
@@ -125,13 +131,7 @@ impl AdoClient {
                 url.host_str().unwrap_or_default()
             );
         }
-        let response = self
-            .auth
-            .authorize(self.http.get(url.clone()))
-            .await?
-            .send()
-            .await
-            .with_context(|| format!("request failed: {}", url.path()))?;
+        let response = self.send(Method::GET, &url, None, true).await?;
         let status = response.status();
         if !status.is_success() {
             bail!("{status}: {}", url.path());
@@ -170,18 +170,19 @@ impl AdoClient {
         api_version: &str,
     ) -> Result<T> {
         let url = build_url(base, segments, query, api_version)?;
-        self.request(Method::GET, url, None).await
+        self.request(Method::GET, url, None, true).await
     }
 
-    async fn post<T: DeserializeOwned>(
+    /// POST for read-only queries (WIQL, `workitemsbatch`); safe to retry. Mutations use `post_versioned`.
+    async fn post_read<T: DeserializeOwned>(
         &self,
         base: &str,
         segments: &[&str],
         query: &[(&str, &str)],
         body: &Value,
     ) -> Result<T> {
-        self.post_versioned(base, segments, query, body, API_VERSION)
-            .await
+        let url = build_url(base, segments, query, API_VERSION)?;
+        self.request(Method::POST, url, Some(body), true).await
     }
 
     async fn post_versioned<T: DeserializeOwned>(
@@ -193,7 +194,7 @@ impl AdoClient {
         api_version: &str,
     ) -> Result<T> {
         let url = build_url(base, segments, query, api_version)?;
-        self.request(Method::POST, url, Some(body)).await
+        self.request(Method::POST, url, Some(body), false).await
     }
 
     async fn patch<T: DeserializeOwned>(
@@ -203,7 +204,7 @@ impl AdoClient {
         body: &Value,
     ) -> Result<T> {
         let url = build_url(base, segments, &[], API_VERSION)?;
-        self.request(Method::PATCH, url, Some(body)).await
+        self.request(Method::PATCH, url, Some(body), false).await
     }
 
     async fn request<T: DeserializeOwned>(
@@ -211,12 +212,13 @@ impl AdoClient {
         method: Method,
         url: Url,
         body: Option<&Value>,
+        retry: bool,
     ) -> Result<T> {
-        let mut response = self.send(method.clone(), &url, body).await?;
+        let mut response = self.send(method.clone(), &url, body, retry).await?;
         if is_unauthorized_status(response.status()) && !self.auth.uses_pat() {
             tracing::info!(path = url.path(), "token rejected, refreshing");
             self.auth.refresh().await?;
-            response = self.send(method.clone(), &url, body).await?;
+            response = self.send(method.clone(), &url, body, retry).await?;
         }
         let status = response.status();
         tracing::debug!(%method, path = url.path(), %status, "request");
@@ -236,7 +238,41 @@ impl AdoClient {
             .with_context(|| format!("invalid response: {}", url.path()))
     }
 
+    /// Sends the request; with `retry`, transient failures are retried up to `MAX_ATTEMPTS` times in all.
     async fn send(
+        &self,
+        method: Method,
+        url: &Url,
+        body: Option<&Value>,
+        retry: bool,
+    ) -> Result<reqwest::Response> {
+        let attempts = if retry { MAX_ATTEMPTS } else { 1 };
+        let mut attempt = 1;
+        loop {
+            let result = self.send_once(method.clone(), url, body).await;
+            let delay = match &result {
+                Ok(response) if is_retryable_status(response.status()) => {
+                    retry_after(response).map(|delay| delay.min(MAX_RETRY_DELAY))
+                }
+                Err(err) if is_transient_error(err) => None,
+                _ => return result,
+            };
+            if attempt >= attempts {
+                return result;
+            }
+            let delay = delay.unwrap_or_else(|| backoff_delay(self.backoff, attempt));
+            tracing::info!(
+                path = url.path(),
+                attempt,
+                ?delay,
+                "transient failure, retrying"
+            );
+            tokio::time::sleep(delay).await;
+            attempt += 1;
+        }
+    }
+
+    async fn send_once(
         &self,
         method: Method,
         url: &Url,
@@ -341,6 +377,40 @@ fn build_url(
         .extend_pairs(query)
         .append_pair("api-version", api_version);
     Ok(url)
+}
+
+fn is_retryable_status(status: StatusCode) -> bool {
+    matches!(status.as_u16(), 429 | 502 | 503 | 504)
+}
+
+fn is_transient_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|err| err.is_connect() || err.is_timeout())
+    })
+}
+
+/// Seconds from a `Retry-After` header; the HTTP-date form is ignored.
+fn retry_after(response: &reqwest::Response) -> Option<Duration> {
+    let seconds = response
+        .headers()
+        .get(RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(Duration::from_secs(seconds))
+}
+
+/// `base`, `2 * base`, ... plus up to 25% jitter.
+fn backoff_delay(base: Duration, attempt: u32) -> Duration {
+    let delay = base * 2u32.pow(attempt - 1);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.subsec_nanos());
+    delay + delay / 4 * (nanos % 1000) / 1000
 }
 
 fn is_unauthorized_status(status: StatusCode) -> bool {
@@ -520,6 +590,193 @@ mod tests {
                 .downcast_ref::<reqwest::Error>()
                 .is_some_and(reqwest::Error::is_timeout)
         }));
+    }
+
+    async fn serve_in_turn(
+        server: &wiremock::MockServer,
+        verb: &str,
+        responses: Vec<wiremock::ResponseTemplate>,
+    ) {
+        use wiremock::Mock;
+        use wiremock::matchers::{method, path};
+        for response in responses {
+            Mock::given(method(verb))
+                .and(path("/_apis/test"))
+                .respond_with(response)
+                .up_to_n_times(1)
+                .expect(1)
+                .mount(server)
+                .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn get_retries_throttling_with_retry_after() {
+        use wiremock::{MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        serve_in_turn(
+            &server,
+            "GET",
+            vec![
+                ResponseTemplate::new(429).insert_header("retry-after", "0"),
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})),
+            ],
+        )
+        .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+
+        let value: Value = client
+            .get(&server.uri(), &["_apis", "test"], &[])
+            .await
+            .unwrap();
+
+        assert_eq!(value["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn get_gives_up_after_three_attempts() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_apis/test"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(3)
+            .mount(&server)
+            .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+
+        let err = client
+            .get::<Value>(&server.uri(), &["_apis", "test"], &[])
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().starts_with("503"));
+    }
+
+    #[tokio::test]
+    async fn get_does_not_retry_unauthorized_or_client_errors() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        for status in [401, 404] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/_apis/test"))
+                .respond_with(ResponseTemplate::new(status))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+
+            let result = client
+                .get::<Value>(&server.uri(), &["_apis", "test"], &[])
+                .await;
+
+            assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn mutations_are_not_retried() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        for verb in ["POST", "PATCH"] {
+            let server = MockServer::start().await;
+            Mock::given(method(verb))
+                .and(path("/_apis/test"))
+                .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+            let body = serde_json::json!({});
+
+            let result = if verb == "POST" {
+                client
+                    .post_versioned::<Value>(&server.uri(), &["_apis", "test"], &[], &body, "7.1")
+                    .await
+            } else {
+                client
+                    .patch::<Value>(&server.uri(), &["_apis", "test"], &body)
+                    .await
+            };
+
+            assert!(result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_post_is_retried() {
+        use wiremock::{MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        serve_in_turn(
+            &server,
+            "POST",
+            vec![
+                ResponseTemplate::new(502),
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})),
+            ],
+        )
+        .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+
+        let value: Value = client
+            .post_read(
+                &server.uri(),
+                &["_apis", "test"],
+                &[],
+                &serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(value["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn timeouts_are_retried() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_apis/test"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_secs(5))
+                    .set_body_json(serde_json::json!({})),
+            )
+            .expect(3)
+            .mount(&server)
+            .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri())
+            .with_request_timeout(Duration::from_millis(50));
+
+        let result = client
+            .get::<Value>(&server.uri(), &["_apis", "test"], &[])
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn backoff_doubles_with_bounded_jitter() {
+        let base = Duration::from_secs(1);
+
+        let first = backoff_delay(base, 1);
+        let second = backoff_delay(base, 2);
+
+        assert!(first >= base && first <= base * 5 / 4);
+        assert!(second >= base * 2 && second <= base * 5 / 2);
+    }
+
+    #[test]
+    fn retryable_statuses() {
+        for status in [429, 502, 503, 504] {
+            assert!(is_retryable_status(StatusCode::from_u16(status).unwrap()));
+        }
+        for status in [200, 400, 401, 404, 500] {
+            assert!(!is_retryable_status(StatusCode::from_u16(status).unwrap()));
+        }
     }
 
     #[tokio::test]
