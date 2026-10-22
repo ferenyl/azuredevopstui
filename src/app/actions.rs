@@ -90,19 +90,14 @@ impl App {
     }
 
     pub(super) fn assign_to_me(&mut self) {
-        let (Some(item), Some(client), Some(config), Some(user)) = (
-            self.current_work_item(),
-            self.client.clone(),
-            self.config.clone(),
-            self.user.as_ref(),
-        ) else {
+        let (Some(item), Some(api), Some(user)) =
+            (self.current_work_item(), self.api(), self.user.as_ref())
+        else {
             return;
         };
         let (id, assignee) = (item.id, user.unique_name().to_string());
         self.spawn(async move {
-            let result = client
-                .assign_work_item(&config.organization, &config.project, id, &assignee)
-                .await;
+            let result = api.assign_work_item(id, &assignee).await;
             Message::WorkItemUpdated { id, result }
         });
     }
@@ -134,11 +129,11 @@ impl App {
             self.error = Some(format!("#{} is not assigned to you", item.id));
             return;
         }
-        let Some((client, config)) = self.connection() else {
+        let Some(api) = self.api() else {
             return;
         };
         self.spawn(async move {
-            let result = client.tags(&config.organization, &config.project).await;
+            let result = api.tags().await;
             Message::Tags { item, result }
         });
     }
@@ -152,13 +147,11 @@ impl App {
             self.open_column_picker(item, &board, unassign);
             return;
         }
-        let Some((client, config)) = self.connection() else {
+        let Some(api) = self.api() else {
             return;
         };
         self.spawn(async move {
-            let result = client
-                .board(&config.organization, &config.project, &config.team)
-                .await;
+            let result = api.board().await;
             Message::Board {
                 item,
                 unassign,
@@ -184,13 +177,11 @@ impl App {
             self.error = Some(format!("!{} is not ready to complete", pr.pull_request_id));
             return;
         }
-        let Some((client, config)) = self.connection() else {
+        let Some(api) = self.api() else {
             return;
         };
         self.spawn(async move {
-            let result = client
-                .merge_strategies(&config.organization, &config.project, &pr)
-                .await;
+            let result = api.merge_strategies(&pr).await;
             Message::MergeStrategies { pr, result }
         });
     }

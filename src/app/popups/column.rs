@@ -38,9 +38,7 @@ impl App {
     }
 
     pub(in crate::app) fn confirm_column(&mut self, picker: ColumnPicker) {
-        let (Some(board), Some(client), Some(config)) =
-            (self.board.clone(), self.client.clone(), self.config.clone())
-        else {
+        let (Some(board), Some(api)) = (self.board.clone(), self.api()) else {
             return;
         };
         let Some(target) = picker.targets.get(picker.selection.selected).cloned() else {
@@ -48,15 +46,10 @@ impl App {
         };
         let (id, unassign) = (picker.work_item_id, picker.unassign);
         self.spawn(async move {
-            let (organization, project) = (&config.organization, &config.project);
             let result = if unassign {
-                client
-                    .unassign_work_item(organization, project, id, &board, &target)
-                    .await
+                api.unassign_work_item(id, &board, &target).await
             } else {
-                client
-                    .move_work_item(organization, project, id, &board, &target)
-                    .await
+                api.move_work_item(id, &board, &target).await
             };
             Message::WorkItemUpdated { id, result }
         });

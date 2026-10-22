@@ -13,6 +13,7 @@ pub use models::{
 pub use pull_requests::{is_approved, is_reviewer_policy};
 
 use std::fmt;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::header::CONTENT_TYPE;
@@ -21,6 +22,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::auth::Auth;
+use crate::config::Config;
 
 const API_VERSION: &str = "7.1";
 const DEV_AZURE: &str = "https://dev.azure.com";
@@ -234,6 +236,42 @@ impl AdoClient {
             .send()
             .await
             .with_context(|| format!("request failed: {}", url.path()))
+    }
+}
+
+/// An `AdoClient` bound to the configured organization, project and team.
+#[derive(Clone)]
+pub struct ProjectApi {
+    client: AdoClient,
+    organization: Arc<str>,
+    project: Arc<str>,
+    team: Arc<str>,
+}
+
+impl ProjectApi {
+    pub fn new(client: AdoClient, config: &Config) -> Self {
+        Self::for_team(client, &config.organization, &config.project, &config.team)
+    }
+
+    #[cfg(test)]
+    fn with_base_url(url: &str) -> Self {
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), url);
+        Self::for_team(client, "contoso", "MyProject", "Team")
+    }
+
+    #[cfg(test)]
+    fn with_team(mut self, team: &str) -> Self {
+        self.team = team.into();
+        self
+    }
+
+    pub fn for_team(client: AdoClient, organization: &str, project: &str, team: &str) -> Self {
+        Self {
+            client,
+            organization: organization.into(),
+            project: project.into(),
+            team: team.into(),
+        }
     }
 }
 

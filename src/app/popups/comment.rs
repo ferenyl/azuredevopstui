@@ -18,13 +18,11 @@ impl App {
         }
         // Markdown joins single newlines; trailing spaces make them line breaks.
         let text = text.replace('\n', "  \n");
-        let Some((client, config)) = self.connection() else {
+        let Some(api) = self.api() else {
             return;
         };
         self.spawn(async move {
-            let result = client
-                .add_work_item_comment(&config.organization, &config.project, id, &text)
-                .await;
+            let result = api.add_work_item_comment(id, &text).await;
             Message::WorkItemUpdated { id, result }
         });
     }

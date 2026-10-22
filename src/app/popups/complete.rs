@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::api::PullRequest;
 use crate::app::message::Message;
 use crate::app::{App, CompletePicker, Popup, Selection};
@@ -34,16 +36,15 @@ impl App {
         let Some(strategy) = picker.strategies.get(picker.selection.selected).copied() else {
             return;
         };
-        let (Some(client), Some(config)) = (self.client.clone(), &mut self.config) else {
+        let (Some(api), Some(config)) = (self.api(), &mut self.config) else {
             return;
         };
+        let config = Arc::make_mut(config);
         config.merge_strategy = Some(strategy);
         let saved = config.save();
-        let (config, pr) = (config.clone(), picker.pr);
+        let pr = picker.pr;
         self.spawn(async move {
-            let result = client
-                .complete_pull_request(&config.organization, &config.project, &pr, strategy)
-                .await;
+            let result = api.complete_pull_request(&pr, strategy).await;
             Message::PullRequestCompleted {
                 id: pr.pull_request_id,
                 result,
@@ -57,6 +58,8 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crossterm::event::KeyCode;
 
     use crate::app::Popup;
@@ -67,7 +70,7 @@ mod tests {
     #[test]
     fn picker_preselects_last_used_strategy() {
         let mut app = app();
-        app.config.as_mut().unwrap().merge_strategy = Some(MergeStrategy::Rebase);
+        Arc::make_mut(app.config.as_mut().unwrap()).merge_strategy = Some(MergeStrategy::Rebase);
         let pr = Box::new(pull_request(1, "First", "me", "2026-10-03T10:00:00Z"));
 
         app.open_complete_picker(pr, vec![MergeStrategy::Squash, MergeStrategy::Rebase]);

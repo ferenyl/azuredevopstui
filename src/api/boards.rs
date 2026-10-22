@@ -1,30 +1,33 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use super::AdoClient;
+use super::ProjectApi;
 use super::models::{Backlog, Board, BoardResponse, ListResponse, Named};
 use super::sorted_names;
 
 const REQUIREMENT_BACKLOG: &str = "requirement";
 const TAGS_API_VERSION: &str = "7.1-preview.1";
 
-impl AdoClient {
+impl ProjectApi {
     /// Columns of the team's requirement-level board, in board order.
-    pub async fn board_columns(
-        &self,
-        organization: &str,
-        project: &str,
-        team: &str,
-    ) -> Result<Vec<String>> {
-        let board = self.board(organization, project, team).await?;
+    pub async fn board_columns(&self) -> Result<Vec<String>> {
+        let board = self.board().await?;
         Ok(board.columns.into_iter().map(|c| c.name).collect())
     }
 
-    pub async fn board(&self, organization: &str, project: &str, team: &str) -> Result<Board> {
+    pub async fn board(&self) -> Result<Board> {
         let backlogs: ListResponse<Backlog> = self
+            .client
             .get(
-                &self.urls.dev_azure,
-                &[organization, project, team, "_apis", "work", "backlogs"],
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    &self.team,
+                    "_apis",
+                    "work",
+                    "backlogs",
+                ],
                 &[],
             )
             .await?;
@@ -34,12 +37,13 @@ impl AdoClient {
             .find(|b| b.kind.eq_ignore_ascii_case(REQUIREMENT_BACKLOG))
             .context("team has no requirement backlog")?;
         let board: BoardResponse = self
+            .client
             .get(
-                &self.urls.dev_azure,
+                &self.client.urls.dev_azure,
                 &[
-                    organization,
-                    project,
-                    team,
+                    &self.organization,
+                    &self.project,
+                    &self.team,
                     "_apis",
                     "work",
                     "boards",
@@ -57,53 +61,38 @@ impl AdoClient {
 
     pub async fn move_work_item(
         &self,
-        organization: &str,
-        project: &str,
         id: u32,
         board: &Board,
         target: &ColumnTarget,
     ) -> Result<()> {
-        self.update_work_item(organization, project, id, &column_fields(board, target))
+        self.update_work_item(id, &column_fields(board, target))
             .await
     }
 
     /// Clears the assignee and moves the item in one update.
     pub async fn unassign_work_item(
         &self,
-        organization: &str,
-        project: &str,
         id: u32,
         board: &Board,
         target: &ColumnTarget,
     ) -> Result<()> {
         let mut fields = vec![("System.AssignedTo", json!(""))];
         fields.extend(column_fields(board, target));
-        self.update_work_item(organization, project, id, &fields)
+        self.update_work_item(id, &fields).await
+    }
+
+    pub async fn assign_work_item(&self, id: u32, assignee: &str) -> Result<()> {
+        self.update_work_item(id, &[("System.AssignedTo", json!(assignee))])
             .await
     }
 
-    pub async fn assign_work_item(
-        &self,
-        organization: &str,
-        project: &str,
-        id: u32,
-        assignee: &str,
-    ) -> Result<()> {
-        self.update_work_item(
-            organization,
-            project,
-            id,
-            &[("System.AssignedTo", json!(assignee))],
-        )
-        .await
-    }
-
     /// Tags used in the project.
-    pub async fn tags(&self, organization: &str, project: &str) -> Result<Vec<String>> {
+    pub async fn tags(&self) -> Result<Vec<String>> {
         let tags: ListResponse<Named> = self
+            .client
             .get_versioned(
-                &self.urls.dev_azure,
-                &[organization, project, "_apis", "wit", "tags"],
+                &self.client.urls.dev_azure,
+                &[&self.organization, &self.project, "_apis", "wit", "tags"],
                 &[],
                 TAGS_API_VERSION,
             )
@@ -111,50 +100,38 @@ impl AdoClient {
         Ok(sorted_names(tags.value.into_iter().map(|tag| tag.name)))
     }
 
-    pub async fn set_work_item_tags(
-        &self,
-        organization: &str,
-        project: &str,
-        id: u32,
-        tags: &[String],
-    ) -> Result<()> {
+    pub async fn set_work_item_tags(&self, id: u32, tags: &[String]) -> Result<()> {
         // `add` merges tags, so the list is replaced; removing the last tag clears the field.
         let operation = if tags.is_empty() {
             json!({ "op": "remove", "path": "/fields/System.Tags" })
         } else {
             json!({ "op": "replace", "path": "/fields/System.Tags", "value": tags.join("; ") })
         };
-        self.patch_work_item(organization, project, id, vec![operation])
-            .await
+        self.patch_work_item(id, vec![operation]).await
     }
 
-    async fn update_work_item(
-        &self,
-        organization: &str,
-        project: &str,
-        id: u32,
-        fields: &[(&str, Value)],
-    ) -> Result<()> {
+    async fn update_work_item(&self, id: u32, fields: &[(&str, Value)]) -> Result<()> {
         let operations: Vec<Value> = fields
             .iter()
             .map(|(field, value)| json!({ "op": "add", "path": format!("/fields/{field}"), "value": value }))
             .collect();
-        self.patch_work_item(organization, project, id, operations)
-            .await
+        self.patch_work_item(id, operations).await
     }
 
-    async fn patch_work_item(
-        &self,
-        organization: &str,
-        project: &str,
-        id: u32,
-        operations: Vec<Value>,
-    ) -> Result<()> {
+    async fn patch_work_item(&self, id: u32, operations: Vec<Value>) -> Result<()> {
         let id = id.to_string();
         let _: serde::de::IgnoredAny = self
+            .client
             .patch(
-                &self.urls.dev_azure,
-                &[organization, project, "_apis", "wit", "workitems", &id],
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "wit",
+                    "workitems",
+                    &id,
+                ],
                 &Value::Array(operations),
             )
             .await?;
@@ -212,7 +189,6 @@ mod tests {
 
     use super::*;
     use crate::api::models::BoardColumn;
-    use crate::auth::Auth;
 
     fn column(name: &str, is_split: bool, mappings: &[(&str, &str)]) -> BoardColumn {
         BoardColumn {
@@ -301,9 +277,9 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
 
-        let board = client.board("contoso", "MyProject", "Team").await.unwrap();
+        let board = client.board().await.unwrap();
 
         assert_eq!(board.column_field, "WEF_A_Kanban.Column");
         assert_eq!(board.done_field, "WEF_A_Kanban.Column.Done");
@@ -326,14 +302,11 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
         let board = board(vec![column("Active", true, &[("User Story", "Active")])]);
         let target = board.targets("User Story").unwrap().pop().unwrap();
 
-        client
-            .move_work_item("contoso", "MyProject", 5, &board, &target)
-            .await
-            .unwrap();
+        client.move_work_item(5, &board, &target).await.unwrap();
     }
 
     #[tokio::test]
@@ -348,12 +321,9 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
 
-        client
-            .assign_work_item("contoso", "MyProject", 5, "me@example.com")
-            .await
-            .unwrap();
+        client.assign_work_item(5, "me@example.com").await.unwrap();
     }
 
     #[tokio::test]
@@ -371,13 +341,96 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
         let board = board(vec![column("Ready", false, &[("User Story", "New")])]);
         let target = board.targets("User Story").unwrap().remove(0);
 
+        client.unassign_work_item(5, &board, &target).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn board_columns_list_names_in_board_order() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/Team/_apis/work/backlogs"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    json!({ "value": [{ "name": "Stories", "type": "requirement" }] }),
+                ),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/Team/_apis/work/boards/Stories"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "columns": [{ "name": "New" }, { "name": "Done" }],
+                "fields": {
+                    "columnField": { "referenceName": "A" },
+                    "doneField": { "referenceName": "B" }
+                }
+            })))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let columns = client.board_columns().await.unwrap();
+
+        assert_eq!(columns, ["New", "Done"]);
+    }
+
+    #[tokio::test]
+    async fn tags_are_sorted_ignoring_case() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/tags"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "value": [{ "name": "beta" }, { "name": "Alpha" }] })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let tags = client.tags().await.unwrap();
+
+        assert_eq!(tags, ["Alpha", "beta"]);
+    }
+
+    #[tokio::test]
+    async fn set_work_item_tags_replaces_the_field() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
+            .and(body_json(json!([
+                { "op": "replace", "path": "/fields/System.Tags", "value": "a; b" }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
         client
-            .unassign_work_item("contoso", "MyProject", 5, &board, &target)
+            .set_work_item_tags(5, &["a".into(), "b".into()])
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_work_item_tags_removes_the_field_when_empty() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
+            .and(body_json(json!([
+                { "op": "remove", "path": "/fields/System.Tags" }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        client.set_work_item_tags(5, &[]).await.unwrap();
     }
 }

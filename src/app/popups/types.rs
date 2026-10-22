@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::app::{App, Popup, Selection};
 
 impl App {
@@ -24,6 +26,7 @@ impl App {
         let Some(config) = &mut self.config else {
             return;
         };
+        let config = Arc::make_mut(config);
         config.work_item_types = checked_types(selection.items, &checked);
         if let Err(err) = config.save() {
             self.report_error(err);
@@ -72,7 +75,8 @@ mod tests {
     #[test]
     fn types_picker_ticks_configured_types() {
         let mut app = app();
-        app.config.as_mut().unwrap().work_item_types = vec!["Bug".into(), "Retired".into()];
+        Arc::make_mut(app.config.as_mut().unwrap()).work_item_types =
+            vec!["Bug".into(), "Retired".into()];
 
         app.open_types_picker(vec!["Bug".into(), "Task".into()]);
 

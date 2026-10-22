@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt, future, stream};
 use serde_json::json;
 
-use super::AdoClient;
+use super::ProjectApi;
 use super::models::{
     CommentList, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention, PullRequest,
     Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails,
@@ -32,17 +32,14 @@ const HIDDEN_CATEGORY: &str = "Microsoft.HiddenCategory";
 const COMMENTS_API_VERSION: &str = "7.1-preview.4";
 const MAX_COMMENTS: &str = "10";
 
-impl AdoClient {
+impl ProjectApi {
     pub async fn sprint_work_items(
         &self,
-        organization: &str,
-        project: &str,
-        team: &str,
         sprint: Option<&str>,
         ready_column: &str,
         types: &[String],
     ) -> Result<SprintWorkItems> {
-        let iterations = self.iterations(organization, project, team).await?;
+        let iterations = self.iterations().await?;
         let iteration = match sprint {
             Some(sprint) => iterations
                 .into_iter()
@@ -72,10 +69,8 @@ impl AdoClient {
              ORDER BY [System.Id]",
             quote(ready_column)
         );
-        let (mine, ready) = tokio::try_join!(
-            self.query_work_items(organization, project, team, &mine),
-            self.query_work_items(organization, project, team, &ready),
-        )?;
+        let (mine, ready) =
+            tokio::try_join!(self.query_work_items(&mine), self.query_work_items(&ready),)?;
         Ok(SprintWorkItems {
             iteration_name: iteration.name,
             start_date: iteration.attributes.start_date,
@@ -85,32 +80,27 @@ impl AdoClient {
         })
     }
 
-    pub async fn work_item_details(
-        &self,
-        organization: &str,
-        project: &str,
-        id: u32,
-    ) -> Result<WorkItemDetails> {
+    pub async fn work_item_details(&self, id: u32) -> Result<WorkItemDetails> {
         let item_path = [
-            organization,
-            project,
+            &self.organization,
+            &self.project,
             "_apis",
             "wit",
             "workitems",
             &id.to_string(),
         ];
         let (item, comments): (WorkItemResponse, _) = tokio::try_join!(
-            self.get(
-                &self.urls.dev_azure,
+            self.client.get(
+                &self.client.urls.dev_azure,
                 &item_path,
                 &[("$expand", "relations")]
             ),
-            self.comments(organization, project, id),
+            self.comments(id),
         )?;
         let linked_ids: Vec<u32> = item.relations.iter().filter_map(work_item_id).collect();
         let (linked, pull_requests) = tokio::join!(
-            self.work_items_batch(organization, project, &linked_ids),
-            self.linked_pull_requests(organization, &item.relations),
+            self.work_items_batch(&linked_ids),
+            self.linked_pull_requests(&item.relations),
         );
         let linked = linked?;
         let child_ids = child_ids(&item.relations);
@@ -155,15 +145,13 @@ impl AdoClient {
     }
 
     /// Linked pull requests that could be loaded; others are skipped.
-    async fn linked_pull_requests(
-        &self,
-        organization: &str,
-        relations: &[Relation],
-    ) -> Vec<PullRequest> {
+    async fn linked_pull_requests(&self, relations: &[Relation]) -> Vec<PullRequest> {
         let links = pull_request_links(relations);
-        let results = future::join_all(links.iter().map(|(project, repository, id)| {
-            self.pull_request(organization, project, repository, *id)
-        }))
+        let results = future::join_all(
+            links
+                .iter()
+                .map(|(project, repository, id)| self.pull_request(project, repository, *id)),
+        )
         .await;
         results
             .into_iter()
@@ -176,23 +164,15 @@ impl AdoClient {
     }
 
     /// Open work items recently mentioning the user in a comment they have not answered.
-    pub async fn mentioned_work_items(
-        &self,
-        organization: &str,
-        project: &str,
-        team: &str,
-        user_id: &str,
-    ) -> Result<Vec<Mention>> {
+    pub async fn mentioned_work_items(&self, user_id: &str) -> Result<Vec<Mention>> {
         let wiql = "SELECT [System.Id] FROM WorkItems \
                     WHERE [System.Id] IN (@RecentMentions) \
                     AND [System.State] NOT IN ('Closed', 'Removed') \
                     ORDER BY [System.ChangedDate] DESC";
-        let items = self
-            .query_work_items(organization, project, team, wiql)
-            .await?;
+        let items = self.query_work_items(wiql).await?;
         let mentions: Vec<Option<Mention>> = stream::iter(items)
             .map(|item| async move {
-                let comments = self.comments(organization, project, item.id).await?;
+                let comments = self.comments(item.id).await?;
                 let date = unanswered_mention(&comments.comments, user_id);
                 Ok::<_, anyhow::Error>(date.map(|date| Mention { item, date }))
             })
@@ -202,19 +182,14 @@ impl AdoClient {
         Ok(mentions.into_iter().flatten().collect())
     }
 
-    pub async fn add_work_item_comment(
-        &self,
-        organization: &str,
-        project: &str,
-        id: u32,
-        text: &str,
-    ) -> Result<()> {
+    pub async fn add_work_item_comment(&self, id: u32, text: &str) -> Result<()> {
         let _: serde_json::Value = self
+            .client
             .post_versioned(
-                &self.urls.dev_azure,
+                &self.client.urls.dev_azure,
                 &[
-                    organization,
-                    project,
+                    &self.organization,
+                    &self.project,
                     "_apis",
                     "wit",
                     "workItems",
@@ -230,36 +205,38 @@ impl AdoClient {
     }
 
     /// The newest comments first.
-    async fn comments(&self, organization: &str, project: &str, id: u32) -> Result<CommentList> {
-        self.get_versioned(
-            &self.urls.dev_azure,
-            &[
-                organization,
-                project,
-                "_apis",
-                "wit",
-                "workItems",
-                &id.to_string(),
-                "comments",
-            ],
-            &[
-                ("$top", MAX_COMMENTS),
-                ("order", "desc"),
-                ("$expand", "reactions"),
-            ],
-            COMMENTS_API_VERSION,
-        )
-        .await
+    async fn comments(&self, id: u32) -> Result<CommentList> {
+        self.client
+            .get_versioned(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "wit",
+                    "workItems",
+                    &id.to_string(),
+                    "comments",
+                ],
+                &[
+                    ("$top", MAX_COMMENTS),
+                    ("order", "desc"),
+                    ("$expand", "reactions"),
+                ],
+                COMMENTS_API_VERSION,
+            )
+            .await
     }
 
     /// Work item types in the project, without hidden ones like test plans and code reviews.
-    pub async fn work_item_types(&self, organization: &str, project: &str) -> Result<Vec<String>> {
+    pub async fn work_item_types(&self) -> Result<Vec<String>> {
         let categories: ListResponse<WorkItemTypeCategory> = self
+            .client
             .get(
-                &self.urls.dev_azure,
+                &self.client.urls.dev_azure,
                 &[
-                    organization,
-                    project,
+                    &self.organization,
+                    &self.project,
                     "_apis",
                     "wit",
                     "workitemtypecategories",
@@ -271,19 +248,15 @@ impl AdoClient {
     }
 
     /// The team's sprints, furthest in the future first.
-    pub async fn iterations(
-        &self,
-        organization: &str,
-        project: &str,
-        team: &str,
-    ) -> Result<Vec<Iteration>> {
+    pub async fn iterations(&self) -> Result<Vec<Iteration>> {
         let iterations: ListResponse<Iteration> = self
+            .client
             .get(
-                &self.urls.dev_azure,
+                &self.client.urls.dev_azure,
                 &[
-                    organization,
-                    project,
-                    team,
+                    &self.organization,
+                    &self.project,
+                    &self.team,
                     "_apis",
                     "work",
                     "teamsettings",
@@ -297,17 +270,19 @@ impl AdoClient {
         Ok(iterations)
     }
 
-    async fn query_work_items(
-        &self,
-        organization: &str,
-        project: &str,
-        team: &str,
-        wiql: &str,
-    ) -> Result<Vec<WorkItem>> {
+    async fn query_work_items(&self, wiql: &str) -> Result<Vec<WorkItem>> {
         let result: WiqlResult = self
+            .client
             .post(
-                &self.urls.dev_azure,
-                &[organization, project, team, "_apis", "wit", "wiql"],
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    &self.team,
+                    "_apis",
+                    "wit",
+                    "wiql",
+                ],
                 &[("$top", MAX_WORK_ITEMS)],
                 &json!({ "query": wiql }),
             )
@@ -316,23 +291,25 @@ impl AdoClient {
             return Ok(Vec::new());
         }
         let ids: Vec<u32> = result.work_items.iter().map(|item| item.id).collect();
-        self.work_items_batch(organization, project, &ids).await
+        self.work_items_batch(&ids).await
     }
 
     /// Fetches the given work items, keeping the order of `ids`.
-    pub(super) async fn work_items_batch(
-        &self,
-        organization: &str,
-        project: &str,
-        ids: &[u32],
-    ) -> Result<Vec<WorkItem>> {
+    pub(super) async fn work_items_batch(&self, ids: &[u32]) -> Result<Vec<WorkItem>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
         let batch: ListResponse<WorkItem> = self
+            .client
             .post(
-                &self.urls.dev_azure,
-                &[organization, project, "_apis", "wit", "workitemsbatch"],
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "wit",
+                    "workitemsbatch",
+                ],
                 &[],
                 &json!({ "ids": ids, "fields": FIELDS }),
             )
@@ -496,7 +473,6 @@ mod tests {
 
     use super::*;
     use crate::api::models::RelationAttributes;
-    use crate::auth::Auth;
     use crate::test_support::{ids_of_items, work_item_json};
 
     fn relation(rel: &str, url: &str) -> Relation {
@@ -624,17 +600,10 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri()).with_team("My Team");
 
         let sprint = client
-            .sprint_work_items(
-                "contoso",
-                "MyProject",
-                "My Team",
-                None,
-                "Ready",
-                &["Bug".into()],
-            )
+            .sprint_work_items(None, "Ready", &["Bug".into()])
             .await
             .unwrap();
 
@@ -650,10 +619,10 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
 
         let err = client
-            .sprint_work_items("contoso", "MyProject", "Team", None, "Ready", &[])
+            .sprint_work_items(None, "Ready", &[])
             .await
             .err()
             .expect("no current sprint");
@@ -704,12 +673,9 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
 
-        let details = client
-            .work_item_details("contoso", "MyProject", 10)
-            .await
-            .unwrap();
+        let details = client.work_item_details(10).await.unwrap();
 
         assert_eq!(details.state, "Active");
         assert!(details.board_column_done);
@@ -747,12 +713,9 @@ mod tests {
             .expect(0)
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
 
-        let details = client
-            .work_item_details("contoso", "MyProject", 10)
-            .await
-            .unwrap();
+        let details = client.work_item_details(10).await.unwrap();
 
         assert!(details.children.is_empty());
         assert!(details.comments.is_empty());
@@ -770,12 +733,9 @@ mod tests {
             ]})))
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
 
-        let types = client
-            .work_item_types("contoso", "MyProject")
-            .await
-            .unwrap();
+        let types = client.work_item_types().await.unwrap();
 
         assert_eq!(types, ["Bug"]);
     }
@@ -830,5 +790,97 @@ mod tests {
         .unwrap();
 
         assert!(comment.reactions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn iterations_list_newest_first() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/Team/_apis/work/teamsettings/iterations",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "Old", "path": "P\\Old", "attributes": { "startDate": "2026-01-01T00:00:00Z" } },
+                { "name": "New", "path": "P\\New", "attributes": { "startDate": "2026-03-01T00:00:00Z" } }
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let iterations = client.iterations().await.unwrap();
+
+        let names: Vec<_> = iterations.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["New", "Old"]);
+    }
+
+    #[tokio::test]
+    async fn mentioned_work_items_keep_unanswered_mentions() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/Team/_apis/wit/wiql"))
+            .and(body_string_contains("@RecentMentions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "workItems": [{ "id": 10 }, { "id": 11 }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(10, "Mentioned", "Task", "Active"),
+                work_item_json(11, "Answered", "Task", "Active")
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalCount": 1,
+                "comments": [{
+                    "createdBy": { "id": "other", "displayName": "Bo" },
+                    "createdDate": "2026-10-01T10:00:00Z",
+                    "text": "ping @<me-id>"
+                }]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/11/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalCount": 2,
+                "comments": [
+                    { "createdBy": { "id": "me-id", "displayName": "Me" },
+                      "createdDate": "2026-10-02T10:00:00Z", "text": "on it" },
+                    { "createdBy": { "id": "other", "displayName": "Bo" },
+                      "createdDate": "2026-10-01T10:00:00Z", "text": "ping @<me-id>" }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let mentions = client.mentioned_work_items("me-id").await.unwrap();
+
+        assert_eq!(mentions.len(), 1);
+        assert_eq!(mentions[0].item.id, 10);
+        assert_eq!(mentions[0].date, "2026-10-01T10:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn add_work_item_comment_posts_markdown() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .and(query_param("format", "markdown"))
+            .and(body_partial_json(json!({ "text": "hello" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 1 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        client.add_work_item_comment(10, "hello").await.unwrap();
     }
 }

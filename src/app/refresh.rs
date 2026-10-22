@@ -9,8 +9,8 @@ use super::{App, Detail, DetailInfo, DetailTab, Panel, Screen};
 
 impl App {
     pub(super) fn refresh(&mut self) {
-        let (Some(client), Some(config), Some(user)) =
-            (self.client.clone(), self.config.clone(), self.user.clone())
+        let (Some(api), Some(config), Some(user)) =
+            (self.api(), self.config.clone(), self.user.clone())
         else {
             return;
         };
@@ -20,37 +20,19 @@ impl App {
         self.data.show_approved = config.other_prs_filter.show_approved;
         self.data.show_drafts = config.other_prs_filter.show_drafts;
 
-        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
-        self.spawn(async move {
-            Message::MyPullRequests(
-                c.my_pull_requests(&cfg.organization, &cfg.project, &user_id)
-                    .await,
-            )
-        });
+        let (a, user_id) = (api.clone(), user.id.clone());
+        self.spawn(async move { Message::MyPullRequests(a.my_pull_requests(&user_id).await) });
 
-        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
-        self.spawn(async move {
-            Message::Builds(c.my_builds(&cfg.organization, &cfg.project, &user_id).await)
-        });
+        let (a, user_id) = (api.clone(), user.id.clone());
+        self.spawn(async move { Message::Builds(a.my_builds(&user_id).await) });
 
-        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id.clone());
-        self.spawn(async move {
-            Message::Mentions(
-                c.mentioned_work_items(&cfg.organization, &cfg.project, &cfg.team, &user_id)
-                    .await,
-            )
-        });
+        let (a, user_id) = (api.clone(), user.id.clone());
+        self.spawn(async move { Message::Mentions(a.mentioned_work_items(&user_id).await) });
 
-        let (c, cfg, user_id) = (client.clone(), config.clone(), user.id);
         self.spawn(async move {
             Message::OtherPullRequests(
-                c.other_pull_requests(
-                    &cfg.organization,
-                    &cfg.project,
-                    &user_id,
-                    &cfg.other_prs_filter,
-                )
-                .await,
+                api.other_pull_requests(&user.id, &config.other_prs_filter)
+                    .await,
             )
         });
 
@@ -76,89 +58,60 @@ impl App {
     }
 
     pub(super) fn load_sprint(&self) {
-        let Some((client, config)) = self.connection() else {
+        let (Some(api), Some(config)) = (self.api(), &self.config) else {
             return;
         };
         let Some(ready_column) = config.ready_column.clone() else {
             return;
         };
+        let types = config.work_item_types.clone();
         let sprint = self.sprint.clone();
         self.spawn(async move {
             Message::SprintWorkItems(
-                client
-                    .sprint_work_items(
-                        &config.organization,
-                        &config.project,
-                        &config.team,
-                        sprint.as_deref(),
-                        &ready_column,
-                        &config.work_item_types,
-                    )
+                api.sprint_work_items(sprint.as_deref(), &ready_column, &types)
                     .await,
             )
         });
     }
 
     pub(super) fn load_sprints(&self) {
-        let Some((client, config)) = self.connection() else {
+        let Some(api) = self.api() else {
             return;
         };
-        self.spawn(async move {
-            Message::Sprints(
-                client
-                    .iterations(&config.organization, &config.project, &config.team)
-                    .await,
-            )
-        });
+        self.spawn(async move { Message::Sprints(api.iterations().await) });
     }
 
     /// Board columns, used for the sprint overview and moving items.
     pub(super) fn load_board(&self) {
-        let Some((client, config)) = self.connection() else {
+        let Some(api) = self.api() else {
             return;
         };
-        self.spawn(async move {
-            Message::TeamBoard(
-                client
-                    .board(&config.organization, &config.project, &config.team)
-                    .await,
-            )
-        });
+        self.spawn(async move { Message::TeamBoard(api.board().await) });
     }
 
     pub(super) fn load_work_item_types(&mut self) {
-        let Some((client, config)) = self.connection() else {
+        let Some(api) = self.api() else {
             return;
         };
-        self.spawn(async move {
-            Message::WorkItemTypes(
-                client
-                    .work_item_types(&config.organization, &config.project)
-                    .await,
-            )
-        });
+        self.spawn(async move { Message::WorkItemTypes(api.work_item_types().await) });
     }
 
     pub(super) fn load_detail(&self, detail: &Detail) {
-        let Some((client, config)) = self.connection() else {
+        let Some(api) = self.api() else {
             return;
         };
         match detail {
             Detail::PullRequest(pr) => {
                 let (id, pr) = (pr.pull_request_id, pr.clone());
                 self.spawn(async move {
-                    let result = client
-                        .pull_request_details(&config.organization, &config.project, &pr)
-                        .await;
+                    let result = api.pull_request_details(&pr).await;
                     Message::PullRequestDetails { id, result }
                 });
             }
             Detail::WorkItem(item) => {
                 let id = item.id;
                 self.spawn(async move {
-                    let result = client
-                        .work_item_details(&config.organization, &config.project, id)
-                        .await;
+                    let result = api.work_item_details(id).await;
                     Message::WorkItemDetails { id, result }
                 });
             }
@@ -223,15 +176,13 @@ impl App {
     }
 
     pub(super) fn load_signals(&self, prs: &[PullRequest]) {
-        let Some((client, config)) = self.connection() else {
+        let Some(api) = self.api() else {
             return;
         };
         for pr in prs {
-            let (client, config, pr) = (client.clone(), config.clone(), pr.clone());
+            let (api, pr) = (api.clone(), pr.clone());
             self.spawn(async move {
-                let result = client
-                    .pull_request_details(&config.organization, &config.project, &pr)
-                    .await;
+                let result = api.pull_request_details(&pr).await;
                 Message::PullRequestSignals {
                     id: pr.pull_request_id,
                     result,

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::app::{App, Popup, Selection};
 
 impl App {
@@ -16,6 +18,7 @@ impl App {
         let Some(config) = &mut self.config else {
             return;
         };
+        let config = Arc::make_mut(config);
         let filter = &mut config.other_prs_filter;
         filter.show_approved = checked[0];
         filter.show_drafts = checked[1];
@@ -31,6 +34,8 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crossterm::event::KeyCode;
 
     use crate::app::test_helpers::{app, press};
@@ -40,7 +45,9 @@ mod tests {
     fn filter_ticks_configured_options() {
         let mut app = app();
         app.focus = Panel::OtherPrs;
-        app.config.as_mut().unwrap().other_prs_filter.show_drafts = true;
+        Arc::make_mut(app.config.as_mut().unwrap())
+            .other_prs_filter
+            .show_drafts = true;
 
         press(&mut app, KeyCode::Char('f'));
 
