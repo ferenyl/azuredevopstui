@@ -21,7 +21,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - **Pipeline run**: pipeline, run number, branch, status, reason, times and duration.
   - **Pull request**:
     - **Overview** shows status, branches, merge status, reviewers and their votes, the linked work items (with a warning when there are none), and the description.
-    - **Comments** shows the comment threads with their status and file path.
+    - **Comments** shows the comment threads with their status (active, resolved, won't fix, closed) and file path. Select a thread with `]` / `[`, reply with `m`, and change its status with `x`. `m` without a selected thread starts a new one.
     - **Checks** shows the branch policies and statuses, with a summary of passed, failed and pending.
     - **Files** lists the changed files (`A`dded, `M`odified, `D`eleted, `R`enamed) of the latest iteration against the target branch. With the detail panel focused, `j`/`k` select a file and `enter` shows its diff (unified, 3 lines of context); `esc` goes back to the list. The files load only when the tab is shown. Binary files and files over 512 KB are not diffed, and at most 2000 files are listed.
   - **Work item**:
@@ -446,7 +446,9 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
 | `t` | Edit tags on your work item: type to search, `enter` adds the tag or removes it if it is already set (✓). A tag that does not exist is created |
-| `m` | Comment on a work item: type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels |
+| `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels |
+| `]` / `[` | Select the next or previous comment thread on a PR's Comments tab |
+| `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
 | `c` | Complete your ready PR: pick the merge strategy, then `enter`. `esc` cancels and nothing is completed |
 | `v` | Vote on the PR: pick approve, approve with suggestions, wait for author, reject or reset vote, then `enter`. `esc` cancels and nothing is sent |
 | `o` | Open the PR, work item or pipeline run in the browser |

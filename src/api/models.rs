@@ -1,8 +1,10 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::compare_timestamps;
 use crate::config::MergeStrategy;
 use crate::images::markdown_images;
 use crate::rich_text::RichText;
@@ -221,6 +223,8 @@ pub struct PullRequestDetails {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Thread {
+    #[serde(default)]
+    pub id: u32,
     pub status: Option<String>,
     #[serde(default)]
     pub is_deleted: bool,
@@ -229,7 +233,41 @@ pub struct Thread {
     pub properties: Option<Value>,
 }
 
+impl PullRequestDetails {
+    /// Threads as listed: not resolved before resolved, newest first within each.
+    pub fn ordered_threads(&self) -> Vec<&Thread> {
+        let (mut unresolved, mut resolved): (Vec<&Thread>, Vec<&Thread>) =
+            self.threads.iter().partition(|thread| thread.is_open());
+        unresolved.sort_by(|a, b| newest_first(a.latest(), b.latest()));
+        resolved.sort_by(|a, b| newest_first(a.latest(), b.latest()));
+        unresolved.extend(resolved);
+        unresolved
+    }
+}
+
+/// Newest first; threads without a date go last.
+fn newest_first(a: Option<String>, b: Option<String>) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => compare_timestamps(&b, &a),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 impl Thread {
+    pub fn is_open(&self) -> bool {
+        matches!(self.status.as_deref(), None | Some("active" | "pending"))
+    }
+
+    /// Date of the newest comment.
+    fn latest(&self) -> Option<String> {
+        self.comments
+            .iter()
+            .filter_map(|comment| comment.published_date.clone())
+            .max_by(|a, b| compare_timestamps(a, b))
+    }
+
     /// System thread kind such as `VoteUpdate` or `RefUpdate`.
     pub fn kind(&self) -> Option<&str> {
         self.properties
@@ -238,6 +276,22 @@ impl Thread {
             .get("$value")?
             .as_str()
     }
+}
+
+/// Statuses a thread can be set to, as the API names them and as they are shown.
+pub const THREAD_STATUSES: [(&str, &str); 4] = [
+    ("active", "active"),
+    ("fixed", "resolved"),
+    ("wontFix", "won't fix"),
+    ("closed", "closed"),
+];
+
+/// The status as shown to the user.
+pub fn thread_status_label(status: &str) -> &str {
+    THREAD_STATUSES
+        .iter()
+        .find(|(api, _)| *api == status)
+        .map_or(status, |(_, label)| label)
 }
 
 #[derive(Deserialize)]
@@ -249,6 +303,8 @@ pub struct ThreadContext {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Comment {
+    #[serde(default)]
+    pub id: u32,
     pub author: IdentityRef,
     pub content: Option<String>,
     /// `content` rendered once; filled when the threads are loaded.
@@ -723,6 +779,39 @@ mod tests {
         .unwrap();
 
         assert_eq!(user.unique_name(), "Anna Andersson");
+    }
+
+    #[test]
+    fn ordered_threads_lists_open_before_resolved_newest_first() {
+        let thread = |id: u32, status: &str, date: &str| {
+            json!({
+                "id": id,
+                "status": status,
+                "comments": [{
+                    "id": 1,
+                    "author": { "id": "a", "displayName": "Anna" },
+                    "publishedDate": date
+                }]
+            })
+        };
+        let threads: Vec<Thread> = serde_json::from_value(json!([
+            thread(1, "fixed", "2024-01-05T10:00:00Z"),
+            thread(2, "active", "2024-01-01T10:00:00Z"),
+            thread(3, "active", "2024-01-03T10:00:00Z"),
+            thread(4, "closed", "2024-01-04T10:00:00Z"),
+        ]))
+        .unwrap();
+        let details = PullRequestDetails {
+            description: None,
+            threads,
+            statuses: Vec::new(),
+            policies: Vec::new(),
+            work_items: Vec::new(),
+        };
+
+        let ids: Vec<u32> = details.ordered_threads().iter().map(|t| t.id).collect();
+
+        assert_eq!(ids, vec![3, 2, 1, 4]);
     }
 
     #[test]

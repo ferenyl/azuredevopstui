@@ -102,6 +102,9 @@ impl App {
             | Action::NextTab
             | Action::PrevTab
             | Action::Vote
+            | Action::NextThread
+            | Action::PrevThread
+            | Action::ThreadStatus
                 if !matches!(self.screen, Screen::Main) => {}
             Action::OpenInBrowser => self.open_in_browser(),
             Action::Copy => self.copy_number(),
@@ -124,6 +127,10 @@ impl App {
             Action::Tag => self.tag(),
             Action::Comment => self.open_comment(),
             Action::Vote => self.open_vote_picker(),
+            Action::NextThread | Action::PrevThread => {
+                self.move_thread(action == Action::NextThread)
+            }
+            Action::ThreadStatus => self.open_thread_status(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);
@@ -172,6 +179,10 @@ impl App {
     }
 
     pub(super) fn scroll_detail(&mut self, down: bool) {
+        if self.scroll_to_thread {
+            self.scroll_to_thread = false;
+            self.detail_scroll = self.thread_row.get().unwrap_or(self.detail_scroll);
+        }
         self.detail_scroll = if down {
             self.detail_scroll.saturating_add(1)
         } else {
@@ -195,6 +206,8 @@ impl App {
         };
         self.detail_tab = tabs[index];
         self.detail_scroll = 0;
+        self.detail_thread = None;
+        self.scroll_to_thread = false;
         self.link_index = None;
         if self.detail_tab == DetailTab::Files {
             self.load_files();
@@ -210,7 +223,7 @@ impl App {
 
     pub(crate) fn handle_paste(&mut self, pasted: &str) {
         let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
-        if let Some(Popup::Comment { text, .. }) = &mut self.popup {
+        if let Some(Popup::Text { text, .. }) = &mut self.popup {
             text.insert_str(&pasted);
             return;
         }
@@ -242,7 +255,7 @@ mod tests {
 
     use crate::app::message::Message;
     use crate::app::test_helpers::{app, ctrl, open_pull_request, press};
-    use crate::app::{App, DetailTab, Panel, Popup, Screen, SetupStep, TextInput};
+    use crate::app::{App, DetailTab, Panel, Popup, Screen, SetupStep, TextInput, TextTarget};
     use crate::test_support::pull_request;
 
     #[test]
@@ -506,13 +519,13 @@ mod tests {
             );
 
             let mut comment = app();
-            comment.popup = Some(Popup::Comment {
-                work_item_id: 10,
+            comment.popup = Some(Popup::Text {
+                target: TextTarget::WorkItemComment(10),
                 text: TextInput::default(),
             });
             type_and_move(&mut comment, left, home);
             assert!(
-                matches!(&comment.popup, Some(Popup::Comment { text, .. }) if text.as_str() == "_abc")
+                matches!(&comment.popup, Some(Popup::Text { text, .. }) if text.as_str() == "_abc")
             );
 
             let mut filter = app();
@@ -529,8 +542,8 @@ mod tests {
     #[test]
     fn delete_and_end_work_through_handle_key() {
         let mut app = app();
-        app.popup = Some(Popup::Comment {
-            work_item_id: 10,
+        app.popup = Some(Popup::Text {
+            target: TextTarget::WorkItemComment(10),
             text: TextInput::new("abc"),
         });
 
@@ -541,15 +554,15 @@ mod tests {
 
         assert!(matches!(
             &app.popup,
-            Some(Popup::Comment { text, .. }) if text.as_str() == "bcd"
+            Some(Popup::Text { text, .. }) if text.as_str() == "bcd"
         ));
     }
 
     #[test]
     fn paste_inserts_at_the_cursor() {
         let mut app = app();
-        app.popup = Some(Popup::Comment {
-            work_item_id: 10,
+        app.popup = Some(Popup::Text {
+            target: TextTarget::WorkItemComment(10),
             text: TextInput::new("ad"),
         });
         press(&mut app, KeyCode::Left);
@@ -558,15 +571,15 @@ mod tests {
 
         assert!(matches!(
             &app.popup,
-            Some(Popup::Comment { text, .. }) if text.split() == ("ab\nc", "d")
+            Some(Popup::Text { text, .. }) if text.split() == ("ab\nc", "d")
         ));
     }
 
     #[test]
     fn paste_into_comment_keeps_lines_and_triggers_no_actions() {
         let mut app = app();
-        app.popup = Some(Popup::Comment {
-            work_item_id: 10,
+        app.popup = Some(Popup::Text {
+            target: TextTarget::WorkItemComment(10),
             text: TextInput::default(),
         });
 
@@ -575,7 +588,7 @@ mod tests {
         assert!(!app.should_quit);
         assert!(matches!(
             &app.popup,
-            Some(Popup::Comment { text, .. })
+            Some(Popup::Text { text, .. })
                 if text.as_str() == "# Title\n\n- q item\n- j item\n```rust\nfn x() {}\n```"
         ));
     }

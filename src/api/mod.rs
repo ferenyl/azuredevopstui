@@ -9,7 +9,8 @@ pub use boards::ColumnTarget;
 pub use models::{
     Board, Build, ChangeKind, ChangedFile, CurrentUser, FileContent, Iteration, Link, LinkTarget,
     Mention, Partial, PullRequest, PullRequestChanges, PullRequestChecks, PullRequestDetails,
-    ReviewSignals, SprintWorkItems, Thread, WorkItem, WorkItemDetails,
+    ReviewSignals, SprintWorkItems, THREAD_STATUSES, Thread, WorkItem, WorkItemDetails,
+    thread_status_label,
 };
 pub use pull_requests::{is_approved, is_reviewer_policy};
 

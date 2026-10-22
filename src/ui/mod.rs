@@ -19,7 +19,7 @@ use ratatui_image::StatefulImage;
 use crate::api::{PullRequest, ReviewSignals, WorkItem};
 use crate::app::{
     App, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS, Panel, Popup, Screen, Selection,
-    Signals, SortKind,
+    Signals, SortKind, TextTarget,
 };
 use crate::images::{ImageState, file_name, image_marker};
 use crate::rich_text::{Marks, RichText};
@@ -124,8 +124,21 @@ pub fn render(frame: &mut Frame, app: &App) {
             let title = format!(" Sprint: {before}▏{after}");
             popup::render_picker(frame, app, &title, &selection, main);
         }
-        Some(Popup::Comment { work_item_id, text }) => {
-            let title = format!(" Comment #{work_item_id} · shift/alt+enter: new line ");
+        Some(Popup::Text { target, text }) => {
+            let title = match target {
+                TextTarget::WorkItemComment(id) => format!(" Comment #{id}"),
+                TextTarget::PrThread {
+                    pr,
+                    thread_id: Some(_),
+                } => format!(" Reply on !{}", pr.pull_request_id),
+                TextTarget::PrThread {
+                    pr,
+                    thread_id: None,
+                } => {
+                    format!(" New thread on !{}", pr.pull_request_id)
+                }
+            };
+            let title = format!("{title} · shift/alt+enter: new line ");
             popup::render_text_input(frame, app, &title, text, main);
         }
         Some(Popup::BuildFilter { text }) => {
@@ -158,6 +171,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
         Some(Popup::Vote { pr, selection }) => {
             let title = format!(" Vote on !{} ", pr.pull_request_id);
+            popup::render_picker(frame, app, &title, selection, main);
+        }
+        Some(Popup::ThreadStatus { pr, selection, .. }) => {
+            let title = format!(" Thread status on !{} ", pr.pull_request_id);
             popup::render_picker(frame, app, &title, selection, main);
         }
         None => {}
@@ -302,13 +319,18 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
         (Detail::Build(build), _) => build_detail::lines(app, build),
     };
     let (lines, slots) = place_images(app, lines, width);
+    let thread_row = selected_thread_row(&lines, width);
+    app.thread_row.set(thread_row);
     let scroll = match detail {
         Detail::PullRequest(_) if app.detail_tab == DetailTab::Files => {
             pr_files::list_scroll(app, content.height, content.width)
         }
         _ => None,
     }
-    .unwrap_or(app.detail_scroll);
+    .unwrap_or(match thread_row {
+        Some(row) if app.scroll_to_thread => row,
+        _ => app.detail_scroll,
+    });
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -391,6 +413,20 @@ fn place_images(
         }
     }
     (out, slots)
+}
+
+/// Row of the header of the selected comment thread, if one is drawn.
+fn selected_thread_row(lines: &[Line<'static>], width: u16) -> Option<u16> {
+    let index = lines.iter().position(|line| {
+        line.spans
+            .first()
+            .is_some_and(|span| span.content == pr_detail::SELECTED_THREAD)
+    })?;
+    let row: usize = lines[..index]
+        .iter()
+        .map(|line| wrapped_rows(line, width))
+        .sum();
+    Some(u16::try_from(row).unwrap_or(u16::MAX))
 }
 
 /// Rows `line` takes when wrapped to `width`; lines wrap independently with `trim: false`.
@@ -880,6 +916,7 @@ mod tests {
 
     use super::*;
     use crate::api::{PullRequestDetails, WorkItemDetails};
+    use crate::app::TextTarget;
     use crate::app::{Retry, SetupStep, TextInput};
     use crate::test_support::{config, pull_request, work_item};
 
@@ -1383,8 +1420,8 @@ mod tests {
     #[test]
     fn comment_popup_shows_pasted_markdown_lines() {
         let mut app = main_app();
-        app.popup = Some(Popup::Comment {
-            work_item_id: 10,
+        app.popup = Some(Popup::Text {
+            target: TextTarget::WorkItemComment(10),
             text: TextInput::default(),
         });
 

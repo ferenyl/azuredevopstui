@@ -257,6 +257,8 @@ impl App {
         self.detail_scroll = 0;
         self.link_index = None;
         self.detail_tab = DetailTab::Overview;
+        self.detail_thread = None;
+        self.scroll_to_thread = false;
     }
 
     /// Back to the sprint overview.

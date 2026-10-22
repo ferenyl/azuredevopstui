@@ -7,6 +7,7 @@ mod changes;
 mod flows;
 mod links;
 mod notifications;
+mod threads;
 mod vote;
 
 use std::fs;

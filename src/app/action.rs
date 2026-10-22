@@ -32,6 +32,9 @@ pub enum Action {
     NextLink,
     PrevLink,
     Vote,
+    NextThread,
+    PrevThread,
+    ThreadStatus,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -67,7 +70,17 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::Comment,
         ],
     ),
-    ("Pull requests", &[Action::Complete, Action::Vote]),
+    (
+        "Pull requests",
+        &[
+            Action::Complete,
+            Action::Vote,
+            Action::Comment,
+            Action::NextThread,
+            Action::PrevThread,
+            Action::ThreadStatus,
+        ],
+    ),
 ];
 
 impl Action {
@@ -104,6 +117,9 @@ impl Action {
             (KeyCode::Char('L'), _) => Some(Self::PrevLink),
             (KeyCode::Char('?'), _) => Some(Self::Help),
             (KeyCode::Char('v'), _) => Some(Self::Vote),
+            (KeyCode::Char(']'), _) => Some(Self::NextThread),
+            (KeyCode::Char('['), _) => Some(Self::PrevThread),
+            (KeyCode::Char('x'), _) => Some(Self::ThreadStatus),
             _ => None,
         }
     }
@@ -140,6 +156,9 @@ impl Action {
             Self::NextLink => "l",
             Self::PrevLink => "L",
             Self::Vote => "v",
+            Self::NextThread => "]",
+            Self::PrevThread => "[",
+            Self::ThreadStatus => "x",
         }
     }
 
@@ -175,6 +194,9 @@ impl Action {
             Self::NextLink => "select link",
             Self::PrevLink => "previous link",
             Self::Vote => "vote",
+            Self::NextThread => "next thread",
+            Self::PrevThread => "previous thread",
+            Self::ThreadStatus => "thread status",
         }
     }
 }
@@ -254,7 +276,7 @@ mod tests {
 
     #[test]
     fn unbound_key_is_ignored() {
-        assert_eq!(plain(KeyCode::Char('x')), None);
+        assert_eq!(plain(KeyCode::Char('z')), None);
         assert_eq!(plain(KeyCode::F(1)), None);
     }
 
