@@ -267,14 +267,15 @@ fn without_own(mut pull_requests: Vec<PullRequest>, user_id: &str) -> Vec<PullRe
     pull_requests
 }
 
-/// Blocking reviewer policies are all approved, or without such policies, someone approved.
+/// Blocking reviewer policies all approved, or without them: someone approved and nobody rejected.
 pub fn is_approved(pr: &PullRequest, policies: &[PolicyEvaluation]) -> bool {
     let mut reviewer_policies = policies
         .iter()
         .filter(|policy| policy.configuration.is_blocking && is_reviewer_policy(policy))
         .peekable();
     if reviewer_policies.peek().is_none() {
-        return pr.reviewers.iter().any(|reviewer| reviewer.vote >= 5);
+        return pr.reviewers.iter().any(|reviewer| reviewer.vote >= 5)
+            && pr.reviewers.iter().all(|reviewer| reviewer.vote >= 0);
     }
     reviewer_policies.all(|policy| policy.status == "approved")
 }
@@ -446,6 +447,31 @@ mod tests {
         ];
 
         assert_eq!(ids_of_prs(&without_own(prs, "me")), [1, 3]);
+    }
+
+    fn pull_request_with_votes(votes: &[i32]) -> PullRequest {
+        let mut pr = pull_request(1, "PR", "other", "2026-10-01T10:00:00Z");
+        pr.reviewers = votes
+            .iter()
+            .map(|vote| {
+                serde_json::from_value(json!({ "displayName": "R", "vote": vote })).unwrap()
+            })
+            .collect();
+        pr
+    }
+
+    #[test]
+    fn without_policies_someone_approving_makes_a_pull_request_approved() {
+        assert!(is_approved(&pull_request_with_votes(&[10]), &[]));
+        assert!(is_approved(&pull_request_with_votes(&[0, 5]), &[]));
+        assert!(!is_approved(&pull_request_with_votes(&[0]), &[]));
+    }
+
+    #[test]
+    fn without_policies_a_rejection_means_not_approved() {
+        assert!(!is_approved(&pull_request_with_votes(&[-10]), &[]));
+        assert!(!is_approved(&pull_request_with_votes(&[10, -10]), &[]));
+        assert!(!is_approved(&pull_request_with_votes(&[10, -5]), &[]));
     }
 
     #[test]

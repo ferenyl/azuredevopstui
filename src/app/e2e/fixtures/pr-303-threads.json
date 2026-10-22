@@ -1,0 +1,7 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/git/repositories/repo-api/pullRequests/303/threads",
+  "body": {
+    "value": []
+  }
+}
