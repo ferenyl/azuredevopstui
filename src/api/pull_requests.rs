@@ -125,7 +125,8 @@ impl ProjectApi {
         repository: &str,
         id: u32,
     ) -> Result<PullRequest> {
-        self.client
+        let mut pr: PullRequest = self
+            .client
             .get(
                 &self.client.urls.dev_azure,
                 &[
@@ -140,7 +141,9 @@ impl ProjectApi {
                 ],
                 &[],
             )
-            .await
+            .await?;
+        pr.render_description();
+        Ok(pr)
     }
 
     /// Merge strategies the target branch policies allow.
@@ -227,8 +230,7 @@ impl ProjectApi {
             .await?;
         let mut pull_requests = response.value;
         for pr in &mut pull_requests {
-            pr.description = pr.description.as_deref().map(markdown_images);
-            pr.description_text = pr.description.as_deref().map(RichText::from_markdown);
+            pr.render_description();
         }
         Ok(pull_requests)
     }
@@ -669,6 +671,31 @@ mod tests {
         let err = client.other_pull_requests("me", &filter).await.unwrap_err();
 
         assert_eq!(err.to_string(), "identity not found: nobody@example.com");
+    }
+
+    #[tokio::test]
+    async fn single_pull_request_gets_its_description_rendered() {
+        let server = MockServer::start().await;
+        let mut full = pull_request_json(7, "PR", "other", "2026-10-01T10:00:00Z");
+        full["description"] = json!("Adds **bold** filter");
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/_apis/git/repositories/repo-id/pullRequests/7",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(full))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let pr = client
+            .pull_request("MyProject", "repo-id", 7)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            pr.description_text.map(|text| text.plain()).as_deref(),
+            Some("Adds bold filter")
+        );
     }
 
     #[tokio::test]

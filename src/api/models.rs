@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::config::MergeStrategy;
+use crate::images::markdown_images;
 use crate::rich_text::RichText;
 
 #[derive(Deserialize)]
@@ -158,6 +159,14 @@ pub struct PullRequest {
     /// What the user needs to do; only set for others' PRs.
     #[serde(skip)]
     pub review: ReviewSignals,
+}
+
+impl PullRequest {
+    /// Fills `description_text` from `description`, so drawing never parses markdown.
+    pub fn render_description(&mut self) {
+        self.description = self.description.as_deref().map(markdown_images);
+        self.description_text = self.description.as_deref().map(RichText::from_markdown);
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
