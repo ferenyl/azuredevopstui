@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crossterm::event::KeyCode;
-use wiremock::matchers::{body_string_contains, method, path, path_regex};
+use wiremock::matchers::{body_string_contains, method, path, path_regex, query_param_is_missing};
 use wiremock::{Mock, ResponseTemplate};
 
 use super::Harness;
@@ -275,6 +275,27 @@ async fn throttled_pull_requests_are_retried() {
 
     harness.wait_for_text("Add order filter").await;
     harness.wait_for_text("Fix login redirect").await;
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn pipelines_are_limited_to_the_last_14_days_and_skip_pull_request_runs() {
+    let mut harness = Harness::new().await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET"))
+                .and(path(BUILDS))
+                .and(query_param_is_missing("minTime")),
+            ResponseTemplate::new(500),
+            0,
+        )
+        .await;
+
+    harness.connect().await;
+
+    harness.wait_for_text("orders-ci").await;
+    assert!(!harness.screen().contains("pr-validation"));
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 
