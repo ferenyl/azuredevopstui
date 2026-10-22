@@ -51,7 +51,12 @@ impl Detail {
 
     pub fn tabs(&self) -> &'static [DetailTab] {
         match self {
-            Self::PullRequest(_) => &[DetailTab::Overview, DetailTab::Comments, DetailTab::Checks],
+            Self::PullRequest(_) => &[
+                DetailTab::Overview,
+                DetailTab::Comments,
+                DetailTab::Checks,
+                DetailTab::Files,
+            ],
             Self::WorkItem(_) => &[
                 DetailTab::Overview,
                 DetailTab::Children,
@@ -71,6 +76,7 @@ pub enum DetailTab {
     Links,
     Comments,
     Checks,
+    Files,
 }
 
 impl DetailTab {
@@ -81,6 +87,7 @@ impl DetailTab {
             Self::Links => "Links",
             Self::Comments => "Comments",
             Self::Checks => "Checks",
+            Self::Files => "Files",
         }
     }
 }
@@ -255,7 +262,7 @@ impl SprintPicker {
 
 pub enum DetailInfo {
     PullRequest(PullRequestDetails),
-    WorkItem(WorkItemDetails),
+    WorkItem(Box<WorkItemDetails>),
 }
 
 /// `None` means not loaded yet.
@@ -882,7 +889,12 @@ mod tests {
 
         assert_eq!(
             pr.tabs(),
-            [DetailTab::Overview, DetailTab::Comments, DetailTab::Checks]
+            [
+                DetailTab::Overview,
+                DetailTab::Comments,
+                DetailTab::Checks,
+                DetailTab::Files
+            ]
         );
         assert_eq!(
             item.tabs(),

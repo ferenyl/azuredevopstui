@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use chrono::NaiveTime;
 use serde::{Deserialize, Serialize};
 
 use crate::theme::Theme;
@@ -43,6 +44,9 @@ pub struct Config {
     /// Desktop notification (`notify-send`) for new inbox entries.
     #[serde(default)]
     pub notifications: bool,
+    /// Per-kind switches and quiet hours; `notifications` stays the master switch.
+    #[serde(default)]
+    pub notify: NotifyConfig,
     #[serde(default)]
     pub colors: Theme,
     /// Tags added by the user, most recent first.
@@ -56,6 +60,50 @@ fn default_refresh_interval_secs() -> u64 {
 
 fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotifyConfig {
+    pub builds: bool,
+    pub mentions: bool,
+    /// Pull requests waiting on you and changes to your own.
+    pub pull_requests: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet_hours: Option<QuietHours>,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            builds: true,
+            mentions: true,
+            pull_requests: true,
+            quiet_hours: None,
+        }
+    }
+}
+
+/// Local `HH:MM` times between which nothing is notified. May wrap midnight.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuietHours {
+    pub start: String,
+    pub end: String,
+}
+
+impl QuietHours {
+    /// Whether `time` is in `[start, end)`. Invalid times never match; equal times cover no time.
+    pub fn contains(&self, time: NaiveTime) -> bool {
+        let parse = |text: &str| NaiveTime::parse_from_str(text.trim(), "%H:%M").ok();
+        let (Some(start), Some(end)) = (parse(&self.start), parse(&self.end)) else {
+            return false;
+        };
+        if start <= end {
+            start <= time && time < end
+        } else {
+            time >= start || time < end
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -208,6 +256,7 @@ impl Config {
             merge_strategy: None,
             show_images: true,
             notifications: false,
+            notify: NotifyConfig::default(),
             colors: Theme::default(),
             recent_tags: Vec::new(),
         }
@@ -375,5 +424,80 @@ mod tests {
     fn empty_azure_config_dir_is_none() {
         assert_eq!(auth(None).azure_config_dir(), None);
         assert_eq!(auth(Some("  ")).azure_config_dir(), None);
+    }
+
+    fn time(hour: u32, minute: u32) -> NaiveTime {
+        NaiveTime::from_hms_opt(hour, minute, 0).unwrap()
+    }
+
+    fn quiet(start: &str, end: &str) -> QuietHours {
+        QuietHours {
+            start: start.into(),
+            end: end.into(),
+        }
+    }
+
+    #[test]
+    fn quiet_hours_within_a_day() {
+        let hours = quiet("09:00", "17:30");
+
+        assert!(!hours.contains(time(8, 59)));
+        assert!(hours.contains(time(9, 0)));
+        assert!(hours.contains(time(17, 29)));
+        assert!(!hours.contains(time(17, 30)));
+    }
+
+    #[test]
+    fn quiet_hours_wrap_midnight() {
+        let hours = quiet("22:00", "07:00");
+
+        assert!(hours.contains(time(22, 0)));
+        assert!(hours.contains(time(23, 59)));
+        assert!(hours.contains(time(0, 0)));
+        assert!(hours.contains(time(6, 59)));
+        assert!(!hours.contains(time(7, 0)));
+        assert!(!hours.contains(time(12, 0)));
+        assert!(!hours.contains(time(21, 59)));
+    }
+
+    #[test]
+    fn invalid_or_empty_quiet_hours_never_match() {
+        assert!(!quiet("late", "07:00").contains(time(23, 0)));
+        assert!(!quiet("25:00", "07:00").contains(time(23, 0)));
+        assert!(!quiet("08:00", "08:00").contains(time(8, 0)));
+    }
+
+    #[test]
+    fn old_config_gets_notification_defaults() {
+        let json = r#"{"organization":"o","project":"p","team":"t","notifications":true}"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+
+        assert!(config.notifications);
+        assert_eq!(config.notify, NotifyConfig::default());
+        assert!(config.notify.builds && config.notify.mentions && config.notify.pull_requests);
+        assert!(config.notify.quiet_hours.is_none());
+    }
+
+    #[test]
+    fn notify_config_round_trips() {
+        let json = r#"{"organization":"o","project":"p","team":"t","notify":{"mentions":false,"quiet_hours":{"start":"22:00","end":"07:00"}}}"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        let loaded: Config =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+
+        assert!(!loaded.notify.mentions);
+        assert!(loaded.notify.builds && loaded.notify.pull_requests);
+        assert_eq!(loaded.notify.quiet_hours, Some(quiet("22:00", "07:00")));
+    }
+
+    #[test]
+    fn unset_quiet_hours_are_not_written() {
+        let config = Config::new("o".into(), "p".into(), "t".into());
+
+        let json = serde_json::to_value(&config).unwrap();
+
+        assert!(json["notify"].get("quiet_hours").is_none());
     }
 }

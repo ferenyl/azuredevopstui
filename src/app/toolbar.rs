@@ -1,7 +1,7 @@
 use super::{Action, App, Detail, Panel, Popup, Retry, Screen, SetupStep};
 
 /// Every action the toolbar can show, in display order.
-const TOOLBAR: [Action; 26] = [
+const TOOLBAR: [Action; 27] = [
     Action::Down,
     Action::Up,
     Action::Toggle,
@@ -22,6 +22,7 @@ const TOOLBAR: [Action; 26] = [
     Action::OpenInBrowser,
     Action::Copy,
     Action::CopyLink,
+    Action::NextLink,
     Action::Sort,
     Action::Filter,
     Action::Reload,
@@ -36,6 +37,14 @@ impl App {
             .into_iter()
             .filter(|action| self.can(*action))
             .collect()
+    }
+
+    /// The toolbar text of `action`; `o` opens the selected link when there is one.
+    pub fn action_label(&self, action: Action) -> &'static str {
+        match action {
+            Action::OpenInBrowser if self.selected_link().is_some() => "open link",
+            _ => action.label(),
+        }
     }
 
     /// Whether `action` does its work in the current context, which is when the toolbar offers it.
@@ -105,6 +114,7 @@ impl App {
             Action::Unassign | Action::Tag => work_item_assigned_to_me(true),
             Action::AssignToMe => work_item_assigned_to_me(false),
             Action::Confirm | Action::OpenInBrowser | Action::CopyLink => item.is_some(),
+            Action::NextLink => !self.detail_links.borrow().is_empty(),
             Action::Sort => !is_build && self.focus != Panel::Builds,
             Action::Filter => item.is_some() || self.focus == Panel::Builds,
             _ => false,

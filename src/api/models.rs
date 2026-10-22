@@ -627,6 +627,128 @@ pub struct BuildRepository {
     pub kind: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestIteration {
+    pub id: u32,
+    pub source_ref_commit: CommitRef,
+    pub common_ref_commit: CommitRef,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IterationChanges {
+    #[serde(default)]
+    pub change_entries: Vec<ChangeEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeEntry {
+    pub change_type: String,
+    pub item: ChangedItem,
+    pub original_path: Option<String>,
+    pub source_server_item: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedItem {
+    pub path: String,
+    pub git_object_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitItem {
+    #[serde(default)]
+    pub content: String,
+    pub content_metadata: Option<ContentMetadata>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentMetadata {
+    #[serde(default)]
+    pub is_binary: bool,
+}
+
+/// The files a pull request changes, between the merge base and its latest source commit.
+#[derive(Debug, Clone)]
+pub struct PullRequestChanges {
+    pub base: String,
+    pub head: String,
+    pub files: Vec<ChangedFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedFile {
+    pub kind: ChangeKind,
+    pub path: String,
+    /// The path before a rename.
+    pub original_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+}
+
+impl ChangeKind {
+    /// From a change type such as `edit` or `edit, rename`.
+    pub fn from_change_type(change_type: &str) -> Self {
+        let has = |kind| change_type.split(", ").any(|part| part == kind);
+        if has("delete") {
+            Self::Deleted
+        } else if has("add") {
+            Self::Added
+        } else if has("rename") {
+            Self::Renamed
+        } else {
+            Self::Modified
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Added => "A",
+            Self::Modified => "M",
+            Self::Deleted => "D",
+            Self::Renamed => "R",
+        }
+    }
+}
+
+impl ChangedFile {
+    /// `None` for folders.
+    pub fn from_entry(entry: ChangeEntry) -> Option<Self> {
+        if entry.item.git_object_type.as_deref() == Some("tree") {
+            return None;
+        }
+        let kind = ChangeKind::from_change_type(&entry.change_type);
+        let original_path = entry
+            .original_path
+            .or(entry.source_server_item)
+            .filter(|path| *path != entry.item.path);
+        Some(Self {
+            kind,
+            path: entry.item.path,
+            original_path,
+        })
+    }
+}
+
+/// A file's content at one commit.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FileContent {
+    Text(String),
+    /// Binary or too large to diff.
+    Skipped,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -742,6 +864,67 @@ mod tests {
         assert_eq!(pr.reviewers[0].is_required, Some(true));
         assert_eq!(pr.reviewers[1].is_required, None);
         assert!(!pr.is_draft);
+    }
+
+    #[test]
+    fn change_types_map_to_one_kind() {
+        let labels: Vec<&str> = [
+            "add",
+            "edit",
+            "delete",
+            "rename",
+            "edit, rename",
+            "encoding",
+        ]
+        .into_iter()
+        .map(|change_type| ChangeKind::from_change_type(change_type).label())
+        .collect();
+
+        assert_eq!(labels, ["A", "M", "D", "R", "R", "M"]);
+    }
+
+    #[test]
+    fn change_entries_skip_folders_and_keep_renamed_paths() {
+        let changes: IterationChanges = serde_json::from_value(json!({
+            "changeEntries": [
+                { "changeType": "edit", "item": { "path": "/src", "gitObjectType": "tree" } },
+                { "changeType": "edit", "item": { "path": "/src/a.rs", "gitObjectType": "blob" } },
+                {
+                    "changeType": "rename",
+                    "item": { "path": "/src/new.rs", "gitObjectType": "blob" },
+                    "sourceServerItem": "/src/old.rs"
+                },
+                { "changeType": "add", "item": { "path": "/README.md" }, "originalPath": "/README.md" }
+            ]
+        }))
+        .unwrap();
+
+        let files: Vec<ChangedFile> = changes
+            .change_entries
+            .into_iter()
+            .filter_map(ChangedFile::from_entry)
+            .collect();
+
+        assert_eq!(
+            files,
+            [
+                ChangedFile {
+                    kind: ChangeKind::Modified,
+                    path: "/src/a.rs".into(),
+                    original_path: None
+                },
+                ChangedFile {
+                    kind: ChangeKind::Renamed,
+                    path: "/src/new.rs".into(),
+                    original_path: Some("/src/old.rs".into())
+                },
+                ChangedFile {
+                    kind: ChangeKind::Added,
+                    path: "/README.md".into(),
+                    original_path: None
+                },
+            ]
+        );
     }
 
     #[test]

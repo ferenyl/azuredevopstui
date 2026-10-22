@@ -2,6 +2,7 @@ mod action;
 mod actions;
 #[cfg(test)]
 mod e2e;
+mod files;
 mod inbox;
 mod input;
 mod loads;
@@ -18,6 +19,7 @@ mod toolbar;
 mod wizard;
 
 pub use action::{Action, HELP};
+pub use files::Files;
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
     ColumnPicker, CompletePicker, Data, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS,
@@ -25,6 +27,7 @@ pub use state::{
 };
 pub use text_input::TextInput;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -70,6 +73,15 @@ pub struct App {
     pub scroll_to_thread: bool,
     /// Row of the selected thread in the last drawn detail.
     pub thread_row: std::cell::Cell<Option<u16>>,
+    /// Changed files of the shown PR, once its Files tab was shown.
+    pub files: Option<Files>,
+    /// Targets of the links drawn in the detail pane last frame, in reading order.
+    pub detail_links: RefCell<Vec<String>>,
+    /// Selected entry of `detail_links`.
+    pub link_index: Option<usize>,
+    /// Every URL `open_url` was asked to open, so tests need no browser.
+    #[cfg(test)]
+    opened: Vec<String>,
     pub popup: Option<Popup>,
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
     sprint: Option<String>,
@@ -116,6 +128,11 @@ impl App {
             detail_thread: None,
             scroll_to_thread: false,
             thread_row: std::cell::Cell::new(None),
+            files: None,
+            detail_links: RefCell::default(),
+            link_index: None,
+            #[cfg(test)]
+            opened: Vec::new(),
             popup: None,
             show_help: false,
             last_updated: None,

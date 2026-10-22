@@ -2,6 +2,7 @@ mod api;
 mod app;
 mod auth;
 mod config;
+mod diff;
 mod images;
 mod notify;
 mod rich_text;

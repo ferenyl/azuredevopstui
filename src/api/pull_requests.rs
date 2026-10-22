@@ -6,8 +6,10 @@ use futures::{StreamExt, stream};
 use serde_json::{Value, json};
 
 use super::models::{
-    Comment, Identity, ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestChecks,
-    PullRequestDetails, PullRequestStatus, ResourceRef, ReviewSignals, Thread,
+    ChangeKind, ChangedFile, Comment, FileContent, GitItem, Identity, IterationChanges,
+    ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestChanges, PullRequestChecks,
+    PullRequestDetails, PullRequestIteration, PullRequestStatus, ResourceRef, ReviewSignals,
+    Thread,
 };
 use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps, is_unauthorized};
 use crate::config::{MergeStrategy, OtherPrsFilter};
@@ -19,6 +21,10 @@ const REVIEWER_POLICIES: [&str; 2] = ["Minimum number of reviewers", "Required r
 const MERGE_STRATEGY_POLICY: &str = "Require a merge strategy";
 /// How long the threads of an unchanged PR are reused; new comments do not change the PR itself.
 const THREADS_MAX_AGE: Duration = Duration::from_secs(10 * 60);
+/// Changed files listed per PR; one page, larger PRs are cut off.
+const MAX_CHANGES: &str = "2000";
+/// Larger files are not diffed.
+const MAX_DIFF_BYTES: usize = 512 * 1024;
 
 /// Review signals of someone else's PR and what they were computed from.
 pub(super) struct CachedReview {
@@ -499,6 +505,101 @@ impl ProjectApi {
             .expect("identity cache")
             .insert(name.to_string(), id.clone());
         Ok(id)
+    }
+
+    /// The files changed in the latest iteration, compared with the target branch.
+    pub async fn pull_request_changes(&self, pr: &PullRequest) -> Result<PullRequestChanges> {
+        let id = pr.pull_request_id.to_string();
+        let iterations_path = [&self.pr_path(pr, &id)[..], &["iterations"]].concat();
+        let iterations: ListResponse<PullRequestIteration> = self
+            .client
+            .get(&self.client.urls.dev_azure, &iterations_path, &[])
+            .await?;
+        let latest = iterations
+            .value
+            .into_iter()
+            .max_by_key(|iteration| iteration.id)
+            .context("pull request has no iterations")?;
+        let iteration = latest.id.to_string();
+        let changes_path = [&iterations_path[..], &[&iteration, "changes"]].concat();
+        let changes: IterationChanges = self
+            .client
+            .get(
+                &self.client.urls.dev_azure,
+                &changes_path,
+                &[("$compareTo", "0"), ("$top", MAX_CHANGES)],
+            )
+            .await?;
+        Ok(PullRequestChanges {
+            base: latest.common_ref_commit.commit_id,
+            head: latest.source_ref_commit.commit_id,
+            files: changes
+                .change_entries
+                .into_iter()
+                .filter_map(ChangedFile::from_entry)
+                .collect(),
+        })
+    }
+
+    /// `file` before and after the PR; empty on the side where it does not exist.
+    pub async fn file_versions(
+        &self,
+        pr: &PullRequest,
+        changes: &PullRequestChanges,
+        file: &ChangedFile,
+    ) -> Result<(FileContent, FileContent)> {
+        let old_path = file.original_path.as_deref().unwrap_or(&file.path);
+        let old = async {
+            match file.kind {
+                ChangeKind::Added => Ok(FileContent::Text(String::new())),
+                _ => self.file_at(pr, old_path, &changes.base).await,
+            }
+        };
+        let new = async {
+            match file.kind {
+                ChangeKind::Deleted => Ok(FileContent::Text(String::new())),
+                _ => self.file_at(pr, &file.path, &changes.head).await,
+            }
+        };
+        tokio::try_join!(old, new)
+    }
+
+    async fn file_at(&self, pr: &PullRequest, path: &str, commit: &str) -> Result<FileContent> {
+        let item: GitItem = self
+            .client
+            .get(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &pr.repository.project.id,
+                    "_apis",
+                    "git",
+                    "repositories",
+                    &pr.repository.id,
+                    "items",
+                ],
+                &[
+                    ("path", path),
+                    ("versionDescriptor.version", commit),
+                    ("versionDescriptor.versionType", "commit"),
+                    ("includeContent", "true"),
+                ],
+            )
+            .await?;
+        Ok(file_content(item))
+    }
+}
+
+/// Binary and too large files are skipped.
+fn file_content(item: GitItem) -> FileContent {
+    let binary = item
+        .content_metadata
+        .is_some_and(|metadata| metadata.is_binary)
+        || item.content.contains('\0');
+    if binary || item.content.len() > MAX_DIFF_BYTES {
+        FileContent::Skipped
+    } else {
+        FileContent::Text(item.content)
     }
 }
 
@@ -1335,5 +1436,140 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.to_string(), "pull request has no source commit");
+    }
+
+    const PR_1: &str = "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/1";
+    const ITEMS: &str = "/contoso/project-id/_apis/git/repositories/repo-id/items";
+
+    #[tokio::test]
+    async fn pull_request_changes_list_the_latest_iteration_against_the_base() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("{PR_1}/iterations")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "id": 2, "sourceRefCommit": { "commitId": "head2" }, "commonRefCommit": { "commitId": "base2" } },
+                { "id": 1, "sourceRefCommit": { "commitId": "head1" }, "commonRefCommit": { "commitId": "base1" } }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("{PR_1}/iterations/2/changes")))
+            .and(query_param("$compareTo", "0"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "changeEntries": [
+                { "changeType": "edit", "item": { "path": "/src/a.rs", "gitObjectType": "blob" } }
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = ProjectApi::with_base_url(&server.uri());
+
+        let changes = api
+            .pull_request_changes(&pull_request(1, "PR", "me", "2026-10-01T10:00:00Z"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            (changes.base.as_str(), changes.head.as_str()),
+            ("base2", "head2")
+        );
+        assert_eq!(changes.files.len(), 1);
+        assert_eq!(changes.files[0].path, "/src/a.rs");
+    }
+
+    fn changes() -> PullRequestChanges {
+        PullRequestChanges {
+            base: "base".into(),
+            head: "head".into(),
+            files: Vec::new(),
+        }
+    }
+
+    async fn mount_item(server: &MockServer, file: &str, commit: &str, body: Value) {
+        Mock::given(method("GET"))
+            .and(path(ITEMS))
+            .and(query_param("path", file))
+            .and(query_param("versionDescriptor.version", commit))
+            .and(query_param("versionDescriptor.versionType", "commit"))
+            .and(query_param("includeContent", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn renamed_file_is_read_from_its_old_path_at_the_base() {
+        let server = MockServer::start().await;
+        mount_item(&server, "/old.rs", "base", json!({ "content": "old\n" })).await;
+        mount_item(&server, "/new.rs", "head", json!({ "content": "new\n" })).await;
+        let api = ProjectApi::with_base_url(&server.uri());
+        let file = ChangedFile {
+            kind: ChangeKind::Renamed,
+            path: "/new.rs".into(),
+            original_path: Some("/old.rs".into()),
+        };
+
+        let versions = api
+            .file_versions(
+                &pull_request(1, "PR", "me", "2026-10-01T10:00:00Z"),
+                &changes(),
+                &file,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            versions,
+            (
+                FileContent::Text("old\n".into()),
+                FileContent::Text("new\n".into())
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn added_and_deleted_files_are_read_on_one_side_only() {
+        let server = MockServer::start().await;
+        mount_item(&server, "/added.rs", "head", json!({ "content": "a\n" })).await;
+        mount_item(&server, "/deleted.rs", "base", json!({ "content": "d\n" })).await;
+        let api = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(1, "PR", "me", "2026-10-01T10:00:00Z");
+        let file = |kind, path: &str| ChangedFile {
+            kind,
+            path: path.into(),
+            original_path: None,
+        };
+
+        let added = api
+            .file_versions(&pr, &changes(), &file(ChangeKind::Added, "/added.rs"))
+            .await
+            .unwrap();
+        let deleted = api
+            .file_versions(&pr, &changes(), &file(ChangeKind::Deleted, "/deleted.rs"))
+            .await
+            .unwrap();
+
+        let empty = || FileContent::Text(String::new());
+        assert_eq!(added, (empty(), FileContent::Text("a\n".into())));
+        assert_eq!(deleted, (FileContent::Text("d\n".into()), empty()));
+    }
+
+    #[test]
+    fn binary_and_too_large_files_are_skipped() {
+        let item = |value: Value| file_content(serde_json::from_value(value).unwrap());
+
+        assert_eq!(
+            item(json!({ "content": "text" })),
+            FileContent::Text("text".into())
+        );
+        assert_eq!(
+            item(json!({ "content": "iVBOR", "contentMetadata": { "isBinary": true } })),
+            FileContent::Skipped
+        );
+        assert_eq!(item(json!({ "content": "a\u{0}b" })), FileContent::Skipped);
+        assert_eq!(
+            item(json!({ "content": "x".repeat(MAX_DIFF_BYTES + 1) })),
+            FileContent::Skipped
+        );
     }
 }
