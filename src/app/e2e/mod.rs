@@ -118,6 +118,23 @@ impl MockAdo {
             .await;
     }
 
+    /// Answers the first matching request with `response`, then falls back to the fixtures.
+    pub async fn fail_once(
+        &self,
+        http_method: &str,
+        request_path: &str,
+        response: ResponseTemplate,
+    ) {
+        Mock::given(method(http_method))
+            .and(path(request_path))
+            .respond_with(response)
+            .up_to_n_times(1)
+            .with_priority(OVERRIDE_PRIORITY)
+            .expect(1)
+            .mount(&self.server)
+            .await;
+    }
+
     /// Mounts `mock` ahead of fixtures; its `expect` is verified when the test ends.
     pub async fn expect(&self, mock: MockBuilder, response: ResponseTemplate, times: u64) {
         mock.respond_with(response)

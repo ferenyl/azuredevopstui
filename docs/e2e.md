@@ -30,6 +30,7 @@ async fn server_error_shows_error_and_keeps_other_panels() {
 - `wait_for(|app| ...)`, `wait_for_text("...")`: handle API responses until the condition holds (fails after 5 s with the screen).
 - `screen()`: the rendered screen as text.
 - `ado.fail(method, path, status)`: answer an endpoint with an error instead of its fixture.
+- `ado.fail_once(method, path, response)`: answer only the first request with `response` (e.g. a 429 with `Retry-After: 0`), then serve the fixture.
 - `ado.expect(mock, response, times)`: answer and assert how often a request arrives, e.g. a `PATCH` with a given body.
 
 ## Fixtures

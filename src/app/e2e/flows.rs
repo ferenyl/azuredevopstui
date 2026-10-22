@@ -168,3 +168,82 @@ async fn server_error_shows_error_and_keeps_other_panels() {
     harness.wait_for_text("Add order filter").await;
     harness.wait_for_text("Order list paging").await;
 }
+
+#[tokio::test]
+async fn throttled_pull_requests_are_retried() {
+    let mut harness = Harness::new().await;
+    harness
+        .ado
+        .fail_once(
+            "GET",
+            MY_PRS,
+            ResponseTemplate::new(429).insert_header("retry-after", "0"),
+        )
+        .await;
+
+    harness.connect().await;
+
+    harness.wait_for_text("Add order filter").await;
+    harness.wait_for_text("Fix login redirect").await;
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn unavailable_builds_are_retried() {
+    let mut harness = Harness::new().await;
+    harness
+        .ado
+        .fail_once("GET", BUILDS, ResponseTemplate::new(503))
+        .await;
+
+    harness.connect().await;
+
+    harness.wait_for_text("orders-ci").await;
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn rejected_pat_is_not_retried() {
+    let mut harness = Harness::new().await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET")).and(path(CONNECTION_DATA)),
+            ResponseTemplate::new(401),
+            1,
+        )
+        .await;
+
+    harness.connect().await;
+
+    assert!(matches!(
+        harness.app.screen,
+        Screen::Setup(SetupStep::EnterPat { error: Some(_), .. })
+    ));
+}
+
+#[tokio::test]
+async fn tagging_is_not_retried_when_unavailable() {
+    let mut harness = connected().await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("PATCH")).and(path(WORK_ITEM_301)),
+            ResponseTemplate::new(503).set_body_json(serde_json::json!({ "message": "busy" })),
+            1,
+        )
+        .await;
+    select(&mut harness, Panel::MyWorkItems, 301);
+
+    harness.press(KeyCode::Char('t'));
+    harness
+        .wait_for(|app| matches!(app.popup, Some(Popup::Tags(_))))
+        .await;
+    harness.type_text("frontend");
+    harness.press(KeyCode::Enter);
+    harness.wait_for(|app| app.error.is_some()).await;
+    harness.settle().await;
+
+    let error = harness.app.error.clone().unwrap_or_default();
+    assert!(error.contains("503"), "{error}");
+}
