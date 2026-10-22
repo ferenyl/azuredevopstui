@@ -220,7 +220,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use crossterm::event::KeyCode;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     use crate::app::message::Message;
     use crate::app::test_helpers::{app, ctrl, open_pull_request, press};
@@ -414,6 +414,115 @@ mod tests {
         };
         assert_eq!(picker.query.as_str(), "back");
         assert_eq!(picker.selection.items, ["backend", "back"]);
+    }
+
+    /// Real terminal events: press kind, with lock state or empty modifiers.
+    fn real_keys(code: KeyCode) -> [KeyEvent; 2] {
+        [
+            KeyEvent::new_with_kind_and_state(
+                code,
+                KeyModifiers::NONE,
+                KeyEventKind::Press,
+                KeyEventState::NONE,
+            ),
+            KeyEvent::new_with_kind_and_state(
+                code,
+                KeyModifiers::NONE,
+                KeyEventKind::Press,
+                KeyEventState::NUM_LOCK,
+            ),
+        ]
+    }
+
+    fn type_and_move(app: &mut App, left: KeyEvent, home: KeyEvent) {
+        for c in "ac".chars() {
+            press(app, KeyCode::Char(c));
+        }
+        app.handle_key(left);
+        press(app, KeyCode::Char('b'));
+        app.handle_key(home);
+        press(app, KeyCode::Char('_'));
+    }
+
+    #[test]
+    fn real_arrow_events_move_the_cursor_in_every_input() {
+        for (left, home) in real_keys(KeyCode::Left)
+            .into_iter()
+            .zip(real_keys(KeyCode::Home))
+        {
+            let mut pat = app();
+            press(&mut pat, KeyCode::Char('T'));
+            type_and_move(&mut pat, left, home);
+            assert!(
+                matches!(&pat.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input.as_str() == "_abc")
+            );
+
+            let mut organization = App::new(None, None);
+            organization.screen = Screen::Setup(SetupStep::EnterOrganization(TextInput::default()));
+            type_and_move(&mut organization, left, home);
+            assert!(
+                matches!(&organization.screen, Screen::Setup(SetupStep::EnterOrganization(input)) if input.as_str() == "_abc")
+            );
+
+            let mut tag = app();
+            tag.popup = Some(Popup::Tags(crate::app::TagPicker::new(
+                10,
+                Vec::new(),
+                Vec::new(),
+            )));
+            type_and_move(&mut tag, left, home);
+            assert!(
+                matches!(&tag.popup, Some(Popup::Tags(picker)) if picker.query.as_str() == "_abc")
+            );
+
+            let mut sprint = app();
+            sprint.popup = Some(Popup::Sprint(crate::app::SprintPicker::new(
+                Vec::new(),
+                None,
+            )));
+            type_and_move(&mut sprint, left, home);
+            assert!(
+                matches!(&sprint.popup, Some(Popup::Sprint(picker)) if picker.query.as_str() == "_abc")
+            );
+
+            let mut comment = app();
+            comment.popup = Some(Popup::Comment {
+                work_item_id: 10,
+                text: TextInput::default(),
+            });
+            type_and_move(&mut comment, left, home);
+            assert!(
+                matches!(&comment.popup, Some(Popup::Comment { text, .. }) if text.as_str() == "_abc")
+            );
+
+            let mut filter = app();
+            filter.popup = Some(Popup::BuildFilter {
+                text: TextInput::default(),
+            });
+            type_and_move(&mut filter, left, home);
+            assert!(
+                matches!(&filter.popup, Some(Popup::BuildFilter { text }) if text.as_str() == "_abc")
+            );
+        }
+    }
+
+    #[test]
+    fn delete_and_end_work_through_handle_key() {
+        let mut app = app();
+        app.popup = Some(Popup::Comment {
+            work_item_id: 10,
+            text: TextInput::new("abc"),
+        });
+
+        press(&mut app, KeyCode::Home);
+        press(&mut app, KeyCode::Delete);
+        press(&mut app, KeyCode::End);
+        press(&mut app, KeyCode::Char('d'));
+
+        assert!(matches!(
+            &app.popup,
+            Some(Popup::Comment { text, .. }) if text.as_str() == "bcd"
+        ));
     }
 
     #[test]

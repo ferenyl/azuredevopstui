@@ -66,12 +66,9 @@ impl TextInput {
         self.cursor = self.text.len();
     }
 
-    /// Edits with the key; true when it was consumed. Ctrl combinations are left to the caller.
+    /// Edits with the key; true when it was consumed. Ctrl+character is left to the caller.
     /// With `multiline`, shift/alt+enter inserts a newline.
     pub fn handle_key(&mut self, key: KeyEvent, multiline: bool) -> bool {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            return false;
-        }
         match key.code {
             KeyCode::Enter
                 if multiline
@@ -81,7 +78,7 @@ impl TextInput {
             {
                 self.insert('\n');
             }
-            KeyCode::Char(c) => self.insert(c),
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => self.insert(c),
             KeyCode::Backspace => self.backspace(),
             KeyCode::Delete => self.delete(),
             KeyCode::Left => self.left(),
@@ -211,13 +208,24 @@ mod tests {
             KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
             true
         ));
-        assert!(!input.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL), true));
         assert!(!input.handle_key(key(KeyCode::Enter), true));
         assert!(!input.handle_key(key(KeyCode::Esc), true));
         assert!(!input.handle_key(key(KeyCode::Up), true));
 
         assert_eq!(input.as_str(), "a");
         assert_eq!(input.split(), ("a", ""));
+    }
+
+    #[test]
+    fn ctrl_backspace_still_deletes() {
+        let mut input = TextInput::new("ab");
+
+        assert!(input.handle_key(
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL),
+            false
+        ));
+
+        assert_eq!(input.as_str(), "a");
     }
 
     #[test]
