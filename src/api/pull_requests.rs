@@ -238,20 +238,46 @@ impl ProjectApi {
             .last_merge_source_commit
             .as_ref()
             .context("pull request has no source commit")?;
+        self.update_pull_request(
+            pr,
+            &json!({
+                "status": "completed",
+                "lastMergeSourceCommit": { "commitId": commit.commit_id },
+                "completionOptions": { "mergeStrategy": strategy }
+            }),
+        )
+        .await
+    }
+
+    pub async fn update_pull_request(&self, pr: &PullRequest, body: &Value) -> Result<()> {
         let id = pr.pull_request_id.to_string();
         let _: Value = self
             .client
-            .patch(
-                &self.client.urls.dev_azure,
-                &self.pr_path(pr, &id),
-                &json!({
-                    "status": "completed",
-                    "lastMergeSourceCommit": { "commitId": commit.commit_id },
-                    "completionOptions": { "mergeStrategy": strategy }
-                }),
-            )
+            .patch(&self.client.urls.dev_azure, &self.pr_path(pr, &id), body)
             .await?;
         Ok(())
+    }
+
+    /// Adds the reviewer or updates their entry, e.g. `{ "vote": 10 }`.
+    pub async fn put_reviewer(
+        &self,
+        pr: &PullRequest,
+        reviewer_id: &str,
+        body: &Value,
+    ) -> Result<()> {
+        let id = pr.pull_request_id.to_string();
+        let path = [&self.pr_path(pr, &id)[..], &["reviewers", reviewer_id]].concat();
+        let _: Value = self
+            .client
+            .put(&self.client.urls.dev_azure, &path, body)
+            .await?;
+        Ok(())
+    }
+
+    /// Votes: 10 approved, 5 approved with suggestions, 0 none, -5 waiting for author, -10 rejected.
+    pub async fn vote(&self, pr: &PullRequest, user_id: &str, vote: i32) -> Result<()> {
+        self.put_reviewer(pr, user_id, &json!({ "vote": vote }))
+            .await
     }
 
     /// Approval and review signals of someone else's PR. Policies are loaded again only when the PR
@@ -1122,6 +1148,38 @@ mod tests {
             .complete_pull_request(&pr, MergeStrategy::Squash)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn vote_puts_the_vote_on_the_reviewer() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path(
+                "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/7/reviewers/me",
+            ))
+            .and(body_json(json!({ "vote": -5 })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "vote": -5 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        client.vote(&pr, "me", -5).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_vote_is_an_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(403))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        assert!(client.vote(&pr, "me", 10).await.is_err());
     }
 
     #[tokio::test]

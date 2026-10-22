@@ -155,6 +155,10 @@ pub fn render(frame: &mut Frame, app: &App) {
             };
             popup::render_picker(frame, app, title, &selection, main);
         }
+        Some(Popup::Vote { pr, selection }) => {
+            let title = format!(" Vote on !{} ", pr.pull_request_id);
+            popup::render_picker(frame, app, &title, selection, main);
+        }
         None => {}
     }
     if app.show_help {

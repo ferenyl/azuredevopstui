@@ -31,6 +31,7 @@ pub enum Action {
     Help,
     NextLink,
     PrevLink,
+    Vote,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -66,7 +67,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::Comment,
         ],
     ),
-    ("Pull requests", &[Action::Complete]),
+    ("Pull requests", &[Action::Complete, Action::Vote]),
 ];
 
 impl Action {
@@ -102,6 +103,7 @@ impl Action {
             (KeyCode::Char('l'), _) => Some(Self::NextLink),
             (KeyCode::Char('L'), _) => Some(Self::PrevLink),
             (KeyCode::Char('?'), _) => Some(Self::Help),
+            (KeyCode::Char('v'), _) => Some(Self::Vote),
             _ => None,
         }
     }
@@ -137,6 +139,7 @@ impl Action {
             Self::Help => "?",
             Self::NextLink => "l",
             Self::PrevLink => "L",
+            Self::Vote => "v",
         }
     }
 
@@ -171,6 +174,7 @@ impl Action {
             Self::Help => "help",
             Self::NextLink => "select link",
             Self::PrevLink => "previous link",
+            Self::Vote => "vote",
         }
     }
 }

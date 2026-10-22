@@ -92,6 +92,7 @@ impl App {
             | Action::Toggle
             | Action::NextTab
             | Action::PrevTab
+            | Action::Vote
                 if !matches!(self.screen, Screen::Main) => {}
             Action::OpenInBrowser => self.open_in_browser(),
             Action::Copy => self.copy_number(),
@@ -113,6 +114,7 @@ impl App {
             Action::Unassign => self.unassign(),
             Action::Tag => self.tag(),
             Action::Comment => self.open_comment(),
+            Action::Vote => self.open_vote_picker(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);

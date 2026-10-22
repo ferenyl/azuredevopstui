@@ -115,6 +115,10 @@ pub enum Popup {
     BuildFilter {
         text: TextInput,
     },
+    Vote {
+        pr: Box<PullRequest>,
+        selection: Selection,
+    },
 }
 
 pub struct ColumnPicker {

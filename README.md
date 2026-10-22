@@ -34,6 +34,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - Assign a work item to yourself.
   - Unassign yourself from a work item and pick its new board column in the same step.
   - Complete one of your PRs once it shows `✔`. You pick a merge strategy among the ones the branch policies allow, and the last one you used is preselected. `esc` cancels without completing.
+  - Vote on any PR with `v`: approve, approve with suggestions, wait for author, reject or reset your vote. Your current vote is preselected and `esc` cancels. The inbox entry "needs your vote" goes away once you voted.
 - **Sorting** per list type. The choice is saved to the config.
 - **Work item type filter**: pick which types (User Story, Bug, Feature, …) the work item lists show. The list of types comes from the project, and the choice is saved to the config.
 - **Auto refresh** at a configurable interval. The open detail view refreshes too.
@@ -324,6 +325,12 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
   "work_item_types": [],
   "show_images": true,
   "notifications": false,
+  "notify": {
+    "builds": true,
+    "mentions": true,
+    "pull_requests": true,
+    "quiet_hours": { "start": "22:00", "end": "07:00" }
+  },
   "sort": {
     "pull_requests": "newest",
     "work_items": "priority"
@@ -350,6 +357,10 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `work_item_types` | `[]` | Work item types shown in *My work items* and *Ready*, for example `["User Story", "Bug"]`. An empty array shows all types. |
 | `show_images` | `true` | Draw images in the detail panel when the terminal supports graphics. Set it to `false` to skip the terminal graphics query at startup. |
 | `notifications` | `false` | Send a desktop notification when something new lands in the inbox (not on the first load). Works on Linux (D-Bus), Windows (toast) and macOS. Also sent when an entry's status changes, like new comments or failed checks. Several changes in one refresh become a single notification. A notification about one item has an *Open* action that opens it like `o`. Run `azuredevopstui --test-notification` to check that notifications work. |
+| `notify.builds` | `true` | Notify about failed builds. Only used when `notifications` is `true`. |
+| `notify.mentions` | `true` | Notify about work items that mention you. |
+| `notify.pull_requests` | `true` | Notify about pull requests waiting on you and changes to your own. |
+| `notify.quiet_hours` | not set | Local time range, `{ "start": "22:00", "end": "07:00" }` (`HH:MM`, may span midnight). Nothing is notified during it, and entries that arrive then are not notified afterwards. |
 | `sort.pull_requests` | `"newest"` | Sort order for both PR lists. |
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
 | `colors` | Catppuccin Mocha | Theme colors. See [Colors](#colors). |
@@ -436,6 +447,7 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `t` | Edit tags on your work item: type to search, `enter` adds the tag or removes it if it is already set (✓). A tag that does not exist is created |
 | `m` | Comment on a work item: type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels |
 | `c` | Complete your ready PR: pick the merge strategy, then `enter`. `esc` cancels and nothing is completed |
+| `v` | Vote on the PR: pick approve, approve with suggestions, wait for author, reject or reset vote, then `enter`. `esc` cancels and nothing is sent |
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `y` | Copy the PR (`!1234`) or work item (`#5678`) number |
 | `Y` | Copy the link to the PR, work item or pipeline run |

@@ -156,6 +156,18 @@ impl App {
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::PullRequestUpdated { id, reload, result } => match result {
+                Ok(()) => {
+                    tracing::info!(id, "pull request updated");
+                    let shown = self.detail.as_ref().is_some_and(|d| d.is_pull_request(id));
+                    let loads: Vec<Load> = reload
+                        .into_iter()
+                        .filter(|load| *load != Load::Detail || shown)
+                        .collect();
+                    self.reload_only(&loads);
+                }
+                Err(err) => self.report_error(err),
+            },
             Message::Connected(Err(err)) => self.fail(err, Retry::Continue),
             Message::PullRequestDetails { id, result } => {
                 if self.detail.as_ref().is_some_and(|d| d.is_pull_request(id)) {
