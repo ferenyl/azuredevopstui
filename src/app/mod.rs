@@ -2,6 +2,7 @@ mod action;
 mod actions;
 #[cfg(test)]
 mod e2e;
+mod files;
 mod inbox;
 mod input;
 mod loads;
@@ -18,6 +19,7 @@ mod toolbar;
 mod wizard;
 
 pub use action::{Action, HELP};
+pub use files::Files;
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
     ColumnPicker, CompletePicker, Data, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS,
@@ -64,6 +66,8 @@ pub struct App {
     pub detail_info: Option<DetailInfo>,
     pub detail_scroll: u16,
     pub detail_tab: DetailTab,
+    /// Changed files of the shown PR, once its Files tab was shown.
+    pub files: Option<Files>,
     pub popup: Option<Popup>,
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
     sprint: Option<String>,
@@ -107,6 +111,7 @@ impl App {
             detail_info: None,
             detail_scroll: 0,
             detail_tab: DetailTab::default(),
+            files: None,
             popup: None,
             show_help: false,
             last_updated: None,

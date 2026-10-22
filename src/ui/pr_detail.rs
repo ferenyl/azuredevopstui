@@ -18,6 +18,7 @@ pub fn lines(
 ) -> Vec<Line<'static>> {
     match (tab, details) {
         (DetailTab::Overview, _) => overview(app, pr, details, width),
+        (DetailTab::Files, _) => super::pr_files::lines(app, width),
         (_, None) => loading(app),
         (DetailTab::Comments, Some(details)) => comments(app, details, width),
         (_, Some(details)) => checks(app, details, width),

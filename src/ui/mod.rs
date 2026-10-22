@@ -1,6 +1,7 @@
 mod build_detail;
 mod popup;
 mod pr_detail;
+mod pr_files;
 mod setup;
 mod sprint;
 mod toolbar;
@@ -296,14 +297,21 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
         (Detail::Build(build), _) => build_detail::lines(app, build),
     };
     let (lines, slots) = place_images(app, lines, width);
+    let scroll = match detail {
+        Detail::PullRequest(_) if app.detail_tab == DetailTab::Files => {
+            pr_files::list_scroll(app, content.height, content.width)
+        }
+        _ => None,
+    }
+    .unwrap_or(app.detail_scroll);
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .scroll((app.detail_scroll, 0)),
+            .scroll((scroll, 0)),
         content,
     );
     for slot in slots {
-        let top = i32::from(slot.row) - i32::from(app.detail_scroll);
+        let top = i32::from(slot.row) - i32::from(scroll);
         let fits = top >= 0 && top + i32::from(slot.rows) <= i32::from(content.height);
         if !fits || slot.indent >= content.width {
             continue;
@@ -396,6 +404,10 @@ fn tab_title(app: &App, tab: DetailTab) -> String {
         (DetailTab::Checks, Some(DetailInfo::PullRequest(info))) => {
             (info.policies.len() + info.statuses.len()).to_string()
         }
+        (DetailTab::Files, _) => match app.files.as_ref().and_then(|f| f.changes.as_ref()) {
+            Some(changes) => changes.files.len().to_string(),
+            None => "…".into(),
+        },
         (DetailTab::Comments, Some(DetailInfo::WorkItem(info))) => info.comment_count.to_string(),
         (DetailTab::Children, Some(DetailInfo::WorkItem(info))) => info.children.len().to_string(),
         (DetailTab::Links, Some(DetailInfo::WorkItem(info))) => {
@@ -1364,6 +1376,84 @@ mod tests {
         assert!(screen.contains("## Steps"));
         assert!(screen.contains("- open **list**"));
         assert!(screen.contains("- press q▏"));
+    }
+
+    fn files_app(diff: Option<(usize, Option<crate::diff::FileDiff>)>) -> App {
+        use crate::api::{ChangeKind, ChangedFile, PullRequestChanges};
+        let mut app = main_app();
+        app.detail = app.data.detail(Panel::MyPrs, 0);
+        app.detail_tab = DetailTab::Files;
+        let file = |kind, path: &str, original_path: Option<&str>| ChangedFile {
+            kind,
+            path: path.into(),
+            original_path: original_path.map(String::from),
+        };
+        app.files = Some(crate::app::Files {
+            pr_id: 1,
+            error: None,
+            changes: Some(PullRequestChanges {
+                base: "base".into(),
+                head: "head".into(),
+                files: vec![
+                    file(ChangeKind::Modified, "/src/main.rs", None),
+                    file(ChangeKind::Renamed, "/src/new.rs", Some("/src/old.rs")),
+                    file(ChangeKind::Added, "/logo.png", None),
+                ],
+            }),
+            selected: 1,
+            diff,
+        });
+        app
+    }
+
+    #[test]
+    fn files_tab_lists_changes_with_their_kind() {
+        let screen = screen(&files_app(None));
+
+        assert!(screen.contains("Files (3)"));
+        assert!(screen.contains("M /src/main.rs"));
+        assert!(screen.contains("R /src/old.rs → /src/new.rs"));
+        assert!(screen.contains("A /logo.png"));
+    }
+
+    #[test]
+    fn files_tab_shows_the_open_diff() {
+        use crate::diff::{FileDiff, unified};
+        let diff = unified(
+            "fn main() {\n    old();\n}\n",
+            "fn main() {\n    new();\n}\n",
+        );
+
+        let screen = screen(&files_app(Some((0, Some(FileDiff::Lines(diff))))));
+
+        assert!(screen.contains("▍/src/main.rs"));
+        assert!(screen.contains("@@ -1,3 +1,3 @@"));
+        assert!(screen.contains("-    old();"));
+        assert!(screen.contains("+    new();"));
+        assert!(!screen.contains("/src/old.rs →"));
+    }
+
+    #[test]
+    fn files_tab_says_when_a_file_cannot_be_diffed() {
+        let skipped = screen(&files_app(Some((2, Some(crate::diff::FileDiff::Skipped)))));
+        let loading = screen(&files_app(Some((2, None))));
+
+        assert!(skipped.contains("Binary or too large to show"));
+        assert!(loading.contains("▍/logo.png"));
+        assert!(loading.contains("Loading…"));
+    }
+
+    #[test]
+    fn file_list_scrolls_to_keep_the_selection_visible() {
+        let mut app = files_app(None);
+        app.files.as_mut().unwrap().selected = 2;
+
+        assert_eq!(pr_files::list_scroll(&app, 2, 80), Some(1));
+        assert_eq!(pr_files::list_scroll(&app, 20, 80), Some(0));
+        // Wrapped paths take 2 + 3 + 1 rows.
+        assert_eq!(pr_files::list_scroll(&app, 2, 12), Some(4));
+        app.files.as_mut().unwrap().diff = Some((0, None));
+        assert_eq!(pr_files::list_scroll(&app, 4, 80), None);
     }
 
     #[test]

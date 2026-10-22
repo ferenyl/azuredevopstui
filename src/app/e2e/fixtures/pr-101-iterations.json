@@ -1,0 +1,18 @@
+{
+  "method": "GET",
+  "path": "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/101/iterations",
+  "body": {
+    "value": [
+      {
+        "id": 1,
+        "sourceRefCommit": { "commitId": "c100" },
+        "commonRefCommit": { "commitId": "b101" }
+      },
+      {
+        "id": 2,
+        "sourceRefCommit": { "commitId": "c101" },
+        "commonRefCommit": { "commitId": "b101" }
+      }
+    ]
+  }
+}

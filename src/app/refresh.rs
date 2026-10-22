@@ -253,6 +253,7 @@ impl App {
         self.detail = Some(detail);
         self.load_images();
         self.detail_info = None;
+        self.clear_files();
         self.detail_scroll = 0;
         self.detail_tab = DetailTab::Overview;
     }
@@ -262,6 +263,7 @@ impl App {
         self.loads.cancel(Load::Detail);
         self.detail = None;
         self.detail_info = None;
+        self.clear_files();
         if self.focus == Panel::Detail {
             self.focus = self.last_left;
         }

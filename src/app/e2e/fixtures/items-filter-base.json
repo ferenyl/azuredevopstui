@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/contoso/project-fabrikam/_apis/git/repositories/repo-api/items",
+  "query": {
+    "path": "/src/orders/filter.rs",
+    "versionDescriptor.version": "b101",
+    "versionDescriptor.versionType": "commit",
+    "includeContent": "true"
+  },
+  "body": {
+    "path": "/src/orders/filter.rs",
+    "content": "pub fn filter(orders: &[Order]) -> Vec<Order> {\n    orders.to_vec()\n}\n"
+  }
+}

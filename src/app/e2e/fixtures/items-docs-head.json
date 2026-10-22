@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/contoso/project-fabrikam/_apis/git/repositories/repo-api/items",
+  "query": {
+    "path": "/docs/filter.md",
+    "versionDescriptor.version": "c101",
+    "versionDescriptor.versionType": "commit",
+    "includeContent": "true"
+  },
+  "body": {
+    "path": "/docs/filter.md",
+    "content": "# Order filter\n\nFilter orders by status.\n"
+  }
+}

@@ -16,14 +16,14 @@ const CONNECTION_DATA: &str = "/contoso/_apis/connectionData";
 const WORK_ITEM_301: &str = "/contoso/Fabrikam/_apis/wit/workitems/301";
 const COMMENTS_301: &str = "/contoso/Fabrikam/_apis/wit/workItems/301/comments";
 
-async fn connected() -> Harness {
+pub(super) async fn connected() -> Harness {
     let mut harness = Harness::new().await;
     harness.connect().await;
     harness
 }
 
 /// Focuses `panel` and selects the row of work item or pull request `id`.
-fn select(harness: &mut Harness, panel: Panel, id: u32) {
+pub(super) fn select(harness: &mut Harness, panel: Panel, id: u32) {
     let index = panel.index().expect("left panel");
     let data = &harness.app.data;
     let row = match panel {
