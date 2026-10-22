@@ -78,7 +78,12 @@ impl App {
             },
             Message::OtherPullRequests(result) => match result {
                 Ok(prs) => {
-                    self.data.set_other_prs(prs);
+                    self.data.set_other_prs(prs.items);
+                    self.note_failures(
+                        prs.failed,
+                        "PR without review signals",
+                        "PRs without review signals",
+                    );
                     self.last_updated = Some(Instant::now());
                 }
                 Err(err) => self.report_error(err),
@@ -110,7 +115,14 @@ impl App {
                 Err(err) => tracing::warn!("failed to load board: {err:#}"),
             },
             Message::Mentions(result) => match result {
-                Ok(mentions) => self.data.set_mentions(mentions),
+                Ok(mentions) => {
+                    self.data.set_mentions(mentions.items);
+                    self.note_failures(
+                        mentions.failed,
+                        "work item skipped without comments",
+                        "work items skipped without comments",
+                    );
+                }
                 Err(err) => self.report_error(err),
             },
             Message::MergeStrategies { pr, result } => match result {
