@@ -26,16 +26,24 @@ use crossterm::event::{
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(run());
+    // Notification threads may still wait for a click; don't block exit on them.
+    runtime.shutdown_background();
+    result
+}
+
+async fn run() -> anyhow::Result<()> {
     init_logging()?;
     if std::env::args().any(|arg| arg == "--test-notification") {
-        let clicked = notify::send(
-            "azuredevopstui".into(),
-            "Test notification".into(),
-            Some("open".into()),
-        )
-        .await;
+        let clicked = notify::Notifier::default()
+            .send(
+                "azuredevopstui".into(),
+                "Test notification".into(),
+                Some("open".into()),
+            )
+            .await;
         println!(
             "{}",
             if clicked.is_some() {

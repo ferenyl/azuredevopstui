@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use crate::notify;
-
 use super::message::Message;
 use super::{App, Detail};
 
@@ -65,7 +63,8 @@ impl App {
                 None,
             ),
         };
-        self.spawn(async move { Message::Notified(notify::send(summary, body, url).await) });
+        let notifier = self.notifier.clone();
+        self.spawn(async move { Message::Notified(notifier.send(summary, body, url).await) });
     }
 
     /// After the first load, remembers the current inbox as seen and notified.
