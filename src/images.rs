@@ -75,8 +75,10 @@ fn percent_decode(text: &str) -> String {
 /// Replaces each `<img src="…">` with a paragraph holding an image marker.
 pub fn extract_html_images(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
+    let lower = html.to_ascii_lowercase();
     let mut rest = html;
-    while let Some(start) = find_ignore_case(rest, "<img") {
+    let mut offset = 0;
+    while let Some(start) = lower[offset..].find("<img") {
         let Some(end) = rest[start..].find('>') else {
             break;
         };
@@ -87,15 +89,10 @@ pub fn extract_html_images(html: &str) -> String {
             out.push_str(&format!("<p>{}</p>", marker(&src).replace('&', "&amp;")));
         }
         rest = &rest[start + end + 1..];
+        offset += start + end + 1;
     }
     out.push_str(rest);
     out
-}
-
-fn find_ignore_case(haystack: &str, needle: &str) -> Option<usize> {
-    haystack
-        .to_ascii_lowercase()
-        .find(&needle.to_ascii_lowercase())
 }
 
 /// Value of `name` in an HTML tag, quoted or not.
@@ -377,6 +374,17 @@ mod tests {
             out,
             "<div>Before<p>[[image:https://x/a.png?x=1&amp;fileName=a.png]]</p>After<p>[[image:https://x/b.png]]</p></div>"
         );
+    }
+
+    #[test]
+    fn html_images_are_found_case_insensitively_among_many() {
+        let html = "<P>x</P><IMG SRC=\"a.png\">text<img src='b.png'>".repeat(500);
+
+        let out = extract_html_images(&html);
+
+        assert_eq!(out.matches("[[image:").count(), 1000);
+        assert!(!out.to_ascii_lowercase().contains("<img"));
+        assert!(out.starts_with("<P>x</P><p>"));
     }
 
     #[test]
