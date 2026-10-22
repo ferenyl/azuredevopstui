@@ -71,6 +71,38 @@ async fn pull_request_rejected_by_a_reviewer_is_listed_not_approved() {
 }
 
 #[tokio::test]
+async fn push_after_vote_is_flagged_even_with_fractional_seconds() {
+    let mut harness = connected().await;
+    harness
+        .wait_for(|app| {
+            app.data
+                .other_prs()
+                .is_some_and(|prs| prs.iter().any(|pr| pr.pull_request_id == 405))
+        })
+        .await;
+
+    // 404 was pushed 0.5 s after the vote, 405 was voted 0.5 s after its push.
+    let flagged: Vec<u32> = harness
+        .app
+        .data
+        .other_prs()
+        .unwrap_or_default()
+        .iter()
+        .filter(|pr| pr.review.changed_since_vote)
+        .map(|pr| pr.pull_request_id)
+        .collect();
+    assert_eq!(flagged, [404]);
+    harness.wait_for_text("!404").await;
+    let screen = harness.screen();
+    assert!(
+        screen
+            .lines()
+            .any(|line| line.contains("!404") && line.contains('↻')),
+        "{screen}"
+    );
+}
+
+#[tokio::test]
 async fn opening_a_pull_request_loads_its_details() {
     let mut harness = connected().await;
     select(&mut harness, Panel::MyPrs, 101);
