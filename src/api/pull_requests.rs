@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use futures::{StreamExt, stream};
+use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::models::{
@@ -19,6 +20,22 @@ const REVIEWER_POLICIES: [&str; 2] = ["Minimum number of reviewers", "Required r
 const MERGE_STRATEGY_POLICY: &str = "Require a merge strategy";
 /// How long the threads of an unchanged PR are reused; new comments do not change the PR itself.
 const THREADS_MAX_AGE: Duration = Duration::from_secs(10 * 60);
+/// Identity that clears `autoCompleteSetBy`.
+const NO_IDENTITY: &str = "00000000-0000-0000-0000-000000000000";
+
+/// What happens when a pull request is completed, as Azure DevOps takes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionOptions {
+    pub merge_strategy: MergeStrategy,
+    pub delete_source_branch: bool,
+    pub transition_work_items: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merge_commit_message: Option<String>,
+    pub bypass_policy: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bypass_reason: Option<String>,
+}
 
 /// Review signals of someone else's PR and what they were computed from.
 pub(super) struct CachedReview {
@@ -232,7 +249,7 @@ impl ProjectApi {
     pub async fn complete_pull_request(
         &self,
         pr: &PullRequest,
-        strategy: MergeStrategy,
+        options: &CompletionOptions,
     ) -> Result<()> {
         let commit = pr
             .last_merge_source_commit
@@ -243,10 +260,32 @@ impl ProjectApi {
             &json!({
                 "status": "completed",
                 "lastMergeSourceCommit": { "commitId": commit.commit_id },
-                "completionOptions": { "mergeStrategy": strategy }
+                "completionOptions": options
             }),
         )
         .await
+    }
+
+    /// Completes the pull request by itself once its policies pass.
+    pub async fn set_auto_complete(
+        &self,
+        pr: &PullRequest,
+        user_id: &str,
+        options: &CompletionOptions,
+    ) -> Result<()> {
+        self.update_pull_request(
+            pr,
+            &json!({
+                "autoCompleteSetBy": { "id": user_id },
+                "completionOptions": options
+            }),
+        )
+        .await
+    }
+
+    pub async fn cancel_auto_complete(&self, pr: &PullRequest) -> Result<()> {
+        self.update_pull_request(pr, &json!({ "autoCompleteSetBy": { "id": NO_IDENTITY } }))
+            .await
     }
 
     pub async fn update_pull_request(&self, pr: &PullRequest, body: &Value) -> Result<()> {
@@ -1122,32 +1161,129 @@ mod tests {
         assert_eq!(strategies, [MergeStrategy::Squash]);
     }
 
-    #[tokio::test]
-    async fn complete_pull_request_patches_status_and_strategy() {
-        let server = MockServer::start().await;
+    const PR_7: &str = "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/7";
+
+    fn squash() -> CompletionOptions {
+        CompletionOptions {
+            merge_strategy: MergeStrategy::Squash,
+            delete_source_branch: false,
+            transition_work_items: false,
+            merge_commit_message: None,
+            bypass_policy: false,
+            bypass_reason: None,
+        }
+    }
+
+    async fn expect_patch_of_7(server: &MockServer, body: Value) {
         Mock::given(method("PATCH"))
-            .and(path(
-                "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/7",
-            ))
-            .and(body_json(json!({
-                "status": "completed",
-                "lastMergeSourceCommit": { "commitId": "abc" },
-                "completionOptions": { "mergeStrategy": "squash" }
-            })))
+            .and(path(PR_7))
+            .and(body_json(body))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
             .expect(1)
-            .mount(&server)
+            .mount(server)
             .await;
+    }
+
+    #[test]
+    fn completion_options_leave_out_the_unset_message_and_reason() {
+        let value = serde_json::to_value(squash()).unwrap();
+
+        assert_eq!(
+            value,
+            json!({
+                "mergeStrategy": "squash",
+                "deleteSourceBranch": false,
+                "transitionWorkItems": false,
+                "bypassPolicy": false
+            })
+        );
+    }
+
+    #[test]
+    fn completion_options_carry_message_and_bypass() {
+        let options = CompletionOptions {
+            delete_source_branch: true,
+            merge_commit_message: Some("Merged".into()),
+            bypass_policy: true,
+            bypass_reason: Some("why".into()),
+            ..squash()
+        };
+
+        let value = serde_json::to_value(options).unwrap();
+
+        assert_eq!(value["deleteSourceBranch"], true);
+        assert_eq!(value["mergeCommitMessage"], "Merged");
+        assert_eq!(value["bypassPolicy"], true);
+        assert_eq!(value["bypassReason"], "why");
+    }
+
+    #[tokio::test]
+    async fn complete_pull_request_patches_status_and_options() {
+        let server = MockServer::start().await;
+        expect_patch_of_7(
+            &server,
+            json!({
+                "status": "completed",
+                "lastMergeSourceCommit": { "commitId": "abc" },
+                "completionOptions": {
+                    "mergeStrategy": "squash",
+                    "deleteSourceBranch": true,
+                    "transitionWorkItems": false,
+                    "bypassPolicy": false
+                }
+            }),
+        )
+        .await;
         let client = ProjectApi::with_base_url(&server.uri());
         let mut pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
         pr.last_merge_source_commit = Some(CommitRef {
             commit_id: "abc".into(),
         });
+        let options = CompletionOptions {
+            delete_source_branch: true,
+            ..squash()
+        };
+
+        client.complete_pull_request(&pr, &options).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_auto_complete_patches_the_setter_and_options() {
+        let server = MockServer::start().await;
+        expect_patch_of_7(
+            &server,
+            json!({
+                "autoCompleteSetBy": { "id": "me" },
+                "completionOptions": {
+                    "mergeStrategy": "squash",
+                    "deleteSourceBranch": false,
+                    "transitionWorkItems": false,
+                    "bypassPolicy": false
+                }
+            }),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "me", "2026-10-01T10:00:00Z");
 
         client
-            .complete_pull_request(&pr, MergeStrategy::Squash)
+            .set_auto_complete(&pr, "me", &squash())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_auto_complete_patches_the_empty_identity() {
+        let server = MockServer::start().await;
+        expect_patch_of_7(
+            &server,
+            json!({ "autoCompleteSetBy": { "id": "00000000-0000-0000-0000-000000000000" } }),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "me", "2026-10-01T10:00:00Z");
+
+        client.cancel_auto_complete(&pr).await.unwrap();
     }
 
     #[tokio::test]
@@ -1188,7 +1324,7 @@ mod tests {
         let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
 
         let err = client
-            .complete_pull_request(&pr, MergeStrategy::Squash)
+            .complete_pull_request(&pr, &squash())
             .await
             .unwrap_err();
 

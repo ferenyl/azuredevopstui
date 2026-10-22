@@ -169,21 +169,28 @@ impl App {
         });
     }
 
-    /// My PR with nothing blocking the merge.
+    /// My PR; one that is not ready can still get auto-complete.
     pub(super) fn can_complete(&self, pr: &PullRequest) -> bool {
+        self.user
+            .as_ref()
+            .is_some_and(|user| user.id.eq_ignore_ascii_case(&pr.created_by.id))
+    }
+
+    /// Nothing blocks the merge.
+    pub(super) fn is_ready(&self, pr: &PullRequest) -> bool {
         self.data
             .pr_signals()
             .get(&pr.pull_request_id)
             .is_some_and(|signals| signals.ready)
     }
 
-    /// Asks for the merge strategy first; nothing is completed until it is confirmed.
+    /// Asks for the completion options first; nothing is completed until it is confirmed.
     pub(super) fn complete(&mut self) {
         let Some(Detail::PullRequest(pr)) = self.current_item() else {
             return;
         };
         if !self.can_complete(&pr) {
-            self.error = Some(format!("!{} is not ready to complete", pr.pull_request_id));
+            self.error = Some(format!("!{} is not your pull request", pr.pull_request_id));
             return;
         }
         let Some(api) = self.api() else {

@@ -830,7 +830,7 @@ pub(super) const PR_101: &str =
     "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/101";
 
 /// Answers a `PATCH` of `target` containing `body_part` and asserts it is sent once.
-async fn expect_patch(harness: &Harness, target: &str, body_part: &str) {
+pub(super) async fn expect_patch(harness: &Harness, target: &str, body_part: &str) {
     harness
         .ado
         .expect(
@@ -844,7 +844,7 @@ async fn expect_patch(harness: &Harness, target: &str, body_part: &str) {
 }
 
 /// Lets the signals of PR `id` say it can be completed; the fixture PR lacks a reviewer vote.
-fn mark_ready(harness: &mut Harness, id: u32) {
+pub(super) fn mark_ready(harness: &mut Harness, id: u32) {
     let mut signals = harness.app.data.pr_signals()[&id];
     signals.ready = true;
     harness.app.data.set_pr_signals(id, signals);

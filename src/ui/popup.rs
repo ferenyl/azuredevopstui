@@ -73,6 +73,26 @@ pub fn render_picker(frame: &mut Frame, app: &App, title: &str, selection: &Sele
     frame.render_stateful_widget(list, area, &mut state);
 }
 
+pub fn render_confirm(frame: &mut Frame, app: &App, prompt: &str, area: Rect) {
+    const WIDTH: u16 = 60;
+    let theme = &app.theme;
+    let text = format!("{prompt}\n\ny / enter: yes    n / esc: no");
+    let lines: u16 = text
+        .split('\n')
+        .map(|line| (line.chars().count() as u16).div_ceil(WIDTH - 2).max(1))
+        .sum();
+    let area = centered(area, WIDTH, lines + 2);
+
+    let block = Block::bordered()
+        .title(" Confirm ")
+        .title_style(Style::new().fg(theme.title))
+        .border_style(Style::new().fg(theme.border_focused))
+        .style(Style::new().bg(theme.background).fg(theme.foreground));
+    let confirm = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
+    frame.render_widget(Clear, area);
+    frame.render_widget(confirm, area);
+}
+
 pub fn render_text_input(frame: &mut Frame, app: &App, title: &str, input: &TextInput, area: Rect) {
     const WIDTH: u16 = 60;
     let theme = &app.theme;

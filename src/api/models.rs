@@ -154,6 +154,8 @@ pub struct PullRequest {
     #[serde(default)]
     pub reviewers: Vec<Reviewer>,
     pub last_merge_source_commit: Option<CommitRef>,
+    /// Who set auto-complete; absent when it is not set.
+    pub auto_complete_set_by: Option<IdentityRef>,
     /// Reviewer policies met; only set for others' PRs.
     #[serde(skip)]
     pub approved: bool,

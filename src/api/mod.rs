@@ -11,7 +11,7 @@ pub use models::{
     PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems, Thread, WorkItem,
     WorkItemDetails,
 };
-pub use pull_requests::{is_approved, is_reviewer_policy};
+pub use pull_requests::{CompletionOptions, is_approved, is_reviewer_policy};
 
 use std::cmp::Ordering;
 use std::collections::HashMap;

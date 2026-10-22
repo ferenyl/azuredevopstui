@@ -71,7 +71,10 @@ impl App {
         match action {
             Action::Confirm | Action::Cancel => true,
             Action::Down => !matches!(popup, Popup::Comment { .. } | Popup::BuildFilter { .. }),
-            Action::Toggle => matches!(popup, Popup::Types { .. } | Popup::PrFilter { .. }),
+            Action::Toggle => matches!(
+                popup,
+                Popup::Types { .. } | Popup::PrFilter { .. } | Popup::Complete(_)
+            ),
             _ => false,
         }
     }
@@ -124,6 +127,12 @@ mod tests {
 
     fn selection() -> Selection {
         Selection::new(vec!["a".into(), "b".into()])
+    }
+
+    /// The user who created the fixture pull requests.
+    fn creator() -> crate::api::CurrentUser {
+        serde_json::from_value(serde_json::json!({ "id": "me", "providerDisplayName": "Me" }))
+            .unwrap()
     }
 
     fn step(app: &mut App, step: SetupStep) {
@@ -220,7 +229,9 @@ mod tests {
                 );
             }),
             ("pull request", |_| {}),
+            ("my pull request, not ready", |a| a.user = Some(creator())),
             ("ready pull request", |a| {
+                a.user = Some(creator());
                 a.data.set_pr_signals(
                     1,
                     Signals {
@@ -322,6 +333,25 @@ mod tests {
                     FocusRight,
                     NextTab,
                     Confirm,
+                    Vote,
+                    OpenInBrowser,
+                    Copy,
+                    CopyLink,
+                    Sort,
+                    Filter,
+                    Reload,
+                    Help,
+                    Quit,
+                ],
+            ),
+            (
+                "my pull request, not ready",
+                vec![
+                    Down,
+                    FocusRight,
+                    NextTab,
+                    Confirm,
+                    Complete,
                     Vote,
                     OpenInBrowser,
                     Copy,

@@ -66,10 +66,6 @@ pub enum Message {
         pr: Box<PullRequest>,
         result: Result<Vec<MergeStrategy>>,
     },
-    PullRequestCompleted {
-        id: u32,
-        result: Result<()>,
-    },
     PullRequestUpdated {
         id: u32,
         /// The panels showing what the change touched.

@@ -3,8 +3,9 @@ use std::collections::{HashMap, HashSet};
 use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
-    Build, ColumnTarget, Iteration, Mention, PullRequest, PullRequestChecks, PullRequestDetails,
-    WorkItem, WorkItemDetails, compare_timestamps, is_approved, is_reviewer_policy,
+    Build, ColumnTarget, CompletionOptions, Iteration, Mention, PullRequest, PullRequestChecks,
+    PullRequestDetails, WorkItem, WorkItemDetails, compare_timestamps, is_approved,
+    is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 
@@ -119,6 +120,11 @@ pub enum Popup {
         pr: Box<PullRequest>,
         selection: Selection,
     },
+    /// yes (`y`, enter) or no (`n`, esc) before something that is hard to undo.
+    Confirm {
+        prompt: String,
+        action: ConfirmAction,
+    },
 }
 
 pub struct ColumnPicker {
@@ -129,10 +135,111 @@ pub struct ColumnPicker {
     pub unassign: bool,
 }
 
+/// What a row of the completion popup stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompleteRow {
+    Strategy(usize),
+    DeleteSourceBranch,
+    TransitionWorkItems,
+    AutoComplete,
+    BypassPolicy,
+    Message,
+    CancelAutoComplete,
+}
+
+/// Merge strategies, then the completion options, then cancelling an auto-complete that is set.
 pub struct CompletePicker {
     pub pr: Box<PullRequest>,
     pub strategies: Vec<MergeStrategy>,
+    /// The strategy ticked; confirming on a strategy row picks that row instead.
+    pub strategy: usize,
     pub selection: Selection,
+    /// Nothing blocks the merge; otherwise it is only possible with auto-complete or a bypass.
+    pub ready: bool,
+    pub delete_source_branch: bool,
+    pub transition_work_items: bool,
+    pub auto_complete: bool,
+    pub bypass_policy: bool,
+    pub message: TextInput,
+}
+
+impl CompletePicker {
+    const OPTION_ROWS: [CompleteRow; 5] = [
+        CompleteRow::DeleteSourceBranch,
+        CompleteRow::TransitionWorkItems,
+        CompleteRow::AutoComplete,
+        CompleteRow::BypassPolicy,
+        CompleteRow::Message,
+    ];
+
+    pub fn row(&self) -> CompleteRow {
+        let index = self.selection.selected;
+        match index.checked_sub(self.strategies.len()) {
+            None => CompleteRow::Strategy(index),
+            Some(option) => Self::OPTION_ROWS
+                .get(option)
+                .copied()
+                .unwrap_or(CompleteRow::CancelAutoComplete),
+        }
+    }
+
+    /// Ticks or unticks the option row; a strategy row becomes the ticked strategy.
+    pub fn toggle(&mut self) {
+        match self.row() {
+            CompleteRow::Strategy(index) => self.strategy = index,
+            CompleteRow::DeleteSourceBranch => {
+                self.delete_source_branch = !self.delete_source_branch
+            }
+            CompleteRow::TransitionWorkItems => {
+                self.transition_work_items = !self.transition_work_items
+            }
+            CompleteRow::AutoComplete => self.auto_complete = !self.auto_complete,
+            CompleteRow::BypassPolicy => self.bypass_policy = !self.bypass_policy,
+            CompleteRow::Message | CompleteRow::CancelAutoComplete => {}
+        }
+    }
+
+    pub fn items(&self) -> Vec<String> {
+        let tick = |on: bool| if on { "x" } else { " " };
+        let mut items: Vec<String> = self
+            .strategies
+            .iter()
+            .enumerate()
+            .map(|(index, strategy)| {
+                let mark = if index == self.strategy { "•" } else { " " };
+                format!("({mark}) {}", strategy.label())
+            })
+            .collect();
+        let (before, after) = self.message.split();
+        let message = if self.row() == CompleteRow::Message {
+            format!("{before}▏{after}")
+        } else {
+            self.message.as_str().to_string()
+        };
+        items.extend([
+            format!("[{}] Delete source branch", tick(self.delete_source_branch)),
+            format!(
+                "[{}] Transition linked work items",
+                tick(self.transition_work_items)
+            ),
+            format!("[{}] Set auto-complete", tick(self.auto_complete)),
+            format!("[{}] Bypass branch policies", tick(self.bypass_policy)),
+            format!("Message: {message}"),
+        ]);
+        if self.pr.auto_complete_set_by.is_some() {
+            items.push("Cancel auto-complete".into());
+        }
+        items
+    }
+}
+
+/// What a confirm popup does once confirmed.
+pub enum ConfirmAction {
+    Complete {
+        pr: Box<PullRequest>,
+        options: CompletionOptions,
+        auto_complete: bool,
+    },
 }
 
 pub struct TagPicker {

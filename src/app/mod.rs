@@ -20,8 +20,8 @@ mod wizard;
 pub use action::{Action, HELP};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
-    ColumnPicker, CompletePicker, Data, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS,
-    Panel, Popup, Signals, SortKind, SprintPicker, TagPicker,
+    ColumnPicker, CompletePicker, CompleteRow, ConfirmAction, Data, Detail, DetailInfo, DetailTab,
+    InboxEntry, LEFT_PANELS, Panel, Popup, Signals, SortKind, SprintPicker, TagPicker,
 };
 pub use text_input::TextInput;
 
