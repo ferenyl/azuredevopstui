@@ -1,7 +1,7 @@
 {
   "method": "POST",
   "path": "/contoso/Fabrikam/Web/_apis/wit/wiql",
-  "bodyContains": "@RecentMentions",
+  "bodyContains": "[System.State] NOT IN ('Closed', 'Done', 'Removed') ORDER BY",
   "body": {
     "workItems": []
   }

@@ -425,6 +425,12 @@ pub struct WorkItemTypeCategory {
 }
 
 #[derive(Deserialize)]
+pub struct WorkItemState {
+    pub name: String,
+    pub category: String,
+}
+
+#[derive(Deserialize)]
 pub struct WorkItemDetailFields {
     #[serde(rename = "System.State")]
     pub state: String,

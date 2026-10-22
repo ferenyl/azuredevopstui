@@ -21,6 +21,7 @@ use reqwest::header::CONTENT_TYPE;
 use reqwest::{Method, StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use tokio::sync::OnceCell;
 
 use crate::auth::Auth;
 use crate::config::Config;
@@ -266,6 +267,8 @@ pub struct ProjectApi {
     organization: Arc<str>,
     project: Arc<str>,
     team: Arc<str>,
+    /// State names in the Completed and Removed categories, fetched once per session.
+    closed_states: Arc<OnceCell<Vec<String>>>,
 }
 
 impl ProjectApi {
@@ -291,6 +294,7 @@ impl ProjectApi {
             organization: organization.into(),
             project: project.into(),
             team: team.into(),
+            closed_states: Arc::default(),
         }
     }
 }

@@ -5,7 +5,7 @@ use serde_json::json;
 use super::models::{
     CommentList, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention, Partial,
     PullRequest, Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails,
-    WorkItemResponse, WorkItemTypeCategory,
+    WorkItemResponse, WorkItemState, WorkItemTypeCategory,
 };
 use super::{ProjectApi, is_unauthorized};
 use crate::rich_text::RichText;
@@ -33,6 +33,9 @@ const PULL_REQUEST_ARTIFACT: &str = "vstfs:///Git/PullRequestId/";
 const HIDDEN_CATEGORY: &str = "Microsoft.HiddenCategory";
 const COMMENTS_API_VERSION: &str = "7.1-preview.4";
 const MAX_COMMENTS: &str = "10";
+const CLOSED_CATEGORIES: [&str; 2] = ["Completed", "Removed"];
+/// Used when the states cannot be loaded.
+const DEFAULT_CLOSED_STATES: [&str; 2] = ["Closed", "Removed"];
 
 impl ProjectApi {
     pub async fn sprint_work_items(
@@ -54,10 +57,11 @@ impl ProjectApi {
         };
         let path = quote(&iteration.path);
         let types = type_filter(types);
+        let closed = self.closed_states_filter().await;
         let mine = format!(
             "SELECT [System.Id] FROM WorkItems \
              WHERE [System.AssignedTo] = @Me \
-             AND [System.State] NOT IN ('Closed', 'Removed') \
+             {closed}\
              AND [System.IterationPath] = {path} \
              {types}\
              ORDER BY [System.ChangedDate] DESC"
@@ -167,11 +171,14 @@ impl ProjectApi {
 
     /// Open work items recently mentioning the user in a comment they have not answered.
     pub async fn mentioned_work_items(&self, user_id: &str) -> Result<Partial<Mention>> {
-        let wiql = "SELECT [System.Id] FROM WorkItems \
-                    WHERE [System.Id] IN (@RecentMentions) \
-                    AND [System.State] NOT IN ('Closed', 'Removed') \
-                    ORDER BY [System.ChangedDate] DESC";
-        let items = self.query_work_items(wiql).await?;
+        let closed = self.closed_states_filter().await;
+        let wiql = format!(
+            "SELECT [System.Id] FROM WorkItems \
+             WHERE [System.Id] IN (@RecentMentions) \
+             {closed}\
+             ORDER BY [System.ChangedDate] DESC"
+        );
+        let items = self.query_work_items(&wiql).await?;
         let results: Vec<Result<Option<Mention>>> = stream::iter(items)
             .map(|item| async move {
                 let comments = self.comments(item.id).await.inspect_err(|err| {
@@ -261,6 +268,54 @@ impl ProjectApi {
             )
             .await?;
         Ok(visible_types(categories.value))
+    }
+
+    /// `AND [System.State] NOT IN (...)` over the closed states, falling back to the defaults on error.
+    async fn closed_states_filter(&self) -> String {
+        let states = match self.closed_states().await {
+            Ok(states) if !states.is_empty() => states.to_vec(),
+            Ok(_) => DEFAULT_CLOSED_STATES.map(String::from).to_vec(),
+            Err(err) => {
+                tracing::warn!("failed to load work item states, using defaults: {err:#}");
+                DEFAULT_CLOSED_STATES.map(String::from).to_vec()
+            }
+        };
+        let states: Vec<String> = states.iter().map(|state| quote(state)).collect();
+        format!("AND [System.State] NOT IN ({}) ", states.join(", "))
+    }
+
+    /// States in the Completed and Removed categories of all visible types, cached per session.
+    async fn closed_states(&self) -> Result<&[String]> {
+        let states = self
+            .closed_states
+            .get_or_try_init(|| async {
+                let types = self.work_item_types().await?;
+                let lists =
+                    future::try_join_all(types.iter().map(|kind| self.type_states(kind))).await?;
+                Ok::<_, anyhow::Error>(closed_state_names(lists.into_iter().flatten().collect()))
+            })
+            .await?;
+        Ok(states)
+    }
+
+    async fn type_states(&self, kind: &str) -> Result<Vec<WorkItemState>> {
+        let states: ListResponse<WorkItemState> = self
+            .client
+            .get(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "wit",
+                    "workitemtypes",
+                    kind,
+                    "states",
+                ],
+                &[],
+            )
+            .await?;
+        Ok(states.value)
     }
 
     /// The team's sprints, furthest in the future first.
@@ -470,6 +525,18 @@ fn visible_types(categories: Vec<WorkItemTypeCategory>) -> Vec<String> {
     types.sort();
     types.dedup();
     types
+}
+
+/// Names of states in a closed category, sorted and deduplicated.
+fn closed_state_names(states: Vec<WorkItemState>) -> Vec<String> {
+    let mut names: Vec<String> = states
+        .into_iter()
+        .filter(|state| CLOSED_CATEGORIES.contains(&state.category.as_str()))
+        .map(|state| state.name)
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 fn to_rich_text(value: &str, format: Option<&str>) -> RichText {
@@ -808,6 +875,57 @@ mod tests {
         let types = client.work_item_types().await.unwrap();
 
         assert_eq!(types, ["Bug"]);
+    }
+
+    fn state(name: &str, category: &str) -> WorkItemState {
+        WorkItemState {
+            name: name.into(),
+            category: category.into(),
+        }
+    }
+
+    #[test]
+    fn closed_state_names_keep_completed_and_removed_only() {
+        let states = vec![
+            state("Done", "Completed"),
+            state("Resolved", "Resolved"),
+            state("Active", "InProgress"),
+            state("Removed", "Removed"),
+            state("Done", "Completed"),
+        ];
+
+        assert_eq!(closed_state_names(states), ["Done", "Removed"]);
+    }
+
+    #[tokio::test]
+    async fn closed_states_are_fetched_once() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemtypecategories"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "referenceName": "Microsoft.BugCategory", "workItemTypes": [{ "name": "Bug" }] }
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/_apis/wit/workitemtypes/Bug/states",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "Active", "category": "InProgress" },
+                { "name": "Closed", "category": "Completed" }
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let first = client.closed_states_filter().await;
+        let second = client.closed_states_filter().await;
+
+        assert_eq!(first, "AND [System.State] NOT IN ('Closed') ");
+        assert_eq!(second, first);
     }
 
     fn comment(author: &str, text: &str, date: &str, reacted: bool) -> WorkItemComment {

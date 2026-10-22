@@ -500,7 +500,7 @@ If startup hangs for a moment or the first key press is lost, the terminal does 
 
 - **My PRs**: `status=active` with you as the creator, across all repositories in the project.
 - **Others' PRs**: `status=active`, filtered by `other_prs_filter` and with your own PRs excluded.
-- **My work items**: `AssignedTo = @Me`, a state other than *Closed* or *Removed*, a type in `work_item_types` (all types when it is empty), and the shown sprint (see [Sprint](#sprint)).
+- **My work items**: `AssignedTo = @Me`, a state outside the *Completed* and *Removed* categories of the work item types (for example *Closed*, *Done* and *Removed*; Agile's *Resolved* stays visible), a type in `work_item_types` (all types when it is empty), and the shown sprint (see [Sprint](#sprint)).
 - **Ready**: `BoardColumn = <ready_column>`, `AssignedTo <> @Me`, a type in `work_item_types` (all types when it is empty), and the shown sprint.
 
 Moving a work item sets the board column field, the column's *Done* field (for split columns) and the matching `System.State`.
