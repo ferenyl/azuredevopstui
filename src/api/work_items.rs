@@ -289,7 +289,7 @@ impl ProjectApi {
     async fn query_work_items(&self, wiql: &str) -> Result<Vec<WorkItem>> {
         let result: WiqlResult = self
             .client
-            .post(
+            .post_read(
                 &self.client.urls.dev_azure,
                 &[
                     &self.organization,
@@ -319,7 +319,7 @@ impl ProjectApi {
         for chunk in ids.chunks(BATCH_SIZE) {
             let batch: ListResponse<Option<WorkItem>> = self
                 .client
-                .post(
+                .post_read(
                     &self.client.urls.dev_azure,
                     &[
                         &self.organization,
