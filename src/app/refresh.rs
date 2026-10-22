@@ -8,29 +8,47 @@ use super::loads::Load;
 use super::message::Message;
 use super::{App, Detail, DetailInfo, DetailTab, Panel, Screen};
 
+const ALL: [Load; 6] = [
+    Load::MyPullRequests,
+    Load::Builds,
+    Load::Mentions,
+    Load::OtherPullRequests,
+    Load::Detail,
+    Load::Sprint,
+];
+
 impl App {
     /// Reloads the shown data, leaving requests already in flight to finish.
     pub(super) fn refresh(&mut self) {
-        self.load_all(false);
+        self.load_all(&ALL, false);
     }
 
     /// Like [`App::refresh`], but restarts requests in flight, whose data may predate a change.
     pub(super) fn reload(&mut self) {
-        self.load_all(true);
+        self.load_all(&ALL, true);
     }
 
-    fn load_all(&mut self, restart: bool) {
+    /// Restarts only `loads` after a mutation, whose effect earlier requests may predate.
+    pub(super) fn reload_only(&mut self, loads: &[Load]) {
+        self.load_all(loads, true);
+    }
+
+    fn load_all(&mut self, loads: &[Load], restart: bool) {
         let (Some(api), Some(config), Some(user)) =
             (self.api(), self.config.clone(), self.user.clone())
         else {
             return;
         };
         self.error = None;
-        self.last_refresh = Instant::now();
-        self.track_inbox();
+        let full = loads.len() == ALL.len();
+        if full {
+            self.last_refresh = Instant::now();
+            self.track_inbox();
+        }
         self.data.show_approved = config.other_prs_filter.show_approved;
         self.data.show_drafts = config.other_prs_filter.show_drafts;
-        let wanted = |app: &Self, load| restart || !app.loads.is_loading(load);
+        let wanted =
+            |app: &Self, load| loads.contains(&load) && (restart || !app.loads.is_loading(load));
 
         if wanted(self, Load::MyPullRequests) {
             let (a, user_id) = (api.clone(), user.id.clone());

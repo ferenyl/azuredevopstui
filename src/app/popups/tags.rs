@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crossterm::event::KeyEvent;
 
 use crate::api::WorkItem;
+use crate::app::loads::Load;
 use crate::app::message::Message;
 use crate::app::{App, Popup, TagPicker};
 
@@ -63,7 +64,11 @@ impl App {
         }
         self.spawn(async move {
             let result = api.set_work_item_tags(id, &tags).await;
-            Message::WorkItemUpdated { id, result }
+            Message::WorkItemUpdated {
+                id,
+                reload: &[Load::Mentions, Load::Detail],
+                result,
+            }
         });
     }
 }

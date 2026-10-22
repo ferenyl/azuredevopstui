@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/wit/workitems/301",
+  "body": {
+    "id": 301,
+    "fields": {
+      "System.Title": "Order list paging",
+      "System.WorkItemType": "User Story",
+      "System.State": "Active",
+      "System.ChangedDate": "2026-10-21T10:00:00Z",
+      "System.CreatedDate": "2026-10-01T10:00:00Z",
+      "System.Tags": "backend"
+    }
+  }
+}

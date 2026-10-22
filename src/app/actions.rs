@@ -6,6 +6,7 @@ use crossterm::clipboard::CopyToClipboard;
 use crate::api;
 use crate::api::{PullRequest, WorkItem};
 
+use super::loads::Load;
 use super::message::Message;
 use super::{App, Detail};
 
@@ -102,7 +103,11 @@ impl App {
         let (id, assignee) = (item.id, user.unique_name().to_string());
         self.spawn(async move {
             let result = api.assign_work_item(id, &assignee).await;
-            Message::WorkItemUpdated { id, result }
+            Message::WorkItemUpdated {
+                id,
+                reload: &[Load::Sprint, Load::Mentions, Load::Detail],
+                result,
+            }
         });
     }
 
