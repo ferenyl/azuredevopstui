@@ -1,10 +1,12 @@
+use std::cmp::Ordering;
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::{
     badge, branch, empty, field, heading, loading, rich_lines, short_date, state_color, type_color,
 };
-use crate::api::{PullRequest, PullRequestDetails, Thread};
+use crate::api::{PullRequest, PullRequestDetails, Thread, compare_timestamps};
 use crate::app::{App, DetailTab};
 
 pub fn lines(
@@ -133,6 +135,16 @@ fn overview(
     lines
 }
 
+/// Newest first; threads without a date go last.
+fn newest_first(a: Option<String>, b: Option<String>) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => compare_timestamps(&b, &a),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 fn comments(app: &App, details: &PullRequestDetails, width: u16) -> Vec<Line<'static>> {
     let theme = &app.theme;
     let muted = Style::new().fg(theme.muted);
@@ -144,14 +156,14 @@ fn comments(app: &App, details: &PullRequestDetails, width: u16) -> Vec<Line<'st
             .comments
             .iter()
             .filter_map(|comment| comment.published_date.clone())
-            .max()
+            .max_by(|a, b| compare_timestamps(a, b))
     };
     let (mut unresolved, mut resolved): (Vec<&Thread>, Vec<&Thread>) = details
         .threads
         .iter()
         .partition(|thread| matches!(thread.status.as_deref(), None | Some("active" | "pending")));
-    unresolved.sort_by_key(|thread| std::cmp::Reverse(latest(thread)));
-    resolved.sort_by_key(|thread| std::cmp::Reverse(latest(thread)));
+    unresolved.sort_by(|a, b| newest_first(latest(a), latest(b)));
+    resolved.sort_by(|a, b| newest_first(latest(a), latest(b)));
     let bar = Span::styled("  │ ", Style::new().fg(theme.border));
     let mut lines = Vec::new();
     for (title, threads) in [("Not resolved", unresolved), ("Resolved", resolved)] {

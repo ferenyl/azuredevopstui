@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crossterm::event::KeyCode;
-use wiremock::matchers::{body_string_contains, method, path, path_regex};
+use wiremock::matchers::{body_string_contains, method, path, path_regex, query_param_is_missing};
 use wiremock::{Mock, ResponseTemplate};
 
 use super::Harness;
@@ -76,6 +76,38 @@ async fn pull_request_rejected_by_a_reviewer_is_listed_not_approved() {
 }
 
 #[tokio::test]
+async fn push_after_vote_is_flagged_even_with_fractional_seconds() {
+    let mut harness = connected().await;
+    harness
+        .wait_for(|app| {
+            app.data
+                .other_prs()
+                .is_some_and(|prs| prs.iter().any(|pr| pr.pull_request_id == 405))
+        })
+        .await;
+
+    // 404 was pushed 0.5 s after the vote, 405 was voted 0.5 s after its push.
+    let flagged: Vec<u32> = harness
+        .app
+        .data
+        .other_prs()
+        .unwrap_or_default()
+        .iter()
+        .filter(|pr| pr.review.changed_since_vote)
+        .map(|pr| pr.pull_request_id)
+        .collect();
+    assert_eq!(flagged, [404]);
+    harness.wait_for_text("!404").await;
+    let screen = harness.screen();
+    assert!(
+        screen
+            .lines()
+            .any(|line| line.contains("!404") && line.contains('↻')),
+        "{screen}"
+    );
+}
+
+#[tokio::test]
 async fn opening_a_pull_request_loads_its_details() {
     let mut harness = connected().await;
     select(&mut harness, Panel::MyPrs, 101);
@@ -111,6 +143,26 @@ async fn pull_request_markdown_is_rendered_once_not_per_frame() {
 
     assert!(first.contains("Adds a status filter to the order list."));
     assert_eq!(renders(), before);
+}
+
+#[tokio::test]
+async fn comment_threads_are_newest_first_even_with_fractional_seconds() {
+    let mut harness = connected().await;
+    select(&mut harness, Panel::MyPrs, 101);
+    harness.press(KeyCode::Enter);
+    harness
+        .wait_for(|app| matches!(app.detail_info, Some(DetailInfo::PullRequest(_))))
+        .await;
+    harness.press(KeyCode::Tab);
+    harness.wait_for_text("Second look at paging").await;
+
+    // Thread 2 was published 0.5 s after thread 1, so it is listed first.
+    let screen = harness.screen();
+    let newer = screen.find("Second look at paging").expect("newer thread");
+    let older = screen
+        .find("Please add a test for the empty filter")
+        .expect("older thread");
+    assert!(newer < older, "{screen}");
 }
 
 #[tokio::test]
@@ -244,6 +296,27 @@ async fn throttled_pull_requests_are_retried() {
 
     harness.wait_for_text("Add order filter").await;
     harness.wait_for_text("Fix login redirect").await;
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn pipelines_are_limited_to_the_last_14_days_and_skip_pull_request_runs() {
+    let mut harness = Harness::new().await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET"))
+                .and(path(BUILDS))
+                .and(query_param_is_missing("minTime")),
+            ResponseTemplate::new(500),
+            0,
+        )
+        .await;
+
+    harness.connect().await;
+
+    harness.wait_for_text("orders-ci").await;
+    assert!(!harness.screen().contains("pr-validation"));
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 
