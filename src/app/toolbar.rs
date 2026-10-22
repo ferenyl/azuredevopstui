@@ -1,7 +1,7 @@
 use super::{Action, App, Detail, Panel, Popup, Retry, Screen, SetupStep};
 
 /// Every action the toolbar can show, in display order.
-const TOOLBAR: [Action; 23] = [
+const TOOLBAR: [Action; 26] = [
     Action::Down,
     Action::Up,
     Action::Toggle,
@@ -16,6 +16,9 @@ const TOOLBAR: [Action; 23] = [
     Action::Tag,
     Action::AssignToMe,
     Action::Comment,
+    Action::NextThread,
+    Action::PrevThread,
+    Action::ThreadStatus,
     Action::OpenInBrowser,
     Action::Copy,
     Action::CopyLink,
@@ -70,7 +73,7 @@ impl App {
     fn can_in_popup(popup: &Popup, action: Action) -> bool {
         match action {
             Action::Confirm | Action::Cancel => true,
-            Action::Down => !matches!(popup, Popup::Comment { .. } | Popup::BuildFilter { .. }),
+            Action::Down => !matches!(popup, Popup::Text { .. } | Popup::BuildFilter { .. }),
             Action::Toggle => matches!(popup, Popup::Types { .. } | Popup::PrFilter { .. }),
             _ => false,
         }
@@ -91,7 +94,14 @@ impl App {
                 matches!(&item, Some(Detail::PullRequest(pr)) if self.can_complete(pr))
             }
             Action::Vote => matches!(item, Some(Detail::PullRequest(_))),
-            Action::ChangeColumn | Action::Comment => matches!(item, Some(Detail::WorkItem(_))),
+            Action::ChangeColumn => matches!(item, Some(Detail::WorkItem(_))),
+            Action::Comment => matches!(item, Some(Detail::WorkItem(_) | Detail::PullRequest(_))),
+            Action::NextThread | Action::PrevThread => {
+                matches!(&item, Some(Detail::PullRequest(pr)) if self.has_threads_shown(pr))
+            }
+            Action::ThreadStatus => {
+                matches!(&item, Some(Detail::PullRequest(pr)) if self.selected_thread_of(pr).is_some())
+            }
             Action::Unassign | Action::Tag => work_item_assigned_to_me(true),
             Action::AssignToMe => work_item_assigned_to_me(false),
             Action::Confirm | Action::OpenInBrowser | Action::CopyLink => item.is_some(),
@@ -109,7 +119,8 @@ mod tests {
     use crate::app::state::Signals;
     use crate::app::test_helpers::{app, assign_first_item_to, ctrl, me, press};
     use crate::app::{
-        Action, App, Detail, Panel, Popup, Retry, Screen, Selection, SetupStep, SortKind, TextInput,
+        Action, App, Detail, Panel, Popup, Retry, Screen, Selection, SetupStep, SortKind,
+        TextInput, TextTarget,
     };
 
     fn build() -> Detail {
@@ -196,8 +207,8 @@ mod tests {
             ("comment popup", |a| {
                 popup(
                     a,
-                    Popup::Comment {
-                        work_item_id: 10,
+                    Popup::Text {
+                        target: TextTarget::WorkItemComment(10),
                         text: TextInput::default(),
                     },
                 );
@@ -323,6 +334,7 @@ mod tests {
                     NextTab,
                     Confirm,
                     Vote,
+                    Comment,
                     OpenInBrowser,
                     Copy,
                     CopyLink,
@@ -342,6 +354,7 @@ mod tests {
                     Confirm,
                     Complete,
                     Vote,
+                    Comment,
                     OpenInBrowser,
                     Copy,
                     CopyLink,

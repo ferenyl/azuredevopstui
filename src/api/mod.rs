@@ -8,8 +8,8 @@ mod work_items;
 pub use boards::ColumnTarget;
 pub use models::{
     Board, Build, CurrentUser, Iteration, Link, LinkTarget, Mention, Partial, PullRequest,
-    PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems, Thread, WorkItem,
-    WorkItemDetails,
+    PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems, THREAD_STATUSES, Thread,
+    WorkItem, WorkItemDetails, thread_status_label,
 };
 pub use pull_requests::{is_approved, is_reviewer_policy};
 

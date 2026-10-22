@@ -96,8 +96,8 @@ pub enum Popup {
     Complete(CompletePicker),
     Tags(TagPicker),
     Sprint(SprintPicker),
-    Comment {
-        work_item_id: u32,
+    Text {
+        target: TextTarget,
         text: TextInput,
     },
     Sort {
@@ -118,6 +118,21 @@ pub enum Popup {
     Vote {
         pr: Box<PullRequest>,
         selection: Selection,
+    },
+    ThreadStatus {
+        pr: Box<PullRequest>,
+        thread_id: u32,
+        selection: Selection,
+    },
+}
+
+/// What a text popup writes to.
+pub enum TextTarget {
+    WorkItemComment(u32),
+    /// A reply to the thread, or a new thread without one.
+    PrThread {
+        pr: Box<PullRequest>,
+        thread_id: Option<u32>,
     },
 }
 

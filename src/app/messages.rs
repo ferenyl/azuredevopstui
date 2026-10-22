@@ -173,6 +173,15 @@ impl App {
                 if self.detail.as_ref().is_some_and(|d| d.is_pull_request(id)) {
                     match result {
                         Ok(info) => {
+                            self.detail_thread = self.detail_thread.and_then(|index| {
+                                let Some(DetailInfo::PullRequest(old)) = &self.detail_info else {
+                                    return Some(index);
+                                };
+                                let selected = old.ordered_threads().get(index).map(|t| t.id)?;
+                                info.ordered_threads()
+                                    .iter()
+                                    .position(|thread| thread.id == selected)
+                            });
                             self.detail_info = Some(DetailInfo::PullRequest(info));
                             self.load_images();
                         }

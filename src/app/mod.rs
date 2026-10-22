@@ -21,7 +21,7 @@ pub use action::{Action, HELP};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
     ColumnPicker, CompletePicker, Data, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS,
-    Panel, Popup, Signals, SortKind, SprintPicker, TagPicker,
+    Panel, Popup, Signals, SortKind, SprintPicker, TagPicker, TextTarget,
 };
 pub use text_input::TextInput;
 
@@ -64,6 +64,12 @@ pub struct App {
     pub detail_info: Option<DetailInfo>,
     pub detail_scroll: u16,
     pub detail_tab: DetailTab,
+    /// Selected thread, as an index into the threads in listed order.
+    pub detail_thread: Option<usize>,
+    /// The next scroll starts at the selected thread; drawn by the UI, which knows the rows.
+    pub scroll_to_thread: bool,
+    /// Row of the selected thread in the last drawn detail.
+    pub thread_row: std::cell::Cell<Option<u16>>,
     pub popup: Option<Popup>,
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
     sprint: Option<String>,
@@ -107,6 +113,9 @@ impl App {
             detail_info: None,
             detail_scroll: 0,
             detail_tab: DetailTab::default(),
+            detail_thread: None,
+            scroll_to_thread: false,
+            thread_row: std::cell::Cell::new(None),
             popup: None,
             show_help: false,
             last_updated: None,

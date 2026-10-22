@@ -280,6 +280,70 @@ impl ProjectApi {
             .await
     }
 
+    /// Starts a thread that is not tied to a file.
+    pub async fn create_thread(&self, pr: &PullRequest, content: &str) -> Result<()> {
+        let body = json!({
+            "comments": [{ "parentCommentId": 0, "content": content, "commentType": 1 }],
+            "status": "active"
+        });
+        self.post_thread(pr, &["threads"], &body).await
+    }
+
+    /// Replies to the first comment of a thread.
+    pub async fn reply(
+        &self,
+        pr: &PullRequest,
+        thread_id: u32,
+        parent_comment_id: u32,
+        content: &str,
+    ) -> Result<()> {
+        let body = json!({
+            "parentCommentId": parent_comment_id,
+            "content": content,
+            "commentType": 1
+        });
+        let thread_id = thread_id.to_string();
+        self.post_thread(pr, &["threads", &thread_id, "comments"], &body)
+            .await
+    }
+
+    /// `status` is one of [`THREAD_STATUSES`].
+    pub async fn set_thread_status(
+        &self,
+        pr: &PullRequest,
+        thread_id: u32,
+        status: &str,
+    ) -> Result<()> {
+        let id = pr.pull_request_id.to_string();
+        let thread_id = thread_id.to_string();
+        let path = [&self.pr_path(pr, &id)[..], &["threads", &thread_id]].concat();
+        let _: Value = self
+            .client
+            .patch(
+                &self.client.urls.dev_azure,
+                &path,
+                &json!({ "status": status }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn post_thread(&self, pr: &PullRequest, tail: &[&str], body: &Value) -> Result<()> {
+        let id = pr.pull_request_id.to_string();
+        let path = [&self.pr_path(pr, &id)[..], tail].concat();
+        let _: Value = self
+            .client
+            .post_versioned(
+                &self.client.urls.dev_azure,
+                &path,
+                &[],
+                body,
+                super::API_VERSION,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Approval and review signals of someone else's PR. Policies are loaded again only when the PR
     /// changed, threads also once they are older than [`THREADS_MAX_AGE`].
     async fn review(
@@ -1180,6 +1244,84 @@ mod tests {
         let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
 
         assert!(client.vote(&pr, "me", 10).await.is_err());
+    }
+
+    const THREADS: &str =
+        "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/7/threads";
+
+    async fn expect_thread_call(server: &MockServer, verb: &str, target: &str, body: Value) {
+        Mock::given(method(verb))
+            .and(path(target))
+            .and(body_json(body))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 1 })))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn create_thread_posts_an_active_thread() {
+        let server = MockServer::start().await;
+        expect_thread_call(
+            &server,
+            "POST",
+            THREADS,
+            json!({
+                "comments": [{ "parentCommentId": 0, "content": "Hi", "commentType": 1 }],
+                "status": "active"
+            }),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        client.create_thread(&pr, "Hi").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reply_posts_to_the_thread_under_its_first_comment() {
+        let server = MockServer::start().await;
+        expect_thread_call(
+            &server,
+            "POST",
+            &format!("{THREADS}/3/comments"),
+            json!({ "parentCommentId": 2, "content": "Done", "commentType": 1 }),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        client.reply(&pr, 3, 2, "Done").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_thread_status_patches_the_thread() {
+        let server = MockServer::start().await;
+        expect_thread_call(
+            &server,
+            "PATCH",
+            &format!("{THREADS}/3"),
+            json!({ "status": "fixed" }),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        client.set_thread_status(&pr, 3, "fixed").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_thread_call_is_an_error_and_not_retried() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        assert!(client.create_thread(&pr, "Hi").await.is_err());
     }
 
     #[tokio::test]
