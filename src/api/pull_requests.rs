@@ -5,8 +5,8 @@ use futures::{StreamExt, stream};
 use serde_json::{Value, json};
 
 use super::models::{
-    Comment, Identity, ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestDetails,
-    PullRequestStatus, ResourceRef, ReviewSignals, Thread,
+    Comment, Identity, ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestChecks,
+    PullRequestDetails, PullRequestStatus, ResourceRef, ReviewSignals, Thread,
 };
 use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps, is_unauthorized};
 use crate::config::{MergeStrategy, OtherPrsFilter};
@@ -111,6 +111,33 @@ impl ProjectApi {
             statuses: latest_statuses(statuses.value),
             policies,
             work_items: self.work_items_batch(&ids).await?,
+        })
+    }
+
+    /// The threads, checks and work item links behind the markers, without the full PR and items.
+    pub async fn pull_request_checks(&self, pr: &PullRequest) -> Result<PullRequestChecks> {
+        let id = pr.pull_request_id.to_string();
+        let pr_path = self.pr_path(pr, &id);
+        let statuses_path = [&pr_path[..], &["statuses"]].concat();
+        let work_items_path = [&pr_path[..], &["workitems"]].concat();
+        let (threads, statuses, policies, work_items): (
+            _,
+            ListResponse<PullRequestStatus>,
+            _,
+            ListResponse<ResourceRef>,
+        ) = tokio::try_join!(
+            self.threads(pr),
+            self.client
+                .get(&self.client.urls.dev_azure, &statuses_path, &[]),
+            self.policy_evaluations(pr),
+            self.client
+                .get(&self.client.urls.dev_azure, &work_items_path, &[]),
+        )?;
+        Ok(PullRequestChecks {
+            threads: visible_threads(threads),
+            statuses: latest_statuses(statuses.value),
+            policies,
+            has_work_items: !work_items.value.is_empty(),
         })
     }
 

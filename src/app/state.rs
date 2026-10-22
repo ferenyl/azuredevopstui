@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
-    Build, ColumnTarget, Iteration, Mention, PullRequest, PullRequestDetails, WorkItem,
+    Build, ColumnTarget, Iteration, Mention, PullRequest, PullRequestChecks, PullRequestDetails, WorkItem,
     WorkItemDetails, compare_timestamps, is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
@@ -289,18 +289,18 @@ pub struct Signals {
 }
 
 impl Signals {
-    pub fn new(pr: &PullRequest, details: &PullRequestDetails) -> Self {
-        let failed_policy = details.policies.iter().any(|policy| {
+    pub fn new(pr: &PullRequest, checks: &PullRequestChecks) -> Self {
+        let failed_policy = checks.policies.iter().any(|policy| {
             policy.configuration.is_blocking
                 && !is_reviewer_policy(policy)
                 && matches!(policy.status.as_str(), "rejected" | "broken")
         });
-        let failed_status = details
+        let failed_status = checks
             .statuses
             .iter()
             .any(|status| matches!(status.state.as_deref(), Some("failed" | "error")));
         let mut signals = Self {
-            unresolved: details
+            unresolved: checks
                 .threads
                 .iter()
                 .filter(|thread| matches!(thread.status.as_deref(), Some("active" | "pending")))
@@ -312,16 +312,16 @@ impl Signals {
             unlinked: false,
             ready: false,
         };
-        let blocking_approved = details
+        let blocking_approved = checks
             .policies
             .iter()
             .filter(|policy| policy.configuration.is_blocking)
             .all(|policy| policy.status == "approved");
         signals.ready = !pr.is_draft
             && blocking_approved
-            && is_approved(pr, &details.policies)
+            && is_approved(pr, &checks.policies)
             && signals == Self::default();
-        signals.unlinked = details.work_items.is_empty();
+        signals.unlinked = !checks.has_work_items;
         signals
     }
 }
@@ -886,13 +886,12 @@ mod tests {
         assert_eq!(Panel::Detail.sort_kind(), None);
     }
 
-    fn details(threads: Value, statuses: Value, policies: Value) -> PullRequestDetails {
-        PullRequestDetails {
-            description: None,
+    fn details(threads: Value, statuses: Value, policies: Value) -> PullRequestChecks {
+        PullRequestChecks {
             threads: serde_json::from_value(threads).unwrap(),
             statuses: serde_json::from_value(statuses).unwrap(),
             policies: serde_json::from_value(policies).unwrap(),
-            work_items: vec![work_item(9, "Linked", "User Story", "Active")],
+            has_work_items: true,
         }
     }
 
