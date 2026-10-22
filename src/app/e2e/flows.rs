@@ -55,6 +55,22 @@ async fn startup_loads_pull_requests_work_items_and_builds() {
 }
 
 #[tokio::test]
+async fn pull_request_rejected_by_a_reviewer_is_listed_not_approved() {
+    let mut harness = connected().await;
+    harness
+        .wait_for(|app| {
+            app.data
+                .other_prs()
+                .is_some_and(|prs| prs.iter().any(|pr| pr.pull_request_id == 303))
+        })
+        .await;
+
+    let shown = harness.app.data.shown_other_prs().unwrap_or_default();
+    assert!(shown.iter().any(|pr| pr.pull_request_id == 303));
+    harness.wait_for_text("Reviewer rejected CSV export").await;
+}
+
+#[tokio::test]
 async fn opening_a_pull_request_loads_its_details() {
     let mut harness = connected().await;
     select(&mut harness, Panel::MyPrs, 101);
