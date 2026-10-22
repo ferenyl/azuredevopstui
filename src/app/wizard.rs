@@ -114,15 +114,17 @@ impl App {
             return;
         };
         match step {
-            SetupStep::EnterPat { input, .. } if !input.trim().is_empty() => {
-                let pat = input.trim().to_string();
+            SetupStep::EnterPat { input, .. } if !input.as_str().trim().is_empty() => {
+                let pat = input.as_str().trim().to_string();
                 self.set_step(SetupStep::Loading("Saving token…"));
                 self.spawn(async move {
                     Message::Authenticated(Auth::with_new_pat(pat).await.map(Some))
                 });
             }
-            SetupStep::EnterOrganization(input) if !organization_name(&input).is_empty() => {
-                self.load_projects(organization_name(&input).to_string());
+            SetupStep::EnterOrganization(input)
+                if !organization_name(input.as_str()).is_empty() =>
+            {
+                self.load_projects(organization_name(input.as_str()).to_string());
             }
             SetupStep::SelectOrganization(selection) => match selection.current() {
                 Some(organization) => self.load_projects(organization.to_string()),

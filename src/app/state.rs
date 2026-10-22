@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::setup::Selection;
+use super::text_input::TextInput;
 use crate::api::{
     Build, ColumnTarget, Iteration, Mention, PullRequest, PullRequestDetails, WorkItem,
     WorkItemDetails, is_approved, is_reviewer_policy,
@@ -97,7 +98,7 @@ pub enum Popup {
     Sprint(SprintPicker),
     Comment {
         work_item_id: u32,
-        text: String,
+        text: TextInput,
     },
     Sort {
         kind: SortKind,
@@ -112,7 +113,7 @@ pub enum Popup {
         checked: Vec<bool>,
     },
     BuildFilter {
-        text: String,
+        text: TextInput,
     },
 }
 
@@ -135,7 +136,7 @@ pub struct TagPicker {
     pub current: Vec<String>,
     /// Existing tags, most recently used first.
     pub tags: Vec<String>,
-    pub query: String,
+    pub query: TextInput,
     /// Matching tags on the item, then other matching tags, then the query when it would be a new tag.
     pub selection: Selection,
 }
@@ -146,7 +147,7 @@ impl TagPicker {
             work_item_id,
             current,
             tags,
-            query: String::new(),
+            query: TextInput::default(),
             selection: Selection::new(Vec::new()),
         };
         picker.filter();
@@ -154,7 +155,7 @@ impl TagPicker {
     }
 
     pub fn filter(&mut self) {
-        let query = self.query.trim().to_lowercase();
+        let query = self.query.as_str().trim().to_lowercase();
         let others = self.tags.iter().filter(|tag| !self.has(tag));
         let mut items: Vec<String> = self
             .current
@@ -165,7 +166,7 @@ impl TagPicker {
             .collect();
         let exists = self.tags.iter().any(|tag| tag.to_lowercase() == query);
         if !query.is_empty() && !exists && !self.has(&query) {
-            items.push(self.query.trim().to_string());
+            items.push(self.query.as_str().trim().to_string());
         }
         self.selection = Selection::new(items);
     }
@@ -196,7 +197,7 @@ impl TagPicker {
 pub struct SprintPicker {
     /// Furthest in the future first.
     pub sprints: Vec<Iteration>,
-    pub query: String,
+    pub query: TextInput,
     /// Paths of the sprints matching the query.
     pub selection: Selection,
 }
@@ -205,7 +206,7 @@ impl SprintPicker {
     pub fn new(sprints: Vec<Iteration>, selected: Option<&str>) -> Self {
         let mut picker = Self {
             sprints,
-            query: String::new(),
+            query: TextInput::default(),
             selection: Selection::new(Vec::new()),
         };
         picker.filter();
@@ -218,7 +219,7 @@ impl SprintPicker {
     }
 
     pub fn filter(&mut self) {
-        let query = self.query.trim().to_lowercase();
+        let query = self.query.as_str().trim().to_lowercase();
         let items = self
             .sprints
             .iter()

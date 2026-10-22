@@ -1,14 +1,15 @@
+use super::TextInput;
 use crate::config::Config;
 
 pub enum SetupStep {
     Loading(&'static str),
     EnterPat {
-        input: String,
+        input: TextInput,
         error: Option<String>,
         /// Opened from the main view; cancel returns there.
         cancelable: bool,
     },
-    EnterOrganization(String),
+    EnterOrganization(TextInput),
     SelectOrganization(Selection),
     SelectProject {
         organization: String,
@@ -68,7 +69,7 @@ impl SetupStep {
         }
     }
 
-    pub fn input_mut(&mut self) -> Option<&mut String> {
+    pub fn input_mut(&mut self) -> Option<&mut TextInput> {
         match self {
             Self::EnterPat { input, .. } | Self::EnterOrganization(input) => Some(input),
             _ => None,
@@ -155,16 +156,16 @@ mod tests {
     #[test]
     fn input_steps() {
         let mut pat = SetupStep::EnterPat {
-            input: String::new(),
+            input: TextInput::default(),
             error: None,
             cancelable: false,
         };
-        let mut organization = SetupStep::EnterOrganization(String::new());
+        let mut organization = SetupStep::EnterOrganization(TextInput::default());
 
         assert!(pat.is_input());
         assert!(organization.is_input());
-        pat.input_mut().unwrap().push('x');
-        assert!(matches!(pat, SetupStep::EnterPat { input, .. } if input == "x"));
+        pat.input_mut().unwrap().insert('x');
+        assert!(matches!(pat, SetupStep::EnterPat { input, .. } if input.as_str() == "x"));
         assert!(organization.input_mut().is_some());
         assert!(!SetupStep::Loading("Signing in…").is_input());
     }

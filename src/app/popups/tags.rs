@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 
 use crate::api::WorkItem;
 use crate::app::message::Message;
@@ -71,19 +71,11 @@ impl App {
 impl TagPicker {
     /// Edits the query; true when the key was consumed.
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
-        match key.code {
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.query.push(c);
-                self.filter();
-                true
-            }
-            KeyCode::Backspace => {
-                self.query.pop();
-                self.filter();
-                true
-            }
-            _ => false,
+        let taken = self.query.handle_key(key, false);
+        if taken {
+            self.filter();
         }
+        taken
     }
 }
 
@@ -142,6 +134,6 @@ mod tests {
         let taken = picker.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL));
 
         assert!(!taken);
-        assert_eq!(picker.query, "");
+        assert_eq!(picker.query.as_str(), "");
     }
 }

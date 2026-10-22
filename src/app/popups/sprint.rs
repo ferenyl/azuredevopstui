@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 
 use crate::app::{App, SprintPicker};
 
@@ -18,19 +18,11 @@ impl App {
 impl SprintPicker {
     /// Edits the query; true when the key was consumed.
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
-        match key.code {
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.query.push(c);
-                self.filter();
-                true
-            }
-            KeyCode::Backspace => {
-                self.query.pop();
-                self.filter();
-                true
-            }
-            _ => false,
+        let taken = self.query.handle_key(key, false);
+        if taken {
+            self.filter();
         }
+        taken
     }
 }
 
@@ -66,7 +58,7 @@ mod tests {
         let Some(Popup::Sprint(picker)) = &app.popup else {
             panic!("sprint picker not open");
         };
-        assert_eq!(picker.query, "1");
+        assert_eq!(picker.query.as_str(), "1");
         assert_eq!(picker.selection.items, ["Team\\Sprint 1"]);
     }
 

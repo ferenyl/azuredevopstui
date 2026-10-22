@@ -4,7 +4,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListState, Paragraph, Wrap};
 
-use crate::app::{App, HELP, Selection};
+use crate::app::{App, HELP, Selection, TextInput};
 
 const KEY_WIDTH: usize = 15;
 
@@ -73,10 +73,12 @@ pub fn render_picker(frame: &mut Frame, app: &App, title: &str, selection: &Sele
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-pub fn render_text_input(frame: &mut Frame, app: &App, title: &str, text: &str, area: Rect) {
+pub fn render_text_input(frame: &mut Frame, app: &App, title: &str, input: &TextInput, area: Rect) {
     const WIDTH: u16 = 60;
     let theme = &app.theme;
-    let lines: u16 = format!("{text}▏")
+    let (before, after) = input.split();
+    let text = format!("{before}▏{after}");
+    let lines: u16 = text
         .split('\n')
         .map(|line| (line.chars().count() as u16).div_ceil(WIDTH - 2).max(1))
         .sum();
@@ -87,9 +89,7 @@ pub fn render_text_input(frame: &mut Frame, app: &App, title: &str, text: &str, 
         .title_style(Style::new().fg(theme.title))
         .border_style(Style::new().fg(theme.border_focused))
         .style(Style::new().bg(theme.background).fg(theme.foreground));
-    let input = Paragraph::new(format!("{text}▏"))
-        .block(block)
-        .wrap(Wrap { trim: false });
+    let input = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
     frame.render_widget(Clear, area);
     frame.render_widget(input, area);
 }

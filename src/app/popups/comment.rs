@@ -1,19 +1,17 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
 use crate::app::message::Message;
-use crate::app::{App, Popup};
+use crate::app::{App, Popup, TextInput};
 
 impl App {
     pub(in crate::app) fn open_comment(&mut self) {
         if let Some(item) = self.current_work_item() {
             self.popup = Some(Popup::Comment {
                 work_item_id: item.id,
-                text: String::new(),
+                text: TextInput::default(),
             });
         }
     }
 
-    pub(in crate::app) fn confirm_comment(&mut self, id: u32, text: String) {
+    pub(in crate::app) fn confirm_comment(&mut self, id: u32, text: &str) {
         let text = text.trim();
         if text.is_empty() {
             return;
@@ -32,69 +30,12 @@ impl App {
     }
 }
 
-/// Edits the comment; shift/alt+enter adds a line. True when the key was consumed.
-pub(super) fn handle_key(text: &mut String, key: KeyEvent) -> bool {
-    match key.code {
-        KeyCode::Enter
-            if key
-                .modifiers
-                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
-        {
-            text.push('\n');
-            true
-        }
-        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-            text.push(c);
-            true
-        }
-        KeyCode::Backspace => {
-            text.pop();
-            true
-        }
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crossterm::event::KeyCode;
 
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-    use crate::app::Popup;
     use crate::app::test_helpers::{app, press};
-
-    #[test]
-    fn shift_or_alt_enter_adds_a_line() {
-        let mut text = String::from("a");
-
-        assert!(handle_key(
-            &mut text,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)
-        ));
-        assert!(handle_key(
-            &mut text,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)
-        ));
-
-        assert_eq!(text, "a\n\n");
-    }
-
-    #[test]
-    fn plain_enter_and_ctrl_keys_are_not_taken() {
-        let mut text = String::from("a");
-
-        assert!(!handle_key(
-            &mut text,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
-        ));
-        assert!(!handle_key(
-            &mut text,
-            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)
-        ));
-
-        assert_eq!(text, "a");
-    }
+    use crate::app::{Popup, TextInput};
 
     #[test]
     fn m_opens_comment_for_selected_work_item() {
@@ -105,7 +46,7 @@ mod tests {
 
         assert!(matches!(
             &app.popup,
-            Some(Popup::Comment { work_item_id: 10, text }) if text.is_empty()
+            Some(Popup::Comment { work_item_id: 10, text }) if text.as_str().is_empty()
         ));
     }
 
@@ -114,7 +55,7 @@ mod tests {
         let mut app = app();
         app.popup = Some(Popup::Comment {
             work_item_id: 10,
-            text: String::new(),
+            text: TextInput::default(),
         });
         press(&mut app, KeyCode::Char(' '));
         press(&mut app, KeyCode::Backspace);

@@ -1,23 +1,14 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 
-use super::{Action, App, Detail, LEFT_PANELS, Panel, Popup, Retry, Screen, SetupStep};
+use super::{Action, App, Detail, LEFT_PANELS, Panel, Popup, Retry, Screen, SetupStep, TextInput};
 
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) {
         if let Screen::Setup(step) = &mut self.screen
             && let Some(input) = step.input_mut()
+            && input.handle_key(key, false)
         {
-            match key.code {
-                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    input.push(c);
-                    return;
-                }
-                KeyCode::Backspace => {
-                    input.pop();
-                    return;
-                }
-                _ => {}
-            }
+            return;
         }
         if self.handle_popup_key(key) {
             return;
@@ -51,7 +42,7 @@ impl App {
             Action::Help => self.show_help = matches!(self.screen, Screen::Main),
             Action::ChangeToken => match self.screen {
                 Screen::Main => self.set_step(SetupStep::EnterPat {
-                    input: String::new(),
+                    input: TextInput::default(),
                     error: None,
                     cancelable: true,
                 }),
@@ -59,7 +50,7 @@ impl App {
                     retry: Retry::Authenticate,
                     ..
                 }) if self.can_enter_pat() => self.set_step(SetupStep::EnterPat {
-                    input: String::new(),
+                    input: TextInput::default(),
                     error: None,
                     cancelable: false,
                 }),
@@ -202,25 +193,25 @@ impl App {
     pub(crate) fn handle_paste(&mut self, pasted: &str) {
         let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
         if let Some(Popup::Comment { text, .. }) = &mut self.popup {
-            text.push_str(&pasted);
+            text.insert_str(&pasted);
             return;
         }
         let line = pasted.lines().next().unwrap_or_default();
         match &mut self.popup {
-            Some(Popup::BuildFilter { text }) => text.push_str(line),
+            Some(Popup::BuildFilter { text }) => text.insert_str(line),
             Some(Popup::Tags(picker)) => {
-                picker.query.push_str(line);
+                picker.query.insert_str(line);
                 picker.filter();
             }
             Some(Popup::Sprint(picker)) => {
-                picker.query.push_str(line);
+                picker.query.insert_str(line);
                 picker.filter();
             }
             _ => {
                 if let Screen::Setup(step) = &mut self.screen
                     && let Some(input) = step.input_mut()
                 {
-                    input.push_str(line);
+                    input.insert_str(line);
                 }
             }
         }
@@ -233,7 +224,7 @@ mod tests {
 
     use crate::app::message::Message;
     use crate::app::test_helpers::{app, ctrl, open_pull_request, press};
-    use crate::app::{App, DetailTab, Panel, Popup, Screen, SetupStep};
+    use crate::app::{App, DetailTab, Panel, Popup, Screen, SetupStep, TextInput};
     use crate::test_support::pull_request;
 
     #[test]
@@ -380,8 +371,66 @@ mod tests {
 
         assert!(!app.should_quit);
         assert!(
-            matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input == "qj")
+            matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input.as_str() == "qj")
         );
+    }
+
+    #[test]
+    fn cursor_keys_edit_mid_text_in_setup_input() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('T'));
+        for c in "ac".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+
+        press(&mut app, KeyCode::Left);
+        press(&mut app, KeyCode::Char('b'));
+        press(&mut app, KeyCode::Home);
+        press(&mut app, KeyCode::Delete);
+
+        assert!(
+            matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input.split() == ("", "bc"))
+        );
+    }
+
+    #[test]
+    fn cursor_keys_edit_mid_text_in_picker_query_and_refilter() {
+        let mut app = app();
+        app.popup = Some(Popup::Tags(crate::app::TagPicker::new(
+            10,
+            Vec::new(),
+            vec!["backend".into(), "frontend".into()],
+        )));
+        for c in "bk".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+
+        press(&mut app, KeyCode::Left);
+        press(&mut app, KeyCode::Char('a'));
+        press(&mut app, KeyCode::Char('c'));
+
+        let Some(Popup::Tags(picker)) = &app.popup else {
+            panic!("tag picker not open");
+        };
+        assert_eq!(picker.query.as_str(), "back");
+        assert_eq!(picker.selection.items, ["backend", "back"]);
+    }
+
+    #[test]
+    fn paste_inserts_at_the_cursor() {
+        let mut app = app();
+        app.popup = Some(Popup::Comment {
+            work_item_id: 10,
+            text: TextInput::new("ad"),
+        });
+        press(&mut app, KeyCode::Left);
+
+        app.handle_paste("b\nc");
+
+        assert!(matches!(
+            &app.popup,
+            Some(Popup::Comment { text, .. }) if text.split() == ("ab\nc", "d")
+        ));
     }
 
     #[test]
@@ -389,7 +438,7 @@ mod tests {
         let mut app = app();
         app.popup = Some(Popup::Comment {
             work_item_id: 10,
-            text: String::new(),
+            text: TextInput::default(),
         });
 
         app.handle_paste("# Title\r\n\r\n- q item\r- j item\n```rust\nfn x() {}\n```");
@@ -398,7 +447,7 @@ mod tests {
         assert!(matches!(
             &app.popup,
             Some(Popup::Comment { text, .. })
-                if text == "# Title\n\n- q item\n- j item\n```rust\nfn x() {}\n```"
+                if text.as_str() == "# Title\n\n- q item\n- j item\n```rust\nfn x() {}\n```"
         ));
     }
 
@@ -411,7 +460,7 @@ mod tests {
 
         assert!(!app.should_quit);
         assert!(
-            matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input == "token")
+            matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input.as_str() == "token")
         );
     }
 

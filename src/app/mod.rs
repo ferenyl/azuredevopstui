@@ -10,6 +10,7 @@ mod setup;
 mod state;
 #[cfg(test)]
 mod test_helpers;
+mod text_input;
 mod toolbar;
 mod wizard;
 
@@ -19,6 +20,7 @@ pub use state::{
     ColumnPicker, CompletePicker, Data, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS,
     Panel, Popup, Signals, SortKind, SprintPicker, TagPicker,
 };
+pub use text_input::TextInput;
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};

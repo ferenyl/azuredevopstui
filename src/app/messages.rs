@@ -5,7 +5,9 @@ use crate::api::AdoClient;
 use crate::auth::Auth;
 
 use super::message::Message;
-use super::{App, DetailInfo, Popup, Retry, Screen, Selection, SetupStep, Signals, SprintPicker};
+use super::{
+    App, DetailInfo, Popup, Retry, Screen, Selection, SetupStep, Signals, SprintPicker, TextInput,
+};
 
 impl App {
     pub(super) fn handle_message(&mut self, message: Message) {
@@ -20,7 +22,7 @@ impl App {
                 self.continue_setup();
             }
             Message::Authenticated(Ok(None)) => self.set_step(SetupStep::EnterPat {
-                input: String::new(),
+                input: TextInput::default(),
                 error: None,
                 cancelable: false,
             }),
@@ -29,7 +31,7 @@ impl App {
                 self.set_step(SetupStep::SelectOrganization(Selection::new(organizations)));
             }
             Message::Organizations(_) => {
-                self.set_step(SetupStep::EnterOrganization(String::new()));
+                self.set_step(SetupStep::EnterOrganization(TextInput::default()));
             }
             Message::Projects {
                 organization,
@@ -220,7 +222,7 @@ impl App {
             self.client = None;
             tokio::spawn(Auth::forget_pat());
             self.set_step(SetupStep::EnterPat {
-                input: String::new(),
+                input: TextInput::default(),
                 error: Some("The saved token was rejected. Enter a new one.".into()),
                 cancelable: false,
             });

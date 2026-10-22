@@ -19,11 +19,13 @@ impl App {
             Some(Popup::Complete(picker)) => self.confirm_complete(picker),
             Some(Popup::Tags(picker)) => self.confirm_tags(picker),
             Some(Popup::Sprint(picker)) => self.confirm_sprint(picker),
-            Some(Popup::Comment { work_item_id, text }) => self.confirm_comment(work_item_id, text),
+            Some(Popup::Comment { work_item_id, text }) => {
+                self.confirm_comment(work_item_id, text.as_str())
+            }
             Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
             Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
             Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
-            Some(Popup::BuildFilter { text }) => self.confirm_build_filter(&text),
+            Some(Popup::BuildFilter { text }) => self.confirm_build_filter(text.as_str()),
             None => {}
         }
     }
@@ -33,8 +35,8 @@ impl App {
         match &mut self.popup {
             Some(Popup::Tags(picker)) => picker.handle_key(key),
             Some(Popup::Sprint(picker)) => picker.handle_key(key),
-            Some(Popup::Comment { text, .. }) => comment::handle_key(text, key),
-            Some(Popup::BuildFilter { text }) => build_filter::handle_key(text, key),
+            Some(Popup::Comment { text, .. }) => text.handle_key(key, true),
+            Some(Popup::BuildFilter { text }) => text.handle_key(key, false),
             _ => false,
         }
     }

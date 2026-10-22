@@ -83,7 +83,8 @@ pub fn render(frame: &mut Frame, app: &App) {
                 items,
                 selected: picker.selection.selected,
             };
-            let title = format!(" Tag #{}: {}▏", picker.work_item_id, picker.query);
+            let (before, after) = picker.query.split();
+            let title = format!(" Tag #{}: {before}▏{after}", picker.work_item_id);
             popup::render_picker(frame, app, &title, &selection, main);
         }
         Some(Popup::Sprint(picker)) => {
@@ -118,7 +119,8 @@ pub fn render(frame: &mut Frame, app: &App) {
                 items,
                 selected: picker.selection.selected,
             };
-            let title = format!(" Sprint: {}▏", picker.query);
+            let (before, after) = picker.query.split();
+            let title = format!(" Sprint: {before}▏{after}");
             popup::render_picker(frame, app, &title, &selection, main);
         }
         Some(Popup::Comment { work_item_id, text }) => {
@@ -840,7 +842,7 @@ mod tests {
 
     use super::*;
     use crate::api::{PullRequestDetails, WorkItemDetails};
-    use crate::app::{Retry, SetupStep};
+    use crate::app::{Retry, SetupStep, TextInput};
     use crate::test_support::{config, pull_request, work_item};
 
     fn text(lines: &[Line]) -> Vec<String> {
@@ -1134,7 +1136,7 @@ mod tests {
     fn pat_input_is_masked() {
         let mut app = App::new(None, None);
         app.screen = Screen::Setup(SetupStep::EnterPat {
-            input: "secret".into(),
+            input: TextInput::new("secret"),
             error: Some("The saved token was rejected.".into()),
             cancelable: false,
         });
@@ -1239,7 +1241,7 @@ mod tests {
         let mut app = main_app();
         app.popup = Some(Popup::Comment {
             work_item_id: 10,
-            text: String::new(),
+            text: TextInput::default(),
         });
 
         app.handle_paste("## Steps\r\n- open **list**\r\n- press q");
@@ -1249,5 +1251,18 @@ mod tests {
         assert!(screen.contains("## Steps"));
         assert!(screen.contains("- open **list**"));
         assert!(screen.contains("- press q▏"));
+    }
+
+    #[test]
+    fn cursor_is_drawn_inside_the_text() {
+        let mut app = main_app();
+        app.popup = Some(Popup::BuildFilter {
+            text: TextInput::new("abc"),
+        });
+        if let Some(Popup::BuildFilter { text }) = &mut app.popup {
+            text.left();
+        }
+
+        assert!(screen(&app).contains("ab▏c"));
     }
 }
