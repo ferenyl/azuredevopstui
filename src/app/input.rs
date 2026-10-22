@@ -105,6 +105,7 @@ impl App {
             | Action::NextThread
             | Action::PrevThread
             | Action::ThreadStatus
+            | Action::PrActions
                 if !matches!(self.screen, Screen::Main) => {}
             Action::OpenInBrowser => self.open_in_browser(),
             Action::Copy => self.copy_number(),
@@ -131,6 +132,7 @@ impl App {
                 self.move_thread(action == Action::NextThread)
             }
             Action::ThreadStatus => self.open_thread_status(),
+            Action::PrActions => self.open_pr_actions(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);

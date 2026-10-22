@@ -230,6 +230,13 @@ impl AdoClient {
         self.request(Method::PUT, url, Some(body), false).await
     }
 
+    /// DELETE; the body of the response, usually empty, is ignored.
+    async fn delete(&self, base: &str, segments: &[&str]) -> Result<()> {
+        let url = build_url(base, segments, &[], API_VERSION)?;
+        self.send_checked(Method::DELETE, &url, None, false).await?;
+        Ok(())
+    }
+
     async fn request<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -237,11 +244,26 @@ impl AdoClient {
         body: Option<&Value>,
         retry: bool,
     ) -> Result<T> {
-        let mut response = self.send(method.clone(), &url, body, retry).await?;
+        let response = self.send_checked(method, &url, body, retry).await?;
+        response
+            .json()
+            .await
+            .with_context(|| format!("invalid response: {}", url.path()))
+    }
+
+    /// Sends the request, refreshing the token once; unauthorized and failed statuses are errors.
+    async fn send_checked(
+        &self,
+        method: Method,
+        url: &Url,
+        body: Option<&Value>,
+        retry: bool,
+    ) -> Result<reqwest::Response> {
+        let mut response = self.send(method.clone(), url, body, retry).await?;
         if is_unauthorized_status(response.status()) && !self.auth.uses_pat() {
             tracing::info!(path = url.path(), "token rejected, refreshing");
             self.auth.refresh().await?;
-            response = self.send(method.clone(), &url, body, retry).await?;
+            response = self.send(method.clone(), url, body, retry).await?;
         }
         let status = response.status();
         tracing::debug!(%method, path = url.path(), %status, "request");
@@ -255,10 +277,7 @@ impl AdoClient {
                 None => bail!("{status}: {}", url.path()),
             }
         }
-        response
-            .json()
-            .await
-            .with_context(|| format!("invalid response: {}", url.path()))
+        Ok(response)
     }
 
     /// Sends the request; with `retry`, transient failures are retried up to `MAX_ATTEMPTS` times in all.
@@ -865,6 +884,34 @@ mod tests {
 
             assert!(result.is_err());
         }
+    }
+
+    #[tokio::test]
+    async fn delete_accepts_an_empty_body_and_is_not_retried() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/_apis/test"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/_apis/busy"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+
+        client
+            .delete(&server.uri(), &["_apis", "test"])
+            .await
+            .unwrap();
+        let busy = client.delete(&server.uri(), &["_apis", "busy"]).await;
+
+        assert!(busy.is_err());
     }
 
     #[tokio::test]

@@ -137,6 +137,70 @@ pub enum Popup {
         thread_id: u32,
         selection: Selection,
     },
+    /// What can be done to the pull request; `selection` lists the labels of `actions`.
+    PrActions {
+        pr: Box<PullRequest>,
+        actions: Vec<PrAction>,
+        selection: Selection,
+    },
+    /// The reviewers of `pr`, in order.
+    RemoveReviewer {
+        pr: Box<PullRequest>,
+        selection: Selection,
+    },
+}
+
+/// An entry of the pull request menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrAction {
+    Abandon,
+    Reactivate,
+    Publish,
+    MarkAsDraft,
+    EditTitle,
+    EditDescription,
+    AddReviewer,
+    RemoveReviewer,
+    LinkWorkItem,
+}
+
+impl PrAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Abandon => "Abandon",
+            Self::Reactivate => "Reactivate",
+            Self::Publish => "Publish (mark as ready)",
+            Self::MarkAsDraft => "Mark as draft",
+            Self::EditTitle => "Edit title",
+            Self::EditDescription => "Edit description",
+            Self::AddReviewer => "Add reviewer",
+            Self::RemoveReviewer => "Remove reviewer",
+            Self::LinkWorkItem => "Link work item",
+        }
+    }
+
+    /// The entries that make sense for `pr` as it is now.
+    pub fn of(pr: &PullRequest) -> Vec<Self> {
+        let mut actions = Vec::new();
+        match pr.status.as_str() {
+            "active" => {
+                actions.push(Self::Abandon);
+                actions.push(if pr.is_draft {
+                    Self::Publish
+                } else {
+                    Self::MarkAsDraft
+                });
+            }
+            "abandoned" => actions.push(Self::Reactivate),
+            _ => {}
+        }
+        actions.extend([Self::EditTitle, Self::EditDescription, Self::AddReviewer]);
+        if !pr.reviewers.is_empty() {
+            actions.push(Self::RemoveReviewer);
+        }
+        actions.push(Self::LinkWorkItem);
+        actions
+    }
 }
 
 /// What a text popup writes to.
@@ -147,6 +211,12 @@ pub enum TextTarget {
         pr: Box<PullRequest>,
         thread_id: Option<u32>,
     },
+    PrTitle(Box<PullRequest>),
+    PrDescription(Box<PullRequest>),
+    /// A name or email address of the new reviewer.
+    AddReviewer(Box<PullRequest>),
+    /// The id of the work item to link.
+    LinkWorkItem(Box<PullRequest>),
 }
 
 pub struct ColumnPicker {
@@ -262,6 +332,7 @@ pub enum ConfirmAction {
         options: CompletionOptions,
         auto_complete: bool,
     },
+    Abandon(Box<PullRequest>),
 }
 
 pub struct TagPicker {

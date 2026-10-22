@@ -145,6 +145,10 @@ impl App {
                 Ok(strategies) => self.open_complete_picker(pr, strategies),
                 Err(err) => self.report_error(err),
             },
+            Message::PrDescription { pr, result } => match result {
+                Ok(description) => self.open_description_editor(pr, description),
+                Err(err) => self.report_error(err),
+            },
             Message::PullRequestUpdated { id, reload, result } => match result {
                 Ok(()) => {
                     tracing::info!(id, "pull request updated");

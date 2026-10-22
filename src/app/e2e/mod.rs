@@ -6,6 +6,7 @@
 mod changes;
 mod completion;
 mod flows;
+mod lifecycle;
 mod links;
 mod notifications;
 mod threads;

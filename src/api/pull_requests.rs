@@ -320,6 +320,75 @@ impl ProjectApi {
         Ok(())
     }
 
+    pub async fn abandon(&self, pr: &PullRequest) -> Result<()> {
+        self.update_pull_request(pr, &json!({ "status": "abandoned" }))
+            .await
+    }
+
+    pub async fn reactivate(&self, pr: &PullRequest) -> Result<()> {
+        self.update_pull_request(pr, &json!({ "status": "active" }))
+            .await
+    }
+
+    /// Publishes a draft, or turns the pull request back into a draft.
+    pub async fn set_draft(&self, pr: &PullRequest, is_draft: bool) -> Result<()> {
+        self.update_pull_request(pr, &json!({ "isDraft": is_draft }))
+            .await
+    }
+
+    pub async fn set_title(&self, pr: &PullRequest, title: &str) -> Result<()> {
+        self.update_pull_request(pr, &json!({ "title": title }))
+            .await
+    }
+
+    /// The description as written; the PR lists cut it off.
+    pub async fn pull_request_description(&self, pr: &PullRequest) -> Result<String> {
+        let id = pr.pull_request_id.to_string();
+        let full: Value = self
+            .client
+            .get(&self.client.urls.dev_azure, &self.pr_path(pr, &id), &[])
+            .await?;
+        Ok(full["description"].as_str().unwrap_or_default().to_string())
+    }
+
+    pub async fn set_description(&self, pr: &PullRequest, description: &str) -> Result<()> {
+        self.update_pull_request(pr, &json!({ "description": description }))
+            .await
+    }
+
+    /// Adds the person `name` finds, e.g. an email address, as a reviewer without a vote.
+    pub async fn add_reviewer(&self, pr: &PullRequest, name: &str) -> Result<()> {
+        let id = self.identity_id(name).await?;
+        self.put_reviewer(pr, &id, &json!({ "vote": 0 })).await
+    }
+
+    pub async fn remove_reviewer(&self, pr: &PullRequest, reviewer_id: &str) -> Result<()> {
+        let id = pr.pull_request_id.to_string();
+        let path = [&self.pr_path(pr, &id)[..], &["reviewers", reviewer_id]].concat();
+        self.client.delete(&self.client.urls.dev_azure, &path).await
+    }
+
+    /// Links the pull request to a work item, which then lists it.
+    pub async fn link_work_item(&self, pr: &PullRequest, work_item_id: u32) -> Result<()> {
+        let artifact = format!(
+            "vstfs:///Git/PullRequestId/{}%2F{}%2F{}",
+            pr.repository.project.id, pr.repository.id, pr.pull_request_id
+        );
+        self.patch_work_item(
+            work_item_id,
+            vec![json!({
+                "op": "add",
+                "path": "/relations/-",
+                "value": {
+                    "rel": "ArtifactLink",
+                    "url": artifact,
+                    "attributes": { "name": "Pull Request" }
+                }
+            })],
+        )
+        .await
+    }
+
     /// Votes: 10 approved, 5 approved with suggestions, 0 none, -5 waiting for author, -10 rejected.
     pub async fn vote(&self, pr: &PullRequest, user_id: &str, vote: i32) -> Result<()> {
         self.put_reviewer(pr, user_id, &json!({ "vote": vote }))
@@ -1560,6 +1629,112 @@ mod tests {
         let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
 
         assert!(client.create_thread(&pr, "Hi").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_changes_patch_the_pull_request() {
+        let server = MockServer::start().await;
+        for body in [
+            json!({ "status": "abandoned" }),
+            json!({ "status": "active" }),
+            json!({ "isDraft": false }),
+            json!({ "isDraft": true }),
+            json!({ "title": "New title" }),
+            json!({ "description": "New\ntext" }),
+        ] {
+            expect_patch_of_7(&server, body).await;
+        }
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "me", "2026-10-01T10:00:00Z");
+
+        client.abandon(&pr).await.unwrap();
+        client.reactivate(&pr).await.unwrap();
+        client.set_draft(&pr, false).await.unwrap();
+        client.set_draft(&pr, true).await.unwrap();
+        client.set_title(&pr, "New title").await.unwrap();
+        client.set_description(&pr, "New\ntext").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn description_is_read_in_full_and_as_written() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(PR_7))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "description": "x".repeat(500) + "\n![a](b)"
+            })))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "me", "2026-10-01T10:00:00Z");
+
+        let description = client.pull_request_description(&pr).await.unwrap();
+
+        assert_eq!(description, "x".repeat(500) + "\n![a](b)");
+    }
+
+    #[tokio::test]
+    async fn add_reviewer_looks_up_the_identity_and_puts_it_without_a_vote() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/_apis/identities"))
+            .and(query_param("filterValue", "anna@example.com"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "value": [{ "id": "anna-id" }] })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path(format!("{PR_7}/reviewers/anna-id")))
+            .and(body_json(json!({ "vote": 0 })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "vote": 0 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "me", "2026-10-01T10:00:00Z");
+
+        client.add_reviewer(&pr, "anna@example.com").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn remove_reviewer_deletes_the_reviewer() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path(format!("{PR_7}/reviewers/anna-id")))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "me", "2026-10-01T10:00:00Z");
+
+        client.remove_reviewer(&pr, "anna-id").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn link_work_item_adds_an_artifact_link_to_the_work_item() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/12"))
+            .and(body_json(json!([{
+                "op": "add",
+                "path": "/relations/-",
+                "value": {
+                    "rel": "ArtifactLink",
+                    "url": "vstfs:///Git/PullRequestId/project-id%2Frepo-id%2F7",
+                    "attributes": { "name": "Pull Request" }
+                }
+            }])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 12 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "me", "2026-10-01T10:00:00Z");
+
+        client.link_work_item(&pr, 12).await.unwrap();
     }
 
     #[tokio::test]
