@@ -34,6 +34,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - Assign a work item to yourself.
   - Unassign yourself from a work item and pick its new board column in the same step.
   - Complete one of your PRs once it shows `✔`. You pick a merge strategy among the ones the branch policies allow, and the last one you used is preselected. `esc` cancels without completing.
+  - Vote on any PR with `v`: approve, approve with suggestions, wait for author, reject or reset your vote. Your current vote is preselected and `esc` cancels. The inbox entry "needs your vote" goes away once you voted.
 - **Sorting** per list type. The choice is saved to the config.
 - **Work item type filter**: pick which types (User Story, Bug, Feature, …) the work item lists show. The list of types comes from the project, and the choice is saved to the config.
 - **Auto refresh** at a configurable interval. The open detail view refreshes too.
@@ -436,6 +437,7 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `t` | Edit tags on your work item: type to search, `enter` adds the tag or removes it if it is already set (✓). A tag that does not exist is created |
 | `m` | Comment on a work item: type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels |
 | `c` | Complete your ready PR: pick the merge strategy, then `enter`. `esc` cancels and nothing is completed |
+| `v` | Vote on the PR: pick approve, approve with suggestions, wait for author, reject or reset vote, then `enter`. `esc` cancels and nothing is sent |
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `y` | Copy the PR (`!1234`) or work item (`#5678`) number |
 | `Y` | Copy the link to the PR, work item or pipeline run |
