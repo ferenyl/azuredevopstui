@@ -791,4 +791,96 @@ mod tests {
 
         assert!(comment.reactions.is_empty());
     }
+
+    #[tokio::test]
+    async fn iterations_list_newest_first() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/Team/_apis/work/teamsettings/iterations",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "Old", "path": "P\\Old", "attributes": { "startDate": "2026-01-01T00:00:00Z" } },
+                { "name": "New", "path": "P\\New", "attributes": { "startDate": "2026-03-01T00:00:00Z" } }
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let iterations = client.iterations().await.unwrap();
+
+        let names: Vec<_> = iterations.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["New", "Old"]);
+    }
+
+    #[tokio::test]
+    async fn mentioned_work_items_keep_unanswered_mentions() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/Team/_apis/wit/wiql"))
+            .and(body_string_contains("@RecentMentions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "workItems": [{ "id": 10 }, { "id": 11 }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(10, "Mentioned", "Task", "Active"),
+                work_item_json(11, "Answered", "Task", "Active")
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalCount": 1,
+                "comments": [{
+                    "createdBy": { "id": "other", "displayName": "Bo" },
+                    "createdDate": "2026-10-01T10:00:00Z",
+                    "text": "ping @<me-id>"
+                }]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/11/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalCount": 2,
+                "comments": [
+                    { "createdBy": { "id": "me-id", "displayName": "Me" },
+                      "createdDate": "2026-10-02T10:00:00Z", "text": "on it" },
+                    { "createdBy": { "id": "other", "displayName": "Bo" },
+                      "createdDate": "2026-10-01T10:00:00Z", "text": "ping @<me-id>" }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let mentions = client.mentioned_work_items("me-id").await.unwrap();
+
+        assert_eq!(mentions.len(), 1);
+        assert_eq!(mentions[0].item.id, 10);
+        assert_eq!(mentions[0].date, "2026-10-01T10:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn add_work_item_comment_posts_markdown() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .and(query_param("format", "markdown"))
+            .and(body_partial_json(json!({ "text": "hello" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 1 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        client.add_work_item_comment(10, "hello").await.unwrap();
+    }
 }

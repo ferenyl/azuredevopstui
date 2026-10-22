@@ -380,10 +380,11 @@ fn latest_statuses(mut statuses: Vec<PullRequestStatus>) -> Vec<PullRequestStatu
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use wiremock::matchers::{method, path, path_regex, query_param};
+    use wiremock::matchers::{body_json, method, path, path_regex, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+    use crate::api::models::CommitRef;
     use crate::test_support::{ids_of_prs, pull_request, pull_request_json};
 
     fn thread(value: Value) -> Thread {
@@ -615,5 +616,90 @@ mod tests {
                 .as_deref(),
             Some("CI")
         );
+    }
+
+    #[tokio::test]
+    async fn my_pull_requests_filter_by_creator() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/git/pullrequests"))
+            .and(query_param("searchCriteria.creatorId", "me"))
+            .and(query_param("searchCriteria.status", "active"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                pull_request_json(4, "Mine", "me", "2026-10-01T10:00:00Z")
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let prs = client.my_pull_requests("me").await.unwrap();
+
+        assert_eq!(ids_of_prs(&prs), [4]);
+    }
+
+    #[tokio::test]
+    async fn merge_strategies_follow_blocking_policy() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [{
+                "status": "approved",
+                "configuration": {
+                    "isBlocking": true,
+                    "type": { "displayName": "Require a merge strategy" },
+                    "settings": { "allowSquash": true }
+                }
+            }]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        let strategies = client.merge_strategies(&pr).await.unwrap();
+
+        assert_eq!(strategies, [MergeStrategy::Squash]);
+    }
+
+    #[tokio::test]
+    async fn complete_pull_request_patches_status_and_strategy() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path(
+                "/contoso/MyProject/_apis/git/repositories/repo-id/pullRequests/7",
+            ))
+            .and(body_json(json!({
+                "status": "completed",
+                "lastMergeSourceCommit": { "commitId": "abc" },
+                "completionOptions": { "mergeStrategy": "squash" }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let mut pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+        pr.last_merge_source_commit = Some(CommitRef {
+            commit_id: "abc".into(),
+        });
+
+        client
+            .complete_pull_request(&pr, MergeStrategy::Squash)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn complete_pull_request_needs_a_source_commit() {
+        let client = ProjectApi::with_base_url("http://127.0.0.1:1");
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        let err = client
+            .complete_pull_request(&pr, MergeStrategy::Squash)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "pull request has no source commit");
     }
 }

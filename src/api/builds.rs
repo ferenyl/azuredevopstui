@@ -155,3 +155,71 @@ fn is_live(build: &Build, live: &HashMap<String, HashSet<String>>) -> bool {
         .and_then(|repository| live.get(&repository.id))
         .is_none_or(|refs| refs.contains(&build.source_branch))
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+
+    fn build_json(id: u32, definition: u32, branch: &str, status: &str, result: &str) -> Value {
+        json!({
+            "id": id,
+            "buildNumber": format!("n{id}"),
+            "status": status,
+            "result": result,
+            "definition": { "id": definition, "name": format!("Pipeline {definition}") },
+            "sourceBranch": branch,
+            "repository": { "id": "repo", "type": "TfsGit" },
+            "queueTime": format!("2026-10-0{id}T10:00:00Z")
+        })
+    }
+
+    #[tokio::test]
+    async fn my_builds_use_latest_run_and_skip_deleted_branches() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/build/builds"))
+            .and(query_param("requestedFor", "me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                build_json(1, 1, "refs/heads/feature", "completed", "failed"),
+                build_json(2, 2, "refs/heads/gone", "completed", "succeeded")
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/git/repositories/repo/refs"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "value": [{ "name": "refs/heads/feature" }] })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/_apis/git/repositories/repo/pullrequests",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/build/builds"))
+            .and(query_param("definitions", "1"))
+            .and(query_param("branchName", "refs/heads/feature"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                build_json(9, 1, "refs/heads/feature", "completed", "succeeded")
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let builds = client.my_builds("me").await.unwrap();
+
+        let ids: Vec<_> = builds.iter().map(|build| build.id).collect();
+        assert_eq!(ids, [9]);
+    }
+}

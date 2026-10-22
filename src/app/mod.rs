@@ -208,6 +208,24 @@ fn stale_cells(buffer: &Buffer, areas: &[Rect]) -> Vec<(u16, u16, Cell)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::Auth;
+    use crate::test_support::config;
+
+    #[test]
+    fn api_needs_both_client_and_config() {
+        let mut app = App::new(None, None);
+        app.client = Some(AdoClient::new(Auth::from_pat("pat")));
+        app.sync_api();
+        assert!(app.api().is_none());
+
+        app.config = Some(Arc::new(config()));
+        app.sync_api();
+        assert!(app.api().is_some());
+
+        app.client = None;
+        app.sync_api();
+        assert!(app.api().is_none());
+    }
 
     #[test]
     fn stale_cells_skip_cells_covered_by_images() {

@@ -347,4 +347,90 @@ mod tests {
 
         client.unassign_work_item(5, &board, &target).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn board_columns_list_names_in_board_order() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/Team/_apis/work/backlogs"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    json!({ "value": [{ "name": "Stories", "type": "requirement" }] }),
+                ),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/Team/_apis/work/boards/Stories"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "columns": [{ "name": "New" }, { "name": "Done" }],
+                "fields": {
+                    "columnField": { "referenceName": "A" },
+                    "doneField": { "referenceName": "B" }
+                }
+            })))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let columns = client.board_columns().await.unwrap();
+
+        assert_eq!(columns, ["New", "Done"]);
+    }
+
+    #[tokio::test]
+    async fn tags_are_sorted_ignoring_case() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/tags"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "value": [{ "name": "beta" }, { "name": "Alpha" }] })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let tags = client.tags().await.unwrap();
+
+        assert_eq!(tags, ["Alpha", "beta"]);
+    }
+
+    #[tokio::test]
+    async fn set_work_item_tags_replaces_the_field() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
+            .and(body_json(json!([
+                { "op": "replace", "path": "/fields/System.Tags", "value": "a; b" }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        client
+            .set_work_item_tags(5, &["a".into(), "b".into()])
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_work_item_tags_removes_the_field_when_empty() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
+            .and(body_json(json!([
+                { "op": "remove", "path": "/fields/System.Tags" }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        client.set_work_item_tags(5, &[]).await.unwrap();
+    }
 }
