@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use futures::{StreamExt, future, stream};
+use futures::{StreamExt, TryStreamExt, stream};
 use serde_json::json;
 
 use super::models::{
@@ -7,7 +7,7 @@ use super::models::{
     PullRequest, Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails,
     WorkItemResponse, WorkItemState, WorkItemTypeCategory,
 };
-use super::{ProjectApi, is_unauthorized};
+use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, is_unauthorized};
 use crate::rich_text::RichText;
 
 const MAX_WORK_ITEMS: &str = "200";
@@ -153,20 +153,17 @@ impl ProjectApi {
     /// Linked pull requests that could be loaded; others are skipped.
     async fn linked_pull_requests(&self, relations: &[Relation]) -> Vec<PullRequest> {
         let links = pull_request_links(relations);
-        let results = future::join_all(
-            links
-                .iter()
-                .map(|(project, repository, id)| self.pull_request(project, repository, *id)),
-        )
-        .await;
-        results
-            .into_iter()
-            .filter_map(|result| {
-                result
+        stream::iter(links)
+            .map(|(project, repository, id)| async move {
+                self.pull_request(&project, &repository, id)
+                    .await
                     .inspect_err(|err| tracing::warn!("failed to load linked PR: {err:#}"))
                     .ok()
             })
+            .buffered(MAX_CONCURRENT_REQUESTS)
+            .filter_map(|pr| async move { pr })
             .collect()
+            .await
     }
 
     /// Open work items recently mentioning the user in a comment they have not answered.
@@ -187,7 +184,7 @@ impl ProjectApi {
                 let date = unanswered_mention(&comments.comments, user_id);
                 Ok(date.map(|date| Mention { item, date }))
             })
-            .buffered(8)
+            .buffered(MAX_CONCURRENT_REQUESTS)
             .collect()
             .await;
         let mut mentions = Vec::new();
@@ -290,8 +287,11 @@ impl ProjectApi {
             .closed_states
             .get_or_try_init(|| async {
                 let types = self.work_item_types().await?;
-                let lists =
-                    future::try_join_all(types.iter().map(|kind| self.type_states(kind))).await?;
+                let lists: Vec<Vec<WorkItemState>> = stream::iter(types.iter().cloned())
+                    .map(|kind| async move { self.type_states(&kind).await })
+                    .buffered(MAX_CONCURRENT_REQUESTS)
+                    .try_collect()
+                    .await?;
                 Ok::<_, anyhow::Error>(closed_state_names(lists.into_iter().flatten().collect()))
             })
             .await?;

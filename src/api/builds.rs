@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use futures::future;
+use futures::{StreamExt, stream};
 
-use super::ProjectApi;
 use super::models::{Build, ListResponse, Named, PullRequest};
+use super::{MAX_CONCURRENT_REQUESTS, ProjectApi};
 
 const MAX_BUILDS: &str = "1000";
 
@@ -33,15 +33,18 @@ impl ProjectApi {
         let builds = latest_branch_builds(builds.value);
         let live = self.live_refs(&builds).await;
         let builds = builds.into_iter().filter(|build| is_live(build, &live));
-        let mut builds: Vec<Build> = future::join_all(builds.map(|build| async {
-            self.latest_build(&build)
-                .await
-                .inspect_err(|err| tracing::warn!("failed to load latest build: {err:#}"))
-                .ok()
-                .flatten()
-                .unwrap_or(build)
-        }))
-        .await;
+        let mut builds: Vec<Build> = stream::iter(builds)
+            .map(|build| async {
+                self.latest_build(&build)
+                    .await
+                    .inspect_err(|err| tracing::warn!("failed to load latest build: {err:#}"))
+                    .ok()
+                    .flatten()
+                    .unwrap_or(build)
+            })
+            .buffered(MAX_CONCURRENT_REQUESTS)
+            .collect()
+            .await;
         builds.sort_by(|a, b| {
             b.failed()
                 .cmp(&a.failed())
@@ -59,17 +62,19 @@ impl ProjectApi {
             .filter(|repository| repository.kind == "TfsGit")
             .map(|repository| repository.id.as_str())
             .collect();
-        future::join_all(repositories.into_iter().map(|repository| async move {
-            self.repository_refs(repository)
-                .await
-                .inspect_err(|err| tracing::warn!("failed to load repository refs: {err:#}"))
-                .ok()
-                .map(|refs| (repository.to_string(), refs))
-        }))
-        .await
-        .into_iter()
-        .flatten()
-        .collect()
+        let repositories: Vec<String> = repositories.into_iter().map(str::to_string).collect();
+        stream::iter(repositories)
+            .map(|repository| async move {
+                self.repository_refs(&repository)
+                    .await
+                    .inspect_err(|err| tracing::warn!("failed to load repository refs: {err:#}"))
+                    .ok()
+                    .map(|refs| (repository, refs))
+            })
+            .buffered(MAX_CONCURRENT_REQUESTS)
+            .filter_map(|entry| async move { entry })
+            .collect()
+            .await
     }
 
     async fn repository_refs(&self, repository: &str) -> Result<HashSet<String>> {

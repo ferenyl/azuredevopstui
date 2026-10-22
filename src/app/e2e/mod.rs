@@ -135,6 +135,19 @@ impl MockAdo {
             .await;
     }
 
+    /// How many requests with `http_method` have reached a path ending in `suffix`.
+    pub async fn received(&self, http_method: &str, suffix: &str) -> usize {
+        self.server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|request| {
+                request.method.as_str() == http_method && request.url.path().ends_with(suffix)
+            })
+            .count()
+    }
+
     /// Mounts `mock` ahead of fixtures; its `expect` is verified when the test ends.
     pub async fn expect(&self, mock: MockBuilder, response: ResponseTemplate, times: u64) {
         mock.respond_with(response)
