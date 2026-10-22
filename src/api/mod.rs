@@ -21,6 +21,7 @@ use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
 use reqwest::{Method, StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use tokio::sync::Semaphore;
 
 use crate::auth::Auth;
 use crate::config::Config;
@@ -32,6 +33,10 @@ const VSSPS_DEV_AZURE: &str = "https://vssps.dev.azure.com";
 const MAX_DOWNLOAD_BYTES: u64 = 20 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// In-flight requests per fan-out (`buffered`), so one call cannot flood the client.
+const MAX_CONCURRENT_REQUESTS: usize = 8;
+/// In-flight requests across the whole client, however many calls and panels run at once.
+const CLIENT_CONCURRENCY: usize = 16;
 const MAX_ATTEMPTS: u32 = 3;
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
@@ -76,6 +81,7 @@ pub struct AdoClient {
     auth: Auth,
     urls: BaseUrls,
     backoff: Duration,
+    in_flight: Arc<Semaphore>,
 }
 
 /// Builds the shared HTTP client. `request_timeout` bounds each whole request, including the body.
@@ -95,6 +101,7 @@ impl AdoClient {
             auth,
             urls: BaseUrls::default(),
             backoff: BACKOFF_BASE,
+            in_flight: Arc::new(Semaphore::new(CLIENT_CONCURRENCY)),
         }
     }
 
@@ -109,6 +116,7 @@ impl AdoClient {
                 vssps_dev_azure: url.into(),
             },
             backoff: Duration::from_millis(1),
+            in_flight: Arc::new(Semaphore::new(CLIENT_CONCURRENCY)),
         }
     }
 
@@ -278,6 +286,12 @@ impl AdoClient {
         url: &Url,
         body: Option<&Value>,
     ) -> Result<reqwest::Response> {
+        // Held only while the request is on the wire, never across a retry sleep or by a caller waiting on sub-requests.
+        let _permit = self
+            .in_flight
+            .acquire()
+            .await
+            .expect("semaphore never closed");
         let is_json_patch = method == Method::PATCH && body.is_some_and(Value::is_array);
         let mut request = self.http.request(method, url.clone());
         if is_json_patch {
@@ -590,6 +604,49 @@ mod tests {
                 .downcast_ref::<reqwest::Error>()
                 .is_some_and(reqwest::Error::is_timeout)
         }));
+    }
+
+    #[tokio::test]
+    async fn client_bounds_requests_in_flight() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let current = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (server_current, server_peak) = (current.clone(), peak.clone());
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let (current, peak) = (server_current.clone(), server_peak.clone());
+                tokio::spawn(async move {
+                    let mut buffer = [0u8; 4096];
+                    let _ = socket.read(&mut buffer).await;
+                    peak.fetch_max(current.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    current.fetch_sub(1, Ordering::SeqCst);
+                    let _ = socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                        )
+                        .await;
+                });
+            }
+        });
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &url);
+
+        let results = futures::future::join_all(
+            (0..CLIENT_CONCURRENCY * 3).map(|_| client.get::<Value>(&url, &["_apis", "test"], &[])),
+        )
+        .await;
+
+        assert!(results.iter().all(Result::is_ok));
+        let peak = peak.load(Ordering::SeqCst);
+        assert!(
+            peak > 1 && peak <= CLIENT_CONCURRENCY,
+            "peak in flight: {peak}"
+        );
     }
 
     async fn serve_in_turn(
