@@ -18,6 +18,22 @@
           "type": "GitHub"
         },
         "queueTime": "2026-10-20T09:30:00Z"
+      },
+      {
+        "id": 502,
+        "buildNumber": "20261021.1",
+        "status": "completed",
+        "result": "failed",
+        "definition": {
+          "id": 8,
+          "name": "pr-validation"
+        },
+        "sourceBranch": "refs/pull/101/merge",
+        "repository": {
+          "id": "gh-orders",
+          "type": "GitHub"
+        },
+        "queueTime": "2026-10-21T09:30:00Z"
       }
     ]
   }

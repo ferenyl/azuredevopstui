@@ -1,17 +1,25 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
+use chrono::{DateTime, Duration, Utc};
 use futures::{StreamExt, stream};
 
-use super::models::{Build, ListResponse, Named, PullRequest};
+use super::models::{Build, ListResponse, Named};
 use super::{MAX_CONCURRENT_REQUESTS, ProjectApi};
 
 const MAX_BUILDS: &str = "1000";
+const BUILD_DAYS: i64 = 14;
 
 impl ProjectApi {
     /// The latest run per pipeline and branch that the user triggered, failed first, then newest.
-    /// Runs on deleted branches or closed pull requests are left out.
+    /// Only runs of the last 14 days count; runs on deleted branches and pull request runs are left out.
     pub async fn my_builds(&self, user_id: &str) -> Result<Vec<Build>> {
+        self.my_builds_since(user_id, Utc::now() - Duration::days(BUILD_DAYS))
+            .await
+    }
+
+    async fn my_builds_since(&self, user_id: &str, min_time: DateTime<Utc>) -> Result<Vec<Build>> {
+        let min_time = min_time.to_rfc3339();
         let builds: ListResponse<Build> = self
             .client
             .get(
@@ -25,6 +33,7 @@ impl ProjectApi {
                 ],
                 &[
                     ("requestedFor", user_id),
+                    ("minTime", min_time.as_str()),
                     ("queryOrder", "queueTimeDescending"),
                     ("$top", MAX_BUILDS),
                 ],
@@ -35,7 +44,7 @@ impl ProjectApi {
         let builds = builds.into_iter().filter(|build| is_live(build, &live));
         let mut builds: Vec<Build> = stream::iter(builds)
             .map(|build| async {
-                self.latest_build(&build)
+                self.latest_build(&build, &min_time)
                     .await
                     .inspect_err(|err| tracing::warn!("failed to load latest build: {err:#}"))
                     .ok()
@@ -53,7 +62,7 @@ impl ProjectApi {
         Ok(builds)
     }
 
-    /// Branches and active pull request merge refs per Azure Repos repository.
+    /// Branches per Azure Repos repository.
     /// Repositories whose refs fail to load are left out.
     async fn live_refs(&self, builds: &[Build]) -> HashMap<String, HashSet<String>> {
         let repositories: HashSet<&str> = builds
@@ -87,34 +96,19 @@ impl ProjectApi {
             repository,
         ];
         let refs_path = [&path[..], &["refs"]].concat();
-        let pull_requests_path = [&path[..], &["pullrequests"]].concat();
-        let (heads, pull_requests) = futures::try_join!(
-            self.client.get::<ListResponse<Named>>(
+        let heads: ListResponse<Named> = self
+            .client
+            .get(
                 &self.client.urls.dev_azure,
                 &refs_path,
                 &[("filter", "heads/")],
-            ),
-            self.client.get::<ListResponse<PullRequest>>(
-                &self.client.urls.dev_azure,
-                &pull_requests_path,
-                &[("searchCriteria.status", "active"), ("$top", "1000")],
-            ),
-        )?;
-        Ok(heads
-            .value
-            .into_iter()
-            .map(|head| head.name)
-            .chain(
-                pull_requests
-                    .value
-                    .into_iter()
-                    .map(|pr| format!("refs/pull/{}/merge", pr.pull_request_id)),
             )
-            .collect())
+            .await?;
+        Ok(heads.value.into_iter().map(|head| head.name).collect())
     }
 
     /// The newest run of the build's pipeline and branch, by anyone.
-    async fn latest_build(&self, build: &Build) -> Result<Option<Build>> {
+    async fn latest_build(&self, build: &Build, min_time: &str) -> Result<Option<Build>> {
         let definition = build.definition.id.to_string();
         let builds: ListResponse<Build> = self
             .client
@@ -130,6 +124,7 @@ impl ProjectApi {
                 &[
                     ("definitions", definition.as_str()),
                     ("branchName", build.source_branch.as_str()),
+                    ("minTime", min_time),
                     ("queryOrder", "queueTimeDescending"),
                     ("$top", "1"),
                 ],
@@ -139,20 +134,17 @@ impl ProjectApi {
     }
 }
 
-/// Keeps the first build per pipeline and branch or pull request.
+/// Keeps the first build per pipeline and branch.
 fn latest_branch_builds(builds: Vec<Build>) -> Vec<Build> {
     let mut seen = HashSet::new();
     builds
         .into_iter()
-        .filter(|build| {
-            build.source_branch.starts_with("refs/heads/")
-                || build.source_branch.starts_with("refs/pull/")
-        })
+        .filter(|build| build.source_branch.starts_with("refs/heads/"))
         .filter(|build| seen.insert((build.definition.id, build.source_branch.clone())))
         .collect()
 }
 
-/// Whether the build's branch or pull request still exists; unknown repositories count as live.
+/// Whether the build's branch still exists; unknown repositories count as live.
 fn is_live(build: &Build, live: &HashMap<String, HashSet<String>>) -> bool {
     build
         .repository
@@ -168,6 +160,12 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+
+    const MIN_TIME: &str = "2026-10-01T00:00:00+00:00";
+
+    fn min_time() -> DateTime<Utc> {
+        MIN_TIME.parse().unwrap()
+    }
 
     fn build_json(id: u32, definition: u32, branch: &str, status: &str, result: &str) -> Value {
         json!({
@@ -188,6 +186,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/contoso/MyProject/_apis/build/builds"))
             .and(query_param("requestedFor", "me"))
+            .and(query_param("minTime", MIN_TIME))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
                 build_json(1, 1, "refs/heads/feature", "completed", "failed"),
                 build_json(2, 2, "refs/heads/gone", "completed", "succeeded")
@@ -204,16 +203,10 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path(
-                "/contoso/MyProject/_apis/git/repositories/repo/pullrequests",
-            ))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
             .and(path("/contoso/MyProject/_apis/build/builds"))
             .and(query_param("definitions", "1"))
             .and(query_param("branchName", "refs/heads/feature"))
+            .and(query_param("minTime", MIN_TIME))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
                 build_json(9, 1, "refs/heads/feature", "completed", "succeeded")
             ]})))
@@ -222,9 +215,23 @@ mod tests {
             .await;
         let client = ProjectApi::with_base_url(&server.uri());
 
-        let builds = client.my_builds("me").await.unwrap();
+        let builds = client.my_builds_since("me", min_time()).await.unwrap();
 
         let ids: Vec<_> = builds.iter().map(|build| build.id).collect();
         assert_eq!(ids, [9]);
+    }
+
+    #[test]
+    fn pull_request_runs_are_dropped() {
+        let builds = [
+            build_json(1, 1, "refs/heads/feature", "completed", "failed"),
+            build_json(2, 1, "refs/pull/7/merge", "completed", "failed"),
+        ]
+        .map(|build| serde_json::from_value(build).unwrap());
+
+        let kept = latest_branch_builds(builds.into());
+
+        let ids: Vec<_> = kept.iter().map(|build| build.id).collect();
+        assert_eq!(ids, [1]);
     }
 }
