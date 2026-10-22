@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/contoso/project-other/_apis/git/repositories/repo-api/pullRequests/303/statuses",
+  "body": {
+    "value": [
+      {
+        "id": 1,
+        "state": "succeeded",
+        "context": {
+          "name": "build"
+        }
+      }
+    ]
+  }
+}

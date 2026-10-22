@@ -14,7 +14,8 @@
           "id": "repo-api",
           "name": "orders-api",
           "project": {
-            "id": "project-fabrikam"
+            "id": "project-fabrikam",
+            "name": "Fabrikam"
           }
         },
         "status": "active",
@@ -44,7 +45,8 @@
           "id": "repo-api",
           "name": "orders-api",
           "project": {
-            "id": "project-fabrikam"
+            "id": "project-fabrikam",
+            "name": "Fabrikam"
           }
         },
         "status": "active",
@@ -74,7 +76,8 @@
           "id": "repo-api",
           "name": "orders-api",
           "project": {
-            "id": "project-fabrikam"
+            "id": "project-other",
+            "name": "Other"
           }
         },
         "status": "active",
@@ -124,7 +127,7 @@
           {
             "id": "me-id",
             "displayName": "Mona Me",
-            "vote": 10,
+            "vote": -5,
             "isRequired": true
           }
         ]
@@ -155,7 +158,7 @@
           {
             "id": "me-id",
             "displayName": "Mona Me",
-            "vote": 10,
+            "vote": -5,
             "isRequired": true
           }
         ]

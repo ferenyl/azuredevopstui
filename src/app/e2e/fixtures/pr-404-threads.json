@@ -1,6 +1,6 @@
 {
   "method": "GET",
-  "path": "/contoso/Fabrikam/_apis/git/repositories/repo-api/pullRequests/404/threads",
+  "path": "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/404/threads",
   "body": {
     "value": [
       {
@@ -18,7 +18,7 @@
               "id": "me-id",
               "displayName": "Mona Me"
             },
-            "content": "Mona Me voted 10",
+            "content": "Mona Me voted -5",
             "publishedDate": "2026-10-21T10:00:00Z",
             "commentType": "system"
           }
