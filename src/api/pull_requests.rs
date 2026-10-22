@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt, stream};
 use serde_json::{Value, json};
 
-use super::AdoClient;
+use super::ProjectApi;
 use super::models::{
     Comment, Identity, ListResponse, PolicyEvaluation, PullRequest, PullRequestDetails,
     PullRequestStatus, ResourceRef, ReviewSignals, Thread,
@@ -16,34 +16,21 @@ const POLICY_API_VERSION: &str = "7.1-preview";
 const REVIEWER_POLICIES: [&str; 2] = ["Minimum number of reviewers", "Required reviewers"];
 const MERGE_STRATEGY_POLICY: &str = "Require a merge strategy";
 
-impl AdoClient {
-    pub async fn my_pull_requests(
-        &self,
-        organization: &str,
-        project: &str,
-        user_id: &str,
-    ) -> Result<Vec<PullRequest>> {
-        self.active_pull_requests(
-            organization,
-            project,
-            &[("searchCriteria.creatorId", user_id)],
-        )
-        .await
+impl ProjectApi {
+    pub async fn my_pull_requests(&self, user_id: &str) -> Result<Vec<PullRequest>> {
+        self.active_pull_requests(&[("searchCriteria.creatorId", user_id)])
+            .await
     }
 
     /// Active PRs not created by the user. Without filter entries, all PRs in the project.
     pub async fn other_pull_requests(
         &self,
-        organization: &str,
-        project: &str,
         user_id: &str,
         filter: &OtherPrsFilter,
     ) -> Result<Vec<PullRequest>> {
         let mut pull_requests = Vec::new();
         if filter.reviewers.is_empty() && filter.creators.is_empty() {
-            pull_requests = self
-                .active_pull_requests(organization, project, &[])
-                .await?;
+            pull_requests = self.active_pull_requests(&[]).await?;
         } else {
             let criteria = filter
                 .reviewers
@@ -56,19 +43,14 @@ impl AdoClient {
                         .map(|name| ("searchCriteria.creatorId", name)),
                 );
             for (key, name) in criteria {
-                let id = self.identity_id(organization, name).await?;
-                pull_requests.extend(
-                    self.active_pull_requests(organization, project, &[(key, &id)])
-                        .await?,
-                );
+                let id = self.identity_id(name).await?;
+                pull_requests.extend(self.active_pull_requests(&[(key, &id)]).await?);
             }
         }
         stream::iter(without_own(pull_requests, user_id))
             .map(|mut pr| async move {
-                let (policies, threads) = tokio::try_join!(
-                    self.policy_evaluations(organization, project, &pr),
-                    self.threads(organization, project, &pr),
-                )?;
+                let (policies, threads) =
+                    tokio::try_join!(self.policy_evaluations(&pr), self.threads(&pr),)?;
                 pr.approved = is_approved(&pr, &policies);
                 pr.review = review_signals(&pr, &threads, user_id);
                 Ok::<_, anyhow::Error>(pr)
@@ -78,14 +60,9 @@ impl AdoClient {
             .await
     }
 
-    pub async fn pull_request_details(
-        &self,
-        organization: &str,
-        project: &str,
-        pr: &PullRequest,
-    ) -> Result<PullRequestDetails> {
+    pub async fn pull_request_details(&self, pr: &PullRequest) -> Result<PullRequestDetails> {
         let id = pr.pull_request_id.to_string();
-        let pr_path = pr_path(organization, project, pr, &id);
+        let pr_path = self.pr_path(pr, &id);
         let statuses_path = [&pr_path[..], &["statuses"]].concat();
         let work_items_path = [&pr_path[..], &["workitems"]].concat();
         let (full, threads, statuses, policies, work_items): (
@@ -95,11 +72,13 @@ impl AdoClient {
             _,
             ListResponse<ResourceRef>,
         ) = tokio::try_join!(
-            self.get(&self.urls.dev_azure, &pr_path, &[]),
-            self.threads(organization, project, pr),
-            self.get(&self.urls.dev_azure, &statuses_path, &[]),
-            self.policy_evaluations(organization, project, pr),
-            self.get(&self.urls.dev_azure, &work_items_path, &[]),
+            self.client.get(&self.client.urls.dev_azure, &pr_path, &[]),
+            self.threads(pr),
+            self.client
+                .get(&self.client.urls.dev_azure, &statuses_path, &[]),
+            self.policy_evaluations(pr),
+            self.client
+                .get(&self.client.urls.dev_azure, &work_items_path, &[]),
         )?;
         let ids: Vec<u32> = work_items
             .value
@@ -112,50 +91,43 @@ impl AdoClient {
             threads: visible_threads(threads),
             statuses: latest_statuses(statuses.value),
             policies,
-            work_items: self.work_items_batch(organization, project, &ids).await?,
+            work_items: self.work_items_batch(&ids).await?,
         })
     }
 
     /// A pull request by its repository, in any state.
     pub(super) async fn pull_request(
         &self,
-        organization: &str,
         project: &str,
         repository: &str,
         id: u32,
     ) -> Result<PullRequest> {
-        self.get(
-            &self.urls.dev_azure,
-            &[
-                organization,
-                project,
-                "_apis",
-                "git",
-                "repositories",
-                repository,
-                "pullRequests",
-                &id.to_string(),
-            ],
-            &[],
-        )
-        .await
+        self.client
+            .get(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    project,
+                    "_apis",
+                    "git",
+                    "repositories",
+                    repository,
+                    "pullRequests",
+                    &id.to_string(),
+                ],
+                &[],
+            )
+            .await
     }
 
     /// Merge strategies the target branch policies allow.
-    pub async fn merge_strategies(
-        &self,
-        organization: &str,
-        project: &str,
-        pr: &PullRequest,
-    ) -> Result<Vec<MergeStrategy>> {
-        let policies = self.policy_evaluations(organization, project, pr).await?;
+    pub async fn merge_strategies(&self, pr: &PullRequest) -> Result<Vec<MergeStrategy>> {
+        let policies = self.policy_evaluations(pr).await?;
         Ok(allowed_merge_strategies(&policies))
     }
 
     pub async fn complete_pull_request(
         &self,
-        organization: &str,
-        project: &str,
         pr: &PullRequest,
         strategy: MergeStrategy,
     ) -> Result<()> {
@@ -165,9 +137,10 @@ impl AdoClient {
             .context("pull request has no source commit")?;
         let id = pr.pull_request_id.to_string();
         let _: Value = self
+            .client
             .patch(
-                &self.urls.dev_azure,
-                &pr_path(organization, project, pr, &id),
+                &self.client.urls.dev_azure,
+                &self.pr_path(pr, &id),
                 &json!({
                     "status": "completed",
                     "lastMergeSourceCommit": { "commitId": commit.commit_id },
@@ -179,32 +152,32 @@ impl AdoClient {
     }
 
     /// All threads, including system threads such as votes and pushes.
-    async fn threads(
-        &self,
-        organization: &str,
-        project: &str,
-        pr: &PullRequest,
-    ) -> Result<Vec<Thread>> {
+    async fn threads(&self, pr: &PullRequest) -> Result<Vec<Thread>> {
         let id = pr.pull_request_id.to_string();
-        let path = [&pr_path(organization, project, pr, &id)[..], &["threads"]].concat();
-        let threads: ListResponse<Thread> = self.get(&self.urls.dev_azure, &path, &[]).await?;
+        let path = [&self.pr_path(pr, &id)[..], &["threads"]].concat();
+        let threads: ListResponse<Thread> = self
+            .client
+            .get(&self.client.urls.dev_azure, &path, &[])
+            .await?;
         Ok(threads.value)
     }
 
-    async fn policy_evaluations(
-        &self,
-        organization: &str,
-        project: &str,
-        pr: &PullRequest,
-    ) -> Result<Vec<PolicyEvaluation>> {
+    async fn policy_evaluations(&self, pr: &PullRequest) -> Result<Vec<PolicyEvaluation>> {
         let artifact_id = format!(
             "vstfs:///CodeReview/CodeReviewId/{}/{}",
             pr.repository.project.id, pr.pull_request_id
         );
         let response: ListResponse<PolicyEvaluation> = self
+            .client
             .get_versioned(
-                &self.urls.dev_azure,
-                &[organization, project, "_apis", "policy", "evaluations"],
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "policy",
+                    "evaluations",
+                ],
                 &[("artifactId", artifact_id.as_str())],
                 POLICY_API_VERSION,
             )
@@ -212,18 +185,20 @@ impl AdoClient {
         Ok(response.value)
     }
 
-    async fn active_pull_requests(
-        &self,
-        organization: &str,
-        project: &str,
-        criteria: &[(&str, &str)],
-    ) -> Result<Vec<PullRequest>> {
+    async fn active_pull_requests(&self, criteria: &[(&str, &str)]) -> Result<Vec<PullRequest>> {
         let mut query = vec![("searchCriteria.status", "active"), ("$top", "500")];
         query.extend_from_slice(criteria);
         let response: ListResponse<PullRequest> = self
+            .client
             .get(
-                &self.urls.dev_azure,
-                &[organization, project, "_apis", "git", "pullrequests"],
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "git",
+                    "pullrequests",
+                ],
                 &query,
             )
             .await?;
@@ -234,9 +209,23 @@ impl AdoClient {
         Ok(pull_requests)
     }
 
-    async fn identity_id(&self, organization: &str, name: &str) -> Result<String> {
-        let base = format!("{}/{organization}", self.urls.vssps_dev_azure);
+    fn pr_path<'a>(&'a self, pr: &'a PullRequest, id: &'a str) -> [&'a str; 8] {
+        [
+            &self.organization,
+            &self.project,
+            "_apis",
+            "git",
+            "repositories",
+            &pr.repository.id,
+            "pullRequests",
+            id,
+        ]
+    }
+
+    async fn identity_id(&self, name: &str) -> Result<String> {
+        let base = format!("{}/{}", self.client.urls.vssps_dev_azure, self.organization);
         let identities: ListResponse<Identity> = self
+            .client
             .get(
                 &base,
                 &["_apis", "identities"],
@@ -250,24 +239,6 @@ impl AdoClient {
             .map(|identity| identity.id)
             .with_context(|| format!("identity not found: {name}"))
     }
-}
-
-fn pr_path<'a>(
-    organization: &'a str,
-    project: &'a str,
-    pr: &'a PullRequest,
-    id: &'a str,
-) -> [&'a str; 8] {
-    [
-        organization,
-        project,
-        "_apis",
-        "git",
-        "repositories",
-        &pr.repository.id,
-        "pullRequests",
-        id,
-    ]
 }
 
 /// Drops duplicates and the user's own PRs.
@@ -413,7 +384,6 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
-    use crate::auth::Auth;
     use crate::test_support::{ids_of_prs, pull_request, pull_request_json};
 
     fn thread(value: Value) -> Thread {
@@ -513,10 +483,10 @@ mod tests {
             .mount(&server)
             .await;
         mount_empty_threads(&server).await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
 
         let prs = client
-            .other_pull_requests("contoso", "MyProject", "me", &OtherPrsFilter::default())
+            .other_pull_requests("me", &OtherPrsFilter::default())
             .await
             .unwrap();
 
@@ -551,17 +521,14 @@ mod tests {
             .mount(&server)
             .await;
         mount_empty_threads(&server).await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
         let filter = OtherPrsFilter {
             reviewers: vec!["[MyProject]\\Developers".into()],
             creators: Vec::new(),
             ..Default::default()
         };
 
-        let prs = client
-            .other_pull_requests("contoso", "MyProject", "me", &filter)
-            .await
-            .unwrap();
+        let prs = client.other_pull_requests("me", &filter).await.unwrap();
 
         assert_eq!(ids_of_prs(&prs), [5]);
     }
@@ -574,17 +541,14 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
         let filter = OtherPrsFilter {
             reviewers: Vec::new(),
             creators: vec!["nobody@example.com".into()],
             ..Default::default()
         };
 
-        let err = client
-            .other_pull_requests("contoso", "MyProject", "me", &filter)
-            .await
-            .unwrap_err();
+        let err = client.other_pull_requests("me", &filter).await.unwrap_err();
 
         assert_eq!(err.to_string(), "identity not found: nobody@example.com");
     }
@@ -635,13 +599,10 @@ mod tests {
             }]})))
             .mount(&server)
             .await;
-        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+        let client = ProjectApi::with_base_url(&server.uri());
         let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
 
-        let details = client
-            .pull_request_details("contoso", "MyProject", &pr)
-            .await
-            .unwrap();
+        let details = client.pull_request_details(&pr).await.unwrap();
 
         assert_eq!(details.description.map(|d| d.len()), Some(500));
         assert_eq!(details.threads.len(), 1);

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::app::{App, Popup, Selection, SortKind};
 use crate::config::{PrSort, WorkItemSort};
 
@@ -29,6 +31,7 @@ impl App {
         let Some(config) = &mut self.config else {
             return;
         };
+        let config = Arc::make_mut(config);
         match kind {
             SortKind::PullRequests => {
                 if let Some(sort) = PrSort::ALL.get(index) {
@@ -52,6 +55,8 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crossterm::event::KeyCode;
 
     use crate::app::test_helpers::{app, ctrl, press};
@@ -61,7 +66,7 @@ mod tests {
     #[test]
     fn sort_picker_preselects_current_sort() {
         let mut app = app();
-        app.config.as_mut().unwrap().sort.work_items = WorkItemSort::Changed;
+        Arc::make_mut(app.config.as_mut().unwrap()).sort.work_items = WorkItemSort::Changed;
         ctrl(&mut app, 'j');
 
         press(&mut app, KeyCode::Char('S'));

@@ -3,24 +3,26 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use futures::future;
 
-use super::AdoClient;
+use super::ProjectApi;
 use super::models::{Build, ListResponse, Named, PullRequest};
 
 const MAX_BUILDS: &str = "1000";
 
-impl AdoClient {
+impl ProjectApi {
     /// The latest run per pipeline and branch that the user triggered, failed first, then newest.
     /// Runs on deleted branches or closed pull requests are left out.
-    pub async fn my_builds(
-        &self,
-        organization: &str,
-        project: &str,
-        user_id: &str,
-    ) -> Result<Vec<Build>> {
+    pub async fn my_builds(&self, user_id: &str) -> Result<Vec<Build>> {
         let builds: ListResponse<Build> = self
+            .client
             .get(
-                &self.urls.dev_azure,
-                &[organization, project, "_apis", "build", "builds"],
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "build",
+                    "builds",
+                ],
                 &[
                     ("requestedFor", user_id),
                     ("queryOrder", "queueTimeDescending"),
@@ -29,10 +31,10 @@ impl AdoClient {
             )
             .await?;
         let builds = latest_branch_builds(builds.value);
-        let live = self.live_refs(organization, project, &builds).await;
+        let live = self.live_refs(&builds).await;
         let builds = builds.into_iter().filter(|build| is_live(build, &live));
         let mut builds: Vec<Build> = future::join_all(builds.map(|build| async {
-            self.latest_build(organization, project, &build)
+            self.latest_build(&build)
                 .await
                 .inspect_err(|err| tracing::warn!("failed to load latest build: {err:#}"))
                 .ok()
@@ -50,12 +52,7 @@ impl AdoClient {
 
     /// Branches and active pull request merge refs per Azure Repos repository.
     /// Repositories whose refs fail to load are left out.
-    async fn live_refs(
-        &self,
-        organization: &str,
-        project: &str,
-        builds: &[Build],
-    ) -> HashMap<String, HashSet<String>> {
+    async fn live_refs(&self, builds: &[Build]) -> HashMap<String, HashSet<String>> {
         let repositories: HashSet<&str> = builds
             .iter()
             .filter_map(|build| build.repository.as_ref())
@@ -63,7 +60,7 @@ impl AdoClient {
             .map(|repository| repository.id.as_str())
             .collect();
         future::join_all(repositories.into_iter().map(|repository| async move {
-            self.repository_refs(organization, project, repository)
+            self.repository_refs(repository)
                 .await
                 .inspect_err(|err| tracing::warn!("failed to load repository refs: {err:#}"))
                 .ok()
@@ -75,15 +72,10 @@ impl AdoClient {
         .collect()
     }
 
-    async fn repository_refs(
-        &self,
-        organization: &str,
-        project: &str,
-        repository: &str,
-    ) -> Result<HashSet<String>> {
+    async fn repository_refs(&self, repository: &str) -> Result<HashSet<String>> {
         let path = [
-            organization,
-            project,
+            &self.organization,
+            &self.project,
             "_apis",
             "git",
             "repositories",
@@ -92,13 +84,13 @@ impl AdoClient {
         let refs_path = [&path[..], &["refs"]].concat();
         let pull_requests_path = [&path[..], &["pullrequests"]].concat();
         let (heads, pull_requests) = futures::try_join!(
-            self.get::<ListResponse<Named>>(
-                &self.urls.dev_azure,
+            self.client.get::<ListResponse<Named>>(
+                &self.client.urls.dev_azure,
                 &refs_path,
                 &[("filter", "heads/")],
             ),
-            self.get::<ListResponse<PullRequest>>(
-                &self.urls.dev_azure,
+            self.client.get::<ListResponse<PullRequest>>(
+                &self.client.urls.dev_azure,
                 &pull_requests_path,
                 &[("searchCriteria.status", "active"), ("$top", "1000")],
             ),
@@ -117,17 +109,19 @@ impl AdoClient {
     }
 
     /// The newest run of the build's pipeline and branch, by anyone.
-    async fn latest_build(
-        &self,
-        organization: &str,
-        project: &str,
-        build: &Build,
-    ) -> Result<Option<Build>> {
+    async fn latest_build(&self, build: &Build) -> Result<Option<Build>> {
         let definition = build.definition.id.to_string();
         let builds: ListResponse<Build> = self
+            .client
             .get(
-                &self.urls.dev_azure,
-                &[organization, project, "_apis", "build", "builds"],
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "build",
+                    "builds",
+                ],
                 &[
                     ("definitions", definition.as_str()),
                     ("branchName", build.source_branch.as_str()),

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crossterm::event::KeyEvent;
 
 use crate::api::WorkItem;
@@ -41,10 +43,10 @@ impl App {
         else {
             return;
         };
-        let (Some(client), Some(config)) = (self.client.clone(), &mut self.config) else {
+        let (Some(api), Some(config)) = (self.api(), &mut self.config) else {
             return;
         };
-        let (organization, project) = (config.organization.clone(), config.project.clone());
+        let config = Arc::make_mut(config);
         let id = picker.work_item_id;
         let mut tags = picker.current.clone();
         if picker.has(&tag) {
@@ -60,9 +62,7 @@ impl App {
             tags.push(tag);
         }
         self.spawn(async move {
-            let result = client
-                .set_work_item_tags(&organization, &project, id, &tags)
-                .await;
+            let result = api.set_work_item_tags(id, &tags).await;
             Message::WorkItemUpdated { id, result }
         });
     }

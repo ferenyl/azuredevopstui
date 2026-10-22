@@ -23,6 +23,7 @@ pub use state::{
 pub use text_input::TextInput;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{Event, EventStream, KeyEventKind};
@@ -33,7 +34,7 @@ use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::layout::Rect;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-use crate::api::{AdoClient, Board, CurrentUser, WorkItem};
+use crate::api::{AdoClient, Board, CurrentUser, ProjectApi, WorkItem};
 use crate::config::Config;
 use crate::images::Images;
 use crate::theme::Theme;
@@ -47,7 +48,7 @@ pub enum Screen {
 }
 
 pub struct App {
-    pub config: Option<Config>,
+    pub config: Option<Arc<Config>>,
     pub theme: Theme,
     pub screen: Screen,
     pub focus: Panel,
@@ -74,6 +75,8 @@ pub struct App {
     notified: Option<HashMap<String, String>>,
     pub images: Images,
     client: Option<AdoClient>,
+    /// Built once both the client and the config exist.
+    api: Option<ProjectApi>,
     tx: UnboundedSender<Message>,
     rx: UnboundedReceiver<Message>,
     should_quit: bool,
@@ -88,7 +91,7 @@ impl App {
                 .map(|c| c.colors.clone())
                 .unwrap_or_default(),
             sprint: config.as_ref().and_then(|c| c.default_sprint.clone()),
-            config,
+            config: config.map(Arc::new),
             screen: Screen::Setup(SetupStep::Loading("Signing in…")),
             focus: Panel::Inbox,
             user: None,
@@ -109,6 +112,7 @@ impl App {
             notified: None,
             images: Images::new(picker),
             client: None,
+            api: None,
             tx,
             rx,
             should_quit: false,
@@ -153,8 +157,16 @@ impl App {
         }
     }
 
-    fn connection(&self) -> Option<(AdoClient, Config)> {
-        Some((self.client.clone()?, self.config.clone()?))
+    fn api(&self) -> Option<ProjectApi> {
+        self.api.clone()
+    }
+
+    /// Rebuilds the project API after the client or the organization, project or team changes.
+    fn sync_api(&mut self) {
+        self.api = match (&self.client, &self.config) {
+            (Some(client), Some(config)) => Some(ProjectApi::new(client.clone(), config)),
+            _ => None,
+        };
     }
 
     pub fn notice(&self) -> Option<&str> {

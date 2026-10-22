@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use crate::api::ProjectApi;
 use crate::auth::Auth;
 use crate::config::{AuthMethod, Config};
 
@@ -31,11 +34,8 @@ impl App {
                     config.team.clone(),
                 );
                 self.set_step(SetupStep::Loading("Loading board columns…"));
-                self.spawn(async move {
-                    Message::BoardColumns(
-                        client.board_columns(&organization, &project, &team).await,
-                    )
-                });
+                let api = ProjectApi::for_team(client, &organization, &project, &team);
+                self.spawn(async move { Message::BoardColumns(api.board_columns().await) });
             }
             Some(config) => {
                 let organization = config.organization.clone();
@@ -79,7 +79,8 @@ impl App {
     pub(super) fn save_config(&mut self, config: Config) {
         match config.save() {
             Ok(()) => {
-                self.config = Some(config);
+                self.config = Some(Arc::new(config));
+                self.sync_api();
                 self.continue_setup();
             }
             Err(err) => self.fail(err, Retry::SaveConfig(Box::new(config))),
@@ -157,7 +158,7 @@ impl App {
                 }),
             },
             SetupStep::SelectReadyColumn(selection) => {
-                match (selection.current(), self.config.clone()) {
+                match (selection.current(), self.config.as_deref().cloned()) {
                     (Some(column), Some(mut config)) => {
                         config.ready_column = Some(column.to_string());
                         self.save_config(config);

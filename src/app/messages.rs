@@ -19,6 +19,7 @@ impl App {
             }
             Message::Authenticated(Ok(Some(auth))) => {
                 self.client = Some(AdoClient::new(auth));
+                self.sync_api();
                 self.continue_setup();
             }
             Message::Authenticated(Ok(None)) => self.set_step(SetupStep::EnterPat {
@@ -220,6 +221,7 @@ impl App {
             api::is_unauthorized(err) && self.client.as_ref().is_some_and(|c| c.auth().uses_pat());
         if pat_rejected {
             self.client = None;
+            self.sync_api();
             tokio::spawn(Auth::forget_pat());
             self.set_step(SetupStep::EnterPat {
                 input: TextInput::default(),
