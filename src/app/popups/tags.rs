@@ -66,7 +66,7 @@ impl App {
             let result = api.set_work_item_tags(id, &tags).await;
             Message::WorkItemUpdated {
                 id,
-                reload: &[Load::Detail],
+                reload: &[Load::Mentions, Load::Detail],
                 result,
             }
         });

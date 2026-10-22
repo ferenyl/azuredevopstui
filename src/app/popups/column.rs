@@ -54,7 +54,7 @@ impl App {
             };
             Message::WorkItemUpdated {
                 id,
-                reload: &[Load::Sprint, Load::Detail],
+                reload: &[Load::Sprint, Load::Mentions, Load::Detail],
                 result,
             }
         });

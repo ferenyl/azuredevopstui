@@ -174,6 +174,19 @@ impl MockAdo {
     }
 }
 
+impl MockAdo {
+    /// Like [`MockAdo::expect`], but only the first `times` requests are answered with `response`;
+    /// later ones fall through to the next mock or fixture.
+    pub async fn expect_first(&self, mock: MockBuilder, response: ResponseTemplate, times: u64) {
+        mock.respond_with(response)
+            .up_to_n_times(times)
+            .with_priority(OVERRIDE_PRIORITY)
+            .expect(times)
+            .mount(&self.server)
+            .await;
+    }
+}
+
 /// Names the request in the test output; the test then fails on the `expect(0)`.
 struct Unmocked;
 

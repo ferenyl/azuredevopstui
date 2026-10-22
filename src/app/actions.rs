@@ -105,7 +105,7 @@ impl App {
             let result = api.assign_work_item(id, &assignee).await;
             Message::WorkItemUpdated {
                 id,
-                reload: &[Load::Sprint, Load::Detail],
+                reload: &[Load::Sprint, Load::Mentions, Load::Detail],
                 result,
             }
         });

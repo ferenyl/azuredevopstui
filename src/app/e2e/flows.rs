@@ -7,7 +7,8 @@ use wiremock::matchers::{
 use wiremock::{Mock, ResponseTemplate};
 
 use super::{FIXTURES, Harness, MockAdo};
-use crate::app::{DetailInfo, Panel, Popup, Screen, SetupStep};
+use crate::api::WorkItem;
+use crate::app::{Detail, DetailInfo, Panel, Popup, Screen, SetupStep};
 
 const MY_PRS: &str = "/contoso/Fabrikam/_apis/git/pullrequests";
 const BUILDS: &str = "/contoso/Fabrikam/_apis/build/builds";
@@ -758,7 +759,7 @@ async fn requests_after_confirming(harness: &mut Harness) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn tagging_without_an_open_detail_sends_only_the_patch() {
+async fn tagging_without_an_open_detail_reloads_only_the_mentions() {
     let mut harness = connected().await;
     select(&mut harness, Panel::MyWorkItems, 301);
     harness.press(KeyCode::Char('t'));
@@ -771,7 +772,10 @@ async fn tagging_without_an_open_detail_sends_only_the_patch() {
 
     assert_eq!(
         requests,
-        ["PATCH /contoso/Fabrikam/_apis/wit/workitems/301"]
+        [
+            "PATCH /contoso/Fabrikam/_apis/wit/workitems/301",
+            "POST /contoso/Fabrikam/Web/_apis/wit/wiql"
+        ]
     );
 }
 
@@ -794,13 +798,7 @@ async fn tagging_with_the_item_open_reloads_only_its_detail() {
             .iter()
             .any(|r| r.starts_with("GET /contoso/Fabrikam/_apis/wit/workItems/301/comments"))
     );
-    for other in [
-        "pullrequests",
-        "builds",
-        "wiql",
-        "iterations",
-        "workitemsbatch",
-    ] {
+    for other in ["pullrequests", "builds", "iterations", "workitemsbatch"] {
         assert!(
             requests.iter().all(|r| !r.contains(other)),
             "{other}: {requests:?}"
@@ -891,7 +889,7 @@ async fn assigning_reloads_only_the_sprint() {
     assert_only_requests_to(
         &requests,
         &["/wiql", "workitemsbatch"],
-        &["pullrequests", "builds", "workItems/"],
+        &["pullrequests", "builds"],
     );
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
@@ -913,7 +911,7 @@ async fn moving_to_another_column_patches_the_column_and_reloads_only_the_sprint
     assert_only_requests_to(
         &requests,
         &["/wiql", "workitemsbatch"],
-        &["pullrequests", "builds", "workItems/"],
+        &["pullrequests", "builds"],
     );
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
@@ -934,11 +932,7 @@ async fn unassigning_clears_the_assignee_and_reloads_only_the_sprint() {
     let requests = requests_after_confirming(&mut harness).await;
 
     assert!(requests.contains(&"PATCH /contoso/Fabrikam/_apis/wit/workitems/301".to_string()));
-    assert_only_requests_to(
-        &requests,
-        &["/wiql"],
-        &["pullrequests", "builds", "workItems/"],
-    );
+    assert_only_requests_to(&requests, &["/wiql"], &["pullrequests", "builds"]);
 }
 
 #[tokio::test]
@@ -995,5 +989,146 @@ async fn failed_completion_shows_the_error_without_reloading() {
     assert!(
         requests.iter().all(|r| r.starts_with("PATCH ")),
         "{requests:?}"
+    );
+}
+
+/// Mounts mention 601 (a User Story) for the next mentions load only; `assigned` makes it mine.
+async fn mention_601_once(harness: &Harness, state: &str, assigned: bool) {
+    let mut fields = serde_json::json!({
+        "System.Title": "Mentioned in checkout",
+        "System.WorkItemType": "User Story",
+        "System.State": state,
+        "System.BoardColumn": state,
+        "System.ChangedDate": "2026-10-21T10:00:00Z",
+        "System.CreatedDate": "2026-10-01T10:00:00Z"
+    });
+    if assigned {
+        fields["System.AssignedTo"] =
+            serde_json::json!({ "id": "me-id", "displayName": "Mona Me" });
+    }
+    harness
+        .ado
+        .expect_first(
+            Mock::given(method("POST"))
+                .and(path("/contoso/Fabrikam/Web/_apis/wit/wiql"))
+                .and(body_string_contains("@RecentMentions")),
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "workItems": [{ "id": 601 }] })),
+            1,
+        )
+        .await;
+    harness
+        .ado
+        .expect_first(
+            Mock::given(method("POST"))
+                .and(path("/contoso/Fabrikam/_apis/wit/workitemsbatch"))
+                .and(body_string_contains("\"ids\":[601]")),
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "value": [{ "id": 601, "fields": fields }] })),
+            1,
+        )
+        .await;
+}
+
+async fn mention_601_comment(harness: &Harness) {
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET"))
+                .and(path("/contoso/Fabrikam/_apis/wit/workItems/601/comments")),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "totalCount": 1,
+                "comments": [{
+                    "createdBy": { "id": "other-id", "displayName": "Olle Other" },
+                    "createdDate": "2026-10-21T10:00:00Z",
+                    "text": "ping @<me-id>"
+                }]
+            })),
+            1..,
+        )
+        .await;
+}
+
+fn select_mention_601(harness: &mut Harness) {
+    let row = harness
+        .app
+        .data
+        .inbox()
+        .iter()
+        .position(|entry| matches!(&entry.detail, Detail::WorkItem(item) if item.id == 601))
+        .expect("mention 601 in the inbox");
+    harness.app.focus = Panel::Inbox;
+    harness.app.selections[Panel::Inbox.index().expect("left panel")] = row;
+}
+
+fn mention_601_item(app: &crate::app::App) -> Option<WorkItem> {
+    app.data
+        .inbox()
+        .iter()
+        .find_map(|entry| match &entry.detail {
+            Detail::WorkItem(item) if item.id == 601 => Some((**item).clone()),
+            _ => None,
+        })
+}
+
+#[tokio::test]
+async fn assigning_a_mentioned_item_updates_it_in_the_inbox() {
+    let mut harness = Harness::new().await;
+    mention_601_once(&harness, "Active", false).await;
+    mention_601_once(&harness, "Active", true).await;
+    mention_601_comment(&harness).await;
+    expect_patch(
+        &harness,
+        "/contoso/Fabrikam/_apis/wit/workitems/601",
+        "System.AssignedTo",
+    )
+    .await;
+    harness.connect().await;
+    select_mention_601(&mut harness);
+    assert!(
+        !harness
+            .app
+            .is_assigned_to_me(&mention_601_item(&harness.app).expect("mention"))
+    );
+
+    harness.press(KeyCode::Char('a'));
+    harness
+        .wait_for(|app| mention_601_item(app).is_some_and(|item| app.is_assigned_to_me(&item)))
+        .await;
+}
+
+#[tokio::test]
+async fn closing_a_mentioned_item_drops_it_from_the_inbox() {
+    let mut harness = Harness::new().await;
+    mention_601_once(&harness, "Active", false).await;
+    mention_601_comment(&harness).await;
+    expect_patch(
+        &harness,
+        "/contoso/Fabrikam/_apis/wit/workitems/601",
+        "Closed",
+    )
+    .await;
+    harness.connect().await;
+    select_mention_601(&mut harness);
+    harness.press(KeyCode::Char('s'));
+    wait_for_popup(&mut harness, |p| matches!(p, Popup::Column(_))).await;
+    harness.press(KeyCode::Char('j'));
+    harness.press(KeyCode::Char('j'));
+    harness.press(KeyCode::Char('j'));
+
+    harness.press(KeyCode::Enter);
+
+    // The mentions query now falls through to the fixture that finds no open item.
+    harness
+        .wait_for(|app| mention_601_item(app).is_none())
+        .await;
+    assert!(mention_601_item(&harness.app).is_none());
+    assert!(
+        harness
+            .app
+            .data
+            .inbox()
+            .iter()
+            .all(|entry| !matches!(&entry.detail, Detail::WorkItem(item) if item.id == 601))
     );
 }
