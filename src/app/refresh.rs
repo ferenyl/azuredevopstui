@@ -131,12 +131,12 @@ impl App {
         }
         match &self.detail_info {
             Some(DetailInfo::PullRequest(info)) => {
-                texts.extend(info.description.as_deref());
-                texts.extend(
+                rich.extend(&info.description);
+                rich.extend(
                     info.threads
                         .iter()
                         .flat_map(|thread| &thread.comments)
-                        .filter_map(|comment| comment.content.as_deref()),
+                        .map(|comment| &comment.text),
                 );
             }
             Some(DetailInfo::WorkItem(info)) => {

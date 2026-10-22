@@ -11,6 +11,7 @@ use super::models::{
 use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps, is_unauthorized};
 use crate::config::{MergeStrategy, OtherPrsFilter};
 use crate::images::markdown_images;
+use crate::rich_text::RichText;
 
 const POLICY_API_VERSION: &str = "7.1-preview";
 const REVIEWER_POLICIES: [&str; 2] = ["Minimum number of reviewers", "Required reviewers"];
@@ -106,7 +107,10 @@ impl ProjectApi {
             .collect();
 
         Ok(PullRequestDetails {
-            description: full.description.as_deref().map(markdown_images),
+            description: full
+                .description
+                .as_deref()
+                .map(|description| RichText::from_markdown(&markdown_images(description))),
             threads: visible_threads(threads),
             statuses: latest_statuses(statuses.value),
             policies,
@@ -121,7 +125,8 @@ impl ProjectApi {
         repository: &str,
         id: u32,
     ) -> Result<PullRequest> {
-        self.client
+        let mut pr: PullRequest = self
+            .client
             .get(
                 &self.client.urls.dev_azure,
                 &[
@@ -136,7 +141,9 @@ impl ProjectApi {
                 ],
                 &[],
             )
-            .await
+            .await?;
+        pr.render_description();
+        Ok(pr)
     }
 
     /// Merge strategies the target branch policies allow.
@@ -223,7 +230,7 @@ impl ProjectApi {
             .await?;
         let mut pull_requests = response.value;
         for pr in &mut pull_requests {
-            pr.description = pr.description.as_deref().map(markdown_images);
+            pr.render_description();
         }
         Ok(pull_requests)
     }
@@ -385,6 +392,8 @@ fn visible_threads(threads: Vec<Thread>) -> Vec<Thread> {
             });
             for comment in &mut thread.comments {
                 comment.content = comment.content.as_deref().map(markdown_images);
+                comment.text =
+                    RichText::from_markdown(comment.content.as_deref().unwrap_or_default());
             }
             thread
         })
@@ -574,6 +583,7 @@ mod tests {
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].comments.len(), 1);
         assert_eq!(threads[0].comments[0].content.as_deref(), Some("Real"));
+        assert_eq!(threads[0].comments[0].text.plain(), "Real");
     }
 
     #[test]
@@ -747,6 +757,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn single_pull_request_gets_its_description_rendered() {
+        let server = MockServer::start().await;
+        let mut full = pull_request_json(7, "PR", "other", "2026-10-01T10:00:00Z");
+        full["description"] = json!("Adds **bold** filter");
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/_apis/git/repositories/repo-id/pullRequests/7",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(full))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let pr = client
+            .pull_request("MyProject", "repo-id", 7)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            pr.description_text.map(|text| text.plain()).as_deref(),
+            Some("Adds bold filter")
+        );
+    }
+
+    #[tokio::test]
     async fn pull_request_details_combine_threads_statuses_and_policies() {
         let server = MockServer::start().await;
         let pr_path = "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/7";
@@ -797,7 +832,7 @@ mod tests {
 
         let details = client.pull_request_details(&pr).await.unwrap();
 
-        assert_eq!(details.description.map(|d| d.len()), Some(500));
+        assert_eq!(details.description.map(|d| d.plain().len()), Some(500));
         assert_eq!(details.threads.len(), 1);
         assert_eq!(details.statuses.len(), 1);
         assert_eq!(

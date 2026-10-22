@@ -125,6 +125,27 @@ async fn opening_a_pull_request_loads_its_details() {
 }
 
 #[tokio::test]
+async fn pull_request_markdown_is_rendered_once_not_per_frame() {
+    let mut harness = connected().await;
+    select(&mut harness, Panel::MyPrs, 101);
+    harness.press(KeyCode::Enter);
+    harness
+        .wait_for(|app| matches!(app.detail_info, Some(DetailInfo::PullRequest(_))))
+        .await;
+    let renders = || crate::rich_text::MARKDOWN_RENDERS.with(|count| count.get());
+    let before = renders();
+
+    let first = harness.screen();
+    for _ in 0..10 {
+        harness.press(KeyCode::Down);
+        harness.screen();
+    }
+
+    assert!(first.contains("Adds a status filter to the order list."));
+    assert_eq!(renders(), before);
+}
+
+#[tokio::test]
 async fn comment_threads_are_newest_first_even_with_fractional_seconds() {
     let mut harness = connected().await;
     select(&mut harness, Panel::MyPrs, 101);
