@@ -8,7 +8,7 @@ use super::models::{
     Comment, Identity, ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestDetails,
     PullRequestStatus, ResourceRef, ReviewSignals, Thread,
 };
-use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, is_unauthorized};
+use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps, is_unauthorized};
 use crate::config::{MergeStrategy, OtherPrsFilter};
 use crate::images::markdown_images;
 
@@ -310,7 +310,7 @@ fn review_signals(pr: &PullRequest, threads: &[Thread], user_id: &str) -> Review
             .flat_map(|thread| &thread.comments)
             .filter(|comment| !by_me || is_me(comment))
             .filter_map(|comment| comment.published_date.clone())
-            .max()
+            .max_by(|a, b| compare_timestamps(a, b))
     };
     let my_vote = pr
         .reviewers
@@ -326,7 +326,11 @@ fn review_signals(pr: &PullRequest, threads: &[Thread], user_id: &str) -> Review
         waiting.push(Some(pr.creation_date.clone()));
     }
     let (voted, pushed) = (latest("VoteUpdate", true), latest("RefUpdate", false));
-    if my_vote.is_some_and(|vote| vote != 0) && voted.is_some() && pushed > voted {
+    let pushed_after_vote = match (&pushed, &voted) {
+        (Some(pushed), Some(voted)) => compare_timestamps(pushed, voted).is_gt(),
+        _ => false,
+    };
+    if my_vote.is_some_and(|vote| vote != 0) && pushed_after_vote {
         signals.changed_since_vote = true;
         waiting.push(pushed);
     }
@@ -366,7 +370,7 @@ fn review_signals(pr: &PullRequest, threads: &[Thread], user_id: &str) -> Review
     signals.since = waiting
         .into_iter()
         .map(|date| date.unwrap_or_else(|| pr.creation_date.clone()))
-        .min();
+        .min_by(|a, b| compare_timestamps(a, b));
     signals
 }
 
@@ -472,6 +476,85 @@ mod tests {
         assert!(!is_approved(&pull_request_with_votes(&[-10]), &[]));
         assert!(!is_approved(&pull_request_with_votes(&[10, -10]), &[]));
         assert!(!is_approved(&pull_request_with_votes(&[10, -5]), &[]));
+    }
+
+    fn pull_request_voted_by(user_id: &str, vote: i32) -> PullRequest {
+        let mut pr = pull_request(1, "PR", "other", "2026-10-01T08:00:00Z");
+        pr.reviewers = vec![
+            serde_json::from_value(json!({ "id": user_id, "displayName": "Me", "vote": vote }))
+                .unwrap(),
+        ];
+        pr
+    }
+
+    fn system_thread(kind: &str, author: &str, date: &str) -> Thread {
+        thread(json!({
+            "status": "closed",
+            "properties": { "CodeReviewThreadType": { "$value": kind } },
+            "comments": [{
+                "author": { "id": author, "displayName": "X" },
+                "publishedDate": date,
+                "commentType": "system"
+            }]
+        }))
+    }
+
+    #[test]
+    fn push_after_vote_is_an_update_even_with_fractional_seconds() {
+        let threads = [
+            system_thread("VoteUpdate", "me", "2026-10-01T10:00:00Z"),
+            system_thread("RefUpdate", "other", "2026-10-01T10:00:00.5Z"),
+        ];
+
+        let signals = review_signals(&pull_request_voted_by("me", 10), &threads, "me");
+
+        assert!(signals.changed_since_vote);
+        assert_eq!(signals.since.as_deref(), Some("2026-10-01T10:00:00.5Z"));
+    }
+
+    #[test]
+    fn push_before_vote_is_not_an_update_even_with_fractional_seconds() {
+        let threads = [
+            system_thread("VoteUpdate", "me", "2026-10-01T10:00:00.5Z"),
+            system_thread("RefUpdate", "other", "2026-10-01T10:00:00Z"),
+        ];
+
+        let signals = review_signals(&pull_request_voted_by("me", 10), &threads, "me");
+
+        assert!(!signals.changed_since_vote);
+        assert_eq!(signals.since, None);
+    }
+
+    #[test]
+    fn since_is_the_oldest_waiting_date_across_precision() {
+        let reply = thread(json!({
+            "status": "active",
+            "comments": [
+                {
+                    "author": { "id": "me", "displayName": "Me" },
+                    "content": "Please rename this",
+                    "publishedDate": "2026-10-01T09:00:00Z",
+                    "commentType": "text"
+                },
+                {
+                    "author": { "id": "other", "displayName": "Other" },
+                    "content": "Done",
+                    "publishedDate": "2026-10-01T10:00:00Z",
+                    "commentType": "text"
+                }
+            ]
+        }));
+        let threads = [
+            reply,
+            system_thread("VoteUpdate", "me", "2026-10-01T09:30:00Z"),
+            system_thread("RefUpdate", "other", "2026-10-01T10:00:00.5Z"),
+        ];
+
+        let signals = review_signals(&pull_request_voted_by("me", 10), &threads, "me");
+
+        assert_eq!(signals.replies, 1);
+        assert!(signals.changed_since_vote);
+        assert_eq!(signals.since.as_deref(), Some("2026-10-01T10:00:00Z"));
     }
 
     #[test]

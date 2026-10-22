@@ -4,7 +4,7 @@ use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
     Build, ColumnTarget, Iteration, Mention, PullRequest, PullRequestDetails, WorkItem,
-    WorkItemDetails, is_approved, is_reviewer_policy,
+    WorkItemDetails, compare_timestamps, is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 
@@ -473,7 +473,7 @@ impl Data {
             });
         let mut entries: Vec<InboxEntry> =
             mine.chain(others).chain(mentions).chain(builds).collect();
-        entries.sort_by(|a, b| a.since.cmp(&b.since));
+        entries.sort_by(|a, b| compare_timestamps(&a.since, &b.since));
         self.inbox = entries;
     }
 
@@ -599,15 +599,19 @@ impl Data {
 
 fn sort_pull_requests(prs: &mut [PullRequest], sort: PrSort) {
     match sort {
-        PrSort::Newest => prs.sort_by(|a, b| b.creation_date.cmp(&a.creation_date)),
-        PrSort::Oldest => prs.sort_by(|a, b| a.creation_date.cmp(&b.creation_date)),
+        PrSort::Newest => {
+            prs.sort_by(|a, b| compare_timestamps(&b.creation_date, &a.creation_date));
+        }
+        PrSort::Oldest => {
+            prs.sort_by(|a, b| compare_timestamps(&a.creation_date, &b.creation_date));
+        }
         PrSort::Title => prs.sort_by_key(|pr| pr.title.to_lowercase()),
         PrSort::Repository => prs.sort_by(|a, b| {
             a.repository
                 .name
                 .to_lowercase()
                 .cmp(&b.repository.name.to_lowercase())
-                .then_with(|| b.creation_date.cmp(&a.creation_date))
+                .then_with(|| compare_timestamps(&b.creation_date, &a.creation_date))
         }),
     }
 }
@@ -714,6 +718,23 @@ mod tests {
     #[test]
     fn pull_requests_sort_oldest_first() {
         assert_eq!(sorted_prs(PrSort::Oldest), [3, 1, 2]);
+    }
+
+    #[test]
+    fn pull_requests_sort_by_creation_across_precision_and_offsets() {
+        let created = |id, date: &str| pull_request(id, "PR", "u", date);
+        let mut prs = vec![
+            created(1, "2026-10-01T10:00:00Z"),
+            created(2, "2026-10-01T10:00:00.5Z"),
+            created(3, "2026-10-01T12:00:00.25+02:00"),
+            created(4, "2026-10-01T10:00:00.1Z"),
+        ];
+
+        sort_pull_requests(&mut prs, PrSort::Newest);
+        assert_eq!(ids_of_prs(&prs), [2, 3, 4, 1]);
+
+        sort_pull_requests(&mut prs, PrSort::Oldest);
+        assert_eq!(ids_of_prs(&prs), [1, 4, 3, 2]);
     }
 
     #[test]
@@ -1084,5 +1105,32 @@ mod tests {
         let since: Vec<&str> = data.inbox().iter().map(|e| e.since.as_str()).collect();
 
         assert_eq!(since, ["2026-09-01T10:00:00Z", "2026-10-01T10:00:00Z"]);
+    }
+
+    #[test]
+    fn inbox_sorts_mixed_precision_and_offsets_by_instant() {
+        let mut data = Data::default();
+        let mention = |id, date: &str| Mention {
+            item: work_item(id, "Mentioned", "Bug", "Active"),
+            date: date.into(),
+        };
+        data.set_mentions(vec![
+            mention(20, "2026-10-01T10:00:00Z"),
+            mention(21, "2026-10-01T10:00:00.5Z"),
+            mention(22, "2026-10-01T12:00:00.1+02:00"),
+            mention(23, "2026-10-01T10:00:00.25Z"),
+        ]);
+
+        let since: Vec<&str> = data.inbox().iter().map(|e| e.since.as_str()).collect();
+
+        assert_eq!(
+            since,
+            [
+                "2026-10-01T10:00:00Z",
+                "2026-10-01T12:00:00.1+02:00",
+                "2026-10-01T10:00:00.25Z",
+                "2026-10-01T10:00:00.5Z",
+            ]
+        );
     }
 }

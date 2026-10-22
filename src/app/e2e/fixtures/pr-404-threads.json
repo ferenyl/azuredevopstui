@@ -1,0 +1,50 @@
+{
+  "method": "GET",
+  "path": "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/404/threads",
+  "body": {
+    "value": [
+      {
+        "id": 1,
+        "status": "closed",
+        "properties": {
+          "CodeReviewThreadType": {
+            "$value": "VoteUpdate"
+          }
+        },
+        "comments": [
+          {
+            "id": 1,
+            "author": {
+              "id": "me-id",
+              "displayName": "Mona Me"
+            },
+            "content": "Mona Me voted -5",
+            "publishedDate": "2026-10-21T10:00:00Z",
+            "commentType": "system"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "status": "closed",
+        "properties": {
+          "CodeReviewThreadType": {
+            "$value": "RefUpdate"
+          }
+        },
+        "comments": [
+          {
+            "id": 2,
+            "author": {
+              "id": "other-id",
+              "displayName": "Olle Other"
+            },
+            "content": "Olle Other pushed 2 commits",
+            "publishedDate": "2026-10-21T10:00:00.5000000Z",
+            "commentType": "system"
+          }
+        ]
+      }
+    ]
+  }
+}

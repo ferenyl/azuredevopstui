@@ -100,6 +100,68 @@
             "isRequired": false
           }
         ]
+      },
+      {
+        "pullRequestId": 404,
+        "title": "Push after my vote",
+        "createdBy": {
+          "id": "other-id",
+          "displayName": "Olle Other"
+        },
+        "repository": {
+          "id": "repo-api",
+          "name": "orders-api",
+          "project": {
+            "id": "project-fabrikam"
+          }
+        },
+        "status": "active",
+        "sourceRefName": "refs/heads/feature/404",
+        "targetRefName": "refs/heads/main",
+        "creationDate": "2026-10-21T09:00:00Z",
+        "mergeStatus": "succeeded",
+        "lastMergeSourceCommit": {
+          "commitId": "c404"
+        },
+        "reviewers": [
+          {
+            "id": "me-id",
+            "displayName": "Mona Me",
+            "vote": -5,
+            "isRequired": true
+          }
+        ]
+      },
+      {
+        "pullRequestId": 405,
+        "title": "Vote after push",
+        "createdBy": {
+          "id": "other-id",
+          "displayName": "Olle Other"
+        },
+        "repository": {
+          "id": "repo-api",
+          "name": "orders-api",
+          "project": {
+            "id": "project-fabrikam"
+          }
+        },
+        "status": "active",
+        "sourceRefName": "refs/heads/feature/405",
+        "targetRefName": "refs/heads/main",
+        "creationDate": "2026-10-21T09:00:00Z",
+        "mergeStatus": "succeeded",
+        "lastMergeSourceCommit": {
+          "commitId": "c405"
+        },
+        "reviewers": [
+          {
+            "id": "me-id",
+            "displayName": "Mona Me",
+            "vote": -5,
+            "isRequired": true
+          }
+        ]
       }
     ]
   }
