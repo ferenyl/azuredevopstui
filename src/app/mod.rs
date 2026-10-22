@@ -1,6 +1,7 @@
 mod action;
 mod actions;
 mod message;
+mod popups;
 mod setup;
 mod state;
 mod toolbar;
@@ -25,7 +26,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::api::{self, AdoClient, Board, CurrentUser, PullRequest, WorkItem};
 use crate::auth::Auth;
-use crate::config::{AuthMethod, Config, MergeStrategy, PrSort, WorkItemSort};
+use crate::config::{AuthMethod, Config};
 use crate::images::{Images, image_urls};
 use crate::notify;
 use crate::rich_text::RichText;
@@ -33,7 +34,6 @@ use crate::theme::Theme;
 use message::Message;
 use setup::organization_name;
 
-const MAX_RECENT_TAGS: usize = 20;
 const NOTICE_DURATION: Duration = Duration::from_secs(3);
 
 pub enum Screen {
@@ -166,219 +166,6 @@ impl App {
         }
     }
 
-    fn open_tag_picker(&mut self, item: &WorkItem, mut tags: Vec<String>) {
-        let recent = self
-            .config
-            .as_ref()
-            .map(|config| config.recent_tags.as_slice())
-            .unwrap_or_default();
-        tags.sort_by_key(|tag| {
-            recent
-                .iter()
-                .position(|r| r.eq_ignore_ascii_case(tag))
-                .unwrap_or(usize::MAX)
-        });
-        let current = item
-            .fields
-            .tags
-            .as_deref()
-            .unwrap_or_default()
-            .split(';')
-            .map(str::trim)
-            .filter(|tag| !tag.is_empty())
-            .map(String::from)
-            .collect();
-        self.popup = Some(Popup::Tags(TagPicker::new(item.id, current, tags)));
-    }
-
-    fn confirm_tags(&mut self, picker: TagPicker) {
-        let Some(tag) = picker
-            .selection
-            .items
-            .get(picker.selection.selected)
-            .cloned()
-        else {
-            return;
-        };
-        let (Some(client), Some(config)) = (self.client.clone(), &mut self.config) else {
-            return;
-        };
-        let (organization, project) = (config.organization.clone(), config.project.clone());
-        let id = picker.work_item_id;
-        let mut tags = picker.current.clone();
-        if picker.has(&tag) {
-            tags.retain(|current| !current.eq_ignore_ascii_case(&tag));
-        } else {
-            config.recent_tags.retain(|r| !r.eq_ignore_ascii_case(&tag));
-            config.recent_tags.insert(0, tag.clone());
-            config.recent_tags.truncate(MAX_RECENT_TAGS);
-            let result = config.save();
-            if let Err(err) = result {
-                self.report_error(err);
-            }
-            tags.push(tag);
-        }
-        self.spawn(async move {
-            let result = client
-                .set_work_item_tags(&organization, &project, id, &tags)
-                .await;
-            Message::WorkItemUpdated { id, result }
-        });
-    }
-
-    fn open_comment(&mut self) {
-        if let Some(item) = self.current_work_item() {
-            self.popup = Some(Popup::Comment {
-                work_item_id: item.id,
-                text: String::new(),
-            });
-        }
-    }
-
-    fn open_build_filter(&mut self) {
-        self.popup = Some(Popup::BuildFilter {
-            text: self.data.build_filter.clone(),
-        });
-    }
-
-    fn confirm_build_filter(&mut self, text: &str) {
-        self.data.build_filter = text.trim().to_string();
-        if let Some(index) = Panel::Builds.index() {
-            self.selections[index] = 0;
-        }
-    }
-
-    fn confirm_comment(&mut self, id: u32, text: String) {
-        let text = text.trim();
-        if text.is_empty() {
-            return;
-        }
-        // Markdown joins single newlines; trailing spaces make them line breaks.
-        let text = text.replace('\n', "  \n");
-        let Some((client, config)) = self.connection() else {
-            return;
-        };
-        self.spawn(async move {
-            let result = client
-                .add_work_item_comment(&config.organization, &config.project, id, &text)
-                .await;
-            Message::WorkItemUpdated { id, result }
-        });
-    }
-
-    fn open_column_picker(&mut self, item: WorkItem, board: &Board, unassign: bool) {
-        let Some(targets) = board.targets(&item.fields.work_item_type) else {
-            self.error = Some(format!(
-                "{} items are not on the board",
-                item.fields.work_item_type
-            ));
-            return;
-        };
-        let labels = targets.iter().map(|t| t.label.clone()).collect();
-        let mut selection = Selection::new(labels);
-        let done = item.fields.board_column_done.unwrap_or(false);
-        let current = item.fields.board_column.as_deref();
-        selection.selected = targets
-            .iter()
-            .position(|t| Some(t.column.as_str()) == current && t.done == done)
-            .or_else(|| {
-                targets
-                    .iter()
-                    .position(|t| Some(t.column.as_str()) == current)
-            })
-            .unwrap_or(0);
-        self.popup = Some(Popup::Column(ColumnPicker {
-            work_item_id: item.id,
-            targets,
-            selection,
-            unassign,
-        }));
-    }
-
-    fn open_complete_picker(&mut self, pr: Box<PullRequest>, strategies: Vec<MergeStrategy>) {
-        if strategies.is_empty() {
-            self.error = Some(format!(
-                "no merge strategy is allowed for !{}",
-                pr.pull_request_id
-            ));
-            return;
-        }
-        let labels = strategies.iter().map(|s| s.label().into()).collect();
-        let mut selection = Selection::new(labels);
-        let last = self.config.as_ref().and_then(|c| c.merge_strategy);
-        selection.selected = strategies
-            .iter()
-            .position(|s| Some(*s) == last)
-            .unwrap_or(0);
-        self.popup = Some(Popup::Complete(CompletePicker {
-            pr,
-            strategies,
-            selection,
-        }));
-    }
-
-    fn confirm_complete(&mut self, picker: CompletePicker) {
-        let Some(strategy) = picker.strategies.get(picker.selection.selected).copied() else {
-            return;
-        };
-        let (Some(client), Some(config)) = (self.client.clone(), &mut self.config) else {
-            return;
-        };
-        config.merge_strategy = Some(strategy);
-        let saved = config.save();
-        let (config, pr) = (config.clone(), picker.pr);
-        self.spawn(async move {
-            let result = client
-                .complete_pull_request(&config.organization, &config.project, &pr, strategy)
-                .await;
-            Message::PullRequestCompleted {
-                id: pr.pull_request_id,
-                result,
-            }
-        });
-        if let Err(err) = saved {
-            self.report_error(err);
-        }
-    }
-
-    fn open_sort_picker(&mut self) {
-        let (Some(kind), Some(config)) = (self.focus.sort_kind(), &self.config) else {
-            return;
-        };
-        let (labels, selected): (Vec<String>, _) = match kind {
-            SortKind::PullRequests => (
-                PrSort::ALL.iter().map(|s| s.label().into()).collect(),
-                PrSort::ALL
-                    .iter()
-                    .position(|s| *s == config.sort.pull_requests),
-            ),
-            SortKind::WorkItems => (
-                WorkItemSort::ALL.iter().map(|s| s.label().into()).collect(),
-                WorkItemSort::ALL
-                    .iter()
-                    .position(|s| *s == config.sort.work_items),
-            ),
-        };
-        let mut selection = Selection::new(labels);
-        selection.selected = selected.unwrap_or(0);
-        self.popup = Some(Popup::Sort { kind, selection });
-    }
-
-    fn confirm_popup(&mut self) {
-        match self.popup.take() {
-            Some(Popup::Column(picker)) => self.confirm_column(picker),
-            Some(Popup::Complete(picker)) => self.confirm_complete(picker),
-            Some(Popup::Tags(picker)) => self.confirm_tags(picker),
-            Some(Popup::Sprint(picker)) => self.confirm_sprint(picker),
-            Some(Popup::Comment { work_item_id, text }) => self.confirm_comment(work_item_id, text),
-            Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
-            Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
-            Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
-            Some(Popup::BuildFilter { text }) => self.confirm_build_filter(&text),
-            None => {}
-        }
-    }
-
     /// Board columns, used for the sprint overview and moving items.
     fn load_board(&self) {
         let Some((client, config)) = self.connection() else {
@@ -403,115 +190,6 @@ impl App {
                     .work_item_types(&config.organization, &config.project)
                     .await,
             )
-        });
-    }
-
-    fn open_types_picker(&mut self, mut types: Vec<String>) {
-        let Some(config) = &self.config else {
-            return;
-        };
-        for kind in &config.work_item_types {
-            if !types.contains(kind) {
-                types.push(kind.clone());
-            }
-        }
-        let checked = types
-            .iter()
-            .map(|kind| config.work_item_types.is_empty() || config.work_item_types.contains(kind))
-            .collect();
-        self.popup = Some(Popup::Types {
-            selection: Selection::new(types),
-            checked,
-        });
-    }
-
-    fn confirm_types(&mut self, selection: Selection, checked: Vec<bool>) {
-        let Some(config) = &mut self.config else {
-            return;
-        };
-        config.work_item_types = checked_types(selection.items, &checked);
-        if let Err(err) = config.save() {
-            self.report_error(err);
-            return;
-        }
-        self.data.my_work_items = None;
-        self.data.ready_work_items = None;
-        self.refresh();
-    }
-
-    fn open_pr_filter(&mut self) {
-        let Some(config) = &self.config else {
-            return;
-        };
-        let filter = &config.other_prs_filter;
-        self.popup = Some(Popup::PrFilter {
-            selection: Selection::new(vec!["Show approved".into(), "Show drafts".into()]),
-            checked: vec![filter.show_approved, filter.show_drafts],
-        });
-    }
-
-    fn confirm_pr_filter(&mut self, checked: &[bool]) {
-        let Some(config) = &mut self.config else {
-            return;
-        };
-        let filter = &mut config.other_prs_filter;
-        filter.show_approved = checked[0];
-        filter.show_drafts = checked[1];
-        self.data.show_approved = filter.show_approved;
-        self.data.show_drafts = filter.show_drafts;
-        let result = config.save();
-        self.clamp_selections();
-        if let Err(err) = result {
-            self.report_error(err);
-        }
-    }
-
-    fn confirm_sort(&mut self, kind: SortKind, index: usize) {
-        let Some(config) = &mut self.config else {
-            return;
-        };
-        match kind {
-            SortKind::PullRequests => {
-                if let Some(sort) = PrSort::ALL.get(index) {
-                    config.sort.pull_requests = *sort;
-                }
-            }
-            SortKind::WorkItems => {
-                if let Some(sort) = WorkItemSort::ALL.get(index) {
-                    config.sort.work_items = *sort;
-                }
-            }
-        }
-        self.data.sort(&config.sort);
-        let result = config.save();
-        self.clamp_selections();
-        if let Err(err) = result {
-            self.report_error(err);
-        }
-    }
-
-    fn confirm_column(&mut self, picker: ColumnPicker) {
-        let (Some(board), Some(client), Some(config)) =
-            (self.board.clone(), self.client.clone(), self.config.clone())
-        else {
-            return;
-        };
-        let Some(target) = picker.targets.get(picker.selection.selected).cloned() else {
-            return;
-        };
-        let (id, unassign) = (picker.work_item_id, picker.unassign);
-        self.spawn(async move {
-            let (organization, project) = (&config.organization, &config.project);
-            let result = if unassign {
-                client
-                    .unassign_work_item(organization, project, id, &board, &target)
-                    .await
-            } else {
-                client
-                    .move_work_item(organization, project, id, &board, &target)
-                    .await
-            };
-            Message::WorkItemUpdated { id, result }
         });
     }
 
@@ -741,17 +419,6 @@ impl App {
                     .await,
             )
         });
-    }
-
-    fn confirm_sprint(&mut self, picker: SprintPicker) {
-        let Some(path) = picker.selection.current() else {
-            return;
-        };
-        self.sprint = Some(path.to_string());
-        self.data.my_work_items = None;
-        self.data.ready_work_items = None;
-        self.data.sprint_name = None;
-        self.load_sprint();
     }
 
     fn retry(&mut self, retry: Retry) {
@@ -1277,69 +944,8 @@ impl App {
                 _ => {}
             }
         }
-        if let Some(Popup::Tags(picker)) = &mut self.popup {
-            match key.code {
-                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    picker.query.push(c);
-                    picker.filter();
-                    return;
-                }
-                KeyCode::Backspace => {
-                    picker.query.pop();
-                    picker.filter();
-                    return;
-                }
-                _ => {}
-            }
-        }
-        if let Some(Popup::Sprint(picker)) = &mut self.popup {
-            match key.code {
-                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    picker.query.push(c);
-                    picker.filter();
-                    return;
-                }
-                KeyCode::Backspace => {
-                    picker.query.pop();
-                    picker.filter();
-                    return;
-                }
-                _ => {}
-            }
-        }
-        if let Some(Popup::Comment { text, .. }) = &mut self.popup {
-            match key.code {
-                KeyCode::Enter
-                    if key
-                        .modifiers
-                        .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
-                {
-                    text.push('\n');
-                    return;
-                }
-                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    text.push(c);
-                    return;
-                }
-                KeyCode::Backspace => {
-                    text.pop();
-                    return;
-                }
-                _ => {}
-            }
-        }
-        if let Some(Popup::BuildFilter { text }) = &mut self.popup {
-            match key.code {
-                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    text.push(c);
-                    return;
-                }
-                KeyCode::Backspace => {
-                    text.pop();
-                    return;
-                }
-                _ => {}
-            }
+        if self.handle_popup_key(key) {
+            return;
         }
         if let Some(action) = Action::from_key(key) {
             self.apply(action);
@@ -1355,45 +961,7 @@ impl App {
             }
             return;
         }
-        if matches!(
-            self.popup,
-            Some(Popup::Comment { .. } | Popup::BuildFilter { .. })
-        ) {
-            match action {
-                Action::Confirm => self.confirm_popup(),
-                Action::Cancel => self.popup = None,
-                Action::Quit => self.should_quit = true,
-                _ => {}
-            }
-            return;
-        }
-        if let Some(popup) = &mut self.popup {
-            let selection = match popup {
-                Popup::Column(picker) => &mut picker.selection,
-                Popup::Complete(picker) => &mut picker.selection,
-                Popup::Tags(picker) => &mut picker.selection,
-                Popup::Sprint(picker) => &mut picker.selection,
-                Popup::Comment { .. } | Popup::BuildFilter { .. } => return,
-                Popup::Sort { selection, .. }
-                | Popup::Types { selection, .. }
-                | Popup::PrFilter { selection, .. } => selection,
-            };
-            match action {
-                Action::Toggle => {
-                    if let Popup::Types { selection, checked }
-                    | Popup::PrFilter { selection, checked } = popup
-                        && let Some(checked) = checked.get_mut(selection.selected)
-                    {
-                        *checked = !*checked;
-                    }
-                }
-                Action::Up => selection.previous(),
-                Action::Down => selection.next(),
-                Action::Confirm => self.confirm_popup(),
-                Action::Cancel => self.popup = None,
-                Action::Quit => self.should_quit = true,
-                _ => {}
-            }
+        if self.apply_popup(action) {
             return;
         }
         match action {
@@ -1554,18 +1122,6 @@ impl App {
     }
 }
 
-/// The ticked types; empty (meaning all) when every type is ticked.
-fn checked_types(items: Vec<String>, checked: &[bool]) -> Vec<String> {
-    if checked.iter().all(|checked| *checked) {
-        return Vec::new();
-    }
-    items
-        .into_iter()
-        .zip(checked)
-        .filter_map(|(kind, checked)| checked.then_some(kind))
-        .collect()
-}
-
 /// Cells over areas where images were drawn, rewritten so the terminal drops their old pixels.
 fn stale_cells(buffer: &Buffer, areas: &[Rect]) -> Vec<(u16, u16, Cell)> {
     areas
@@ -1581,6 +1137,7 @@ fn stale_cells(buffer: &Buffer, areas: &[Rect]) -> Vec<(u16, u16, Cell)> {
 mod tests {
     use super::*;
     use crate::api::{Mention, PullRequestDetails};
+    use crate::config::WorkItemSort;
     use crate::test_support::{config, ids_of_prs, pull_request, work_item};
 
     #[test]
@@ -1885,19 +1442,6 @@ mod tests {
         assert!(
             matches!(&app.popup, Some(Popup::Types { checked, .. }) if checked == &[true, false])
         );
-    }
-
-    #[test]
-    fn checked_types_keep_ticked_types() {
-        let types = checked_types(vec!["Bug".into(), "Task".into()], &[false, true]);
-
-        assert_eq!(types, ["Task"]);
-    }
-
-    #[test]
-    fn all_or_no_ticked_types_mean_all() {
-        assert!(checked_types(vec!["Bug".into(), "Task".into()], &[true, true]).is_empty());
-        assert!(checked_types(vec!["Bug".into()], &[false]).is_empty());
     }
 
     #[test]
