@@ -36,6 +36,10 @@ fn select(harness: &mut Harness, panel: Panel, id: u32) {
             .my_work_items
             .as_ref()
             .and_then(|items| items.iter().position(|item| item.id == id)),
+        Panel::ReadyWorkItems => data
+            .ready_work_items
+            .as_ref()
+            .and_then(|items| items.iter().position(|item| item.id == id)),
         _ => None,
     };
     harness.app.focus = panel;
@@ -821,4 +825,175 @@ async fn commenting_reloads_only_the_mentions() {
             "{other}: {requests:?}"
         );
     }
+}
+
+const WORK_ITEM_303: &str = "/contoso/Fabrikam/_apis/wit/workitems/303";
+const PR_101: &str = "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/101";
+
+/// Answers a `PATCH` of `target` containing `body_part` and asserts it is sent once.
+async fn expect_patch(harness: &Harness, target: &str, body_part: &str) {
+    harness
+        .ado
+        .expect(
+            Mock::given(method("PATCH"))
+                .and(path(target))
+                .and(body_string_contains(body_part)),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 1 })),
+            1,
+        )
+        .await;
+}
+
+/// Lets the signals of PR `id` say it can be completed; the fixture PR lacks a reviewer vote.
+fn mark_ready(harness: &mut Harness, id: u32) {
+    let mut signals = harness.app.data.pr_signals()[&id];
+    signals.ready = true;
+    harness.app.data.set_pr_signals(id, signals);
+}
+
+async fn wait_for_popup(harness: &mut Harness, popup: fn(&Popup) -> bool) {
+    harness
+        .wait_for(move |app| app.popup.as_ref().is_some_and(popup))
+        .await;
+}
+
+fn assert_only_requests_to(requests: &[String], touched: &[&str], untouched: &[&str]) {
+    for suffix in touched {
+        assert!(
+            requests.iter().any(|r| r.contains(suffix)),
+            "{suffix}: {requests:?}"
+        );
+    }
+    for other in untouched {
+        assert!(
+            requests.iter().all(|r| !r.contains(other)),
+            "{other}: {requests:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn assigning_reloads_only_the_sprint() {
+    let mut harness = connected().await;
+    expect_patch(&harness, WORK_ITEM_303, "/fields/System.AssignedTo").await;
+    select(&mut harness, Panel::ReadyWorkItems, 303);
+    harness.settle().await;
+    let before = harness.ado.requests().await.len();
+
+    harness.press(KeyCode::Char('a'));
+    harness.settle().await;
+
+    let requests = harness.ado.requests().await.split_off(before);
+    assert_eq!(
+        requests.first().map(String::as_str),
+        Some("PATCH /contoso/Fabrikam/_apis/wit/workitems/303")
+    );
+    assert_only_requests_to(
+        &requests,
+        &["/wiql", "workitemsbatch"],
+        &["pullrequests", "builds", "workItems/"],
+    );
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn moving_to_another_column_patches_the_column_and_reloads_only_the_sprint() {
+    let mut harness = connected().await;
+    expect_patch(&harness, WORK_ITEM_301, "Closed").await;
+    select(&mut harness, Panel::MyWorkItems, 301);
+    harness.press(KeyCode::Char('s'));
+    wait_for_popup(&mut harness, |p| matches!(p, Popup::Column(_))).await;
+    harness.press(KeyCode::Char('j'));
+    harness.press(KeyCode::Char('j'));
+    harness.press(KeyCode::Char('j'));
+
+    let requests = requests_after_confirming(&mut harness).await;
+
+    assert!(requests.contains(&"PATCH /contoso/Fabrikam/_apis/wit/workitems/301".to_string()));
+    assert_only_requests_to(
+        &requests,
+        &["/wiql", "workitemsbatch"],
+        &["pullrequests", "builds", "workItems/"],
+    );
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn unassigning_clears_the_assignee_and_reloads_only_the_sprint() {
+    let mut harness = connected().await;
+    expect_patch(
+        &harness,
+        WORK_ITEM_301,
+        r#""path":"/fields/System.AssignedTo","value":"""#,
+    )
+    .await;
+    select(&mut harness, Panel::MyWorkItems, 301);
+    harness.press(KeyCode::Char('u'));
+    wait_for_popup(&mut harness, |p| matches!(p, Popup::Column(_))).await;
+
+    let requests = requests_after_confirming(&mut harness).await;
+
+    assert!(requests.contains(&"PATCH /contoso/Fabrikam/_apis/wit/workitems/301".to_string()));
+    assert_only_requests_to(
+        &requests,
+        &["/wiql"],
+        &["pullrequests", "builds", "workItems/"],
+    );
+}
+
+#[tokio::test]
+async fn completing_a_pull_request_reloads_only_the_pull_requests() {
+    let mut harness = connected().await;
+    expect_patch(&harness, PR_101, r#""status":"completed""#).await;
+    select(&mut harness, Panel::MyPrs, 101);
+    mark_ready(&mut harness, 101);
+    harness.press(KeyCode::Char('c'));
+    wait_for_popup(&mut harness, |p| matches!(p, Popup::Complete(_))).await;
+
+    let requests = requests_after_confirming(&mut harness).await;
+
+    assert!(requests.contains(&format!("PATCH {PR_101}")));
+    assert_only_requests_to(
+        &requests,
+        &["pullrequests"],
+        &["builds", "wiql", "workitemsbatch"],
+    );
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn failed_mutations_show_the_error_without_reloading() {
+    for status in [409, 500] {
+        let mut harness = connected().await;
+        harness.ado.fail("PATCH", WORK_ITEM_301, status).await;
+        select(&mut harness, Panel::MyWorkItems, 301);
+        harness.press(KeyCode::Char('u'));
+        wait_for_popup(&mut harness, |p| matches!(p, Popup::Column(_))).await;
+
+        let requests = requests_after_confirming(&mut harness).await;
+
+        assert!(harness.app.error.is_some(), "{status}");
+        assert!(
+            requests.iter().all(|r| r.starts_with("PATCH ")),
+            "{status}: {requests:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn failed_completion_shows_the_error_without_reloading() {
+    let mut harness = connected().await;
+    harness.ado.fail("PATCH", PR_101, 409).await;
+    select(&mut harness, Panel::MyPrs, 101);
+    mark_ready(&mut harness, 101);
+    harness.press(KeyCode::Char('c'));
+    wait_for_popup(&mut harness, |p| matches!(p, Popup::Complete(_))).await;
+
+    let requests = requests_after_confirming(&mut harness).await;
+
+    assert!(harness.app.error.is_some());
+    assert!(
+        requests.iter().all(|r| r.starts_with("PATCH ")),
+        "{requests:?}"
+    );
 }
