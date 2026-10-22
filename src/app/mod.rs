@@ -4,6 +4,7 @@ mod actions;
 mod e2e;
 mod inbox;
 mod input;
+mod loads;
 mod message;
 mod messages;
 mod popups;
@@ -40,6 +41,7 @@ use crate::api::{AdoClient, Board, CurrentUser, ProjectApi, WorkItem};
 use crate::config::Config;
 use crate::images::Images;
 use crate::theme::Theme;
+use loads::{Load, Loads};
 use message::Message;
 
 const NOTICE_DURATION: Duration = Duration::from_secs(3);
@@ -80,6 +82,7 @@ pub struct App {
     client: Option<AdoClient>,
     /// Built once both the client and the config exist.
     api: Option<ProjectApi>,
+    loads: Loads,
     tx: UnboundedSender<Message>,
     rx: UnboundedReceiver<Message>,
     should_quit: bool,
@@ -117,6 +120,7 @@ impl App {
             images: Images::new(picker),
             client: None,
             api: None,
+            loads: Loads::default(),
             tx,
             rx,
             should_quit: false,
@@ -167,6 +171,7 @@ impl App {
 
     /// Rebuilds the project API after the client or the organization, project or team changes.
     fn sync_api(&mut self) {
+        self.loads.cancel_all();
         self.api = match (&self.client, &self.config) {
             (Some(client), Some(config)) => Some(ProjectApi::new(client.clone(), config)),
             _ => None,
@@ -202,6 +207,24 @@ impl App {
         tokio::spawn(async move {
             let _ = tx.send(future.await);
         });
+    }
+
+    /// Spawns the request for `load`, superseding one in flight; only its response is handled.
+    fn spawn_load<F>(&mut self, load: Load, future: F)
+    where
+        F: Future<Output = Message> + Send + 'static,
+    {
+        let generation = self.loads.next(load);
+        let tx = self.tx.clone();
+        let task = tokio::spawn(async move {
+            let message = Box::new(future.await);
+            let _ = tx.send(Message::Loaded {
+                load,
+                generation,
+                message,
+            });
+        });
+        self.loads.track(load, generation, task.abort_handle());
     }
 }
 

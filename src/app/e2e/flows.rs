@@ -6,7 +6,7 @@ use wiremock::matchers::{
 };
 use wiremock::{Mock, ResponseTemplate};
 
-use super::{FIXTURES, Harness};
+use super::{FIXTURES, Harness, MockAdo};
 use crate::app::{DetailInfo, Panel, Popup, Screen, SetupStep};
 
 const MY_PRS: &str = "/contoso/Fabrikam/_apis/git/pullrequests";
@@ -451,6 +451,72 @@ async fn many_sub_requests_run_in_bounded_waves() {
         "40 delayed requests were not bounded: {:?}",
         started.elapsed()
     );
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn slow_response_for_a_previous_sprint_does_not_replace_the_new_one() {
+    const DELAY: Duration = Duration::from_millis(500);
+    let mut harness = connected().await;
+    // Sprint 40 answers slowly and empty; without generations it would land after Sprint 41.
+    harness
+        .ado
+        .expect(
+            Mock::given(method("POST"))
+                .and(path("/contoso/Fabrikam/Web/_apis/wit/wiql"))
+                .and(body_string_contains("Sprint 40")),
+            ResponseTemplate::new(200)
+                .set_delay(DELAY)
+                .set_body_json(serde_json::json!({ "workItems": [] })),
+            0..=2,
+        )
+        .await;
+
+    for sprint in ["40", "41"] {
+        harness.press(KeyCode::Char('i'));
+        harness
+            .wait_for(|app| matches!(app.popup, Some(Popup::Sprint(_))))
+            .await;
+        harness.type_text(sprint);
+        harness.press(KeyCode::Enter);
+    }
+    harness
+        .wait_for(|app| app.data.sprint_name.as_deref() == Some("Sprint 41"))
+        .await;
+    tokio::time::sleep(DELAY).await;
+    harness.settle().await;
+
+    assert_eq!(harness.app.data.sprint_name.as_deref(), Some("Sprint 41"));
+    harness.wait_for_text("Order list paging").await;
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+/// Requests made for the pull request, pipeline and work item lists so far.
+async fn list_requests(ado: &MockAdo) -> [usize; 3] {
+    [
+        ado.received("GET", "/git/pullrequests").await,
+        ado.received("GET", "/build/builds").await,
+        ado.received("POST", "/wit/wiql").await,
+    ]
+}
+
+#[tokio::test]
+async fn repeated_refresh_does_not_stack_requests() {
+    let mut harness = connected().await;
+    let before = list_requests(&harness.ado).await;
+    harness.press(KeyCode::Char('r'));
+    harness.settle().await;
+    let once = list_requests(&harness.ado).await;
+    // Responses are only handled in settle, so the last two presses come while the first is in flight.
+    for _ in 0..3 {
+        harness.press(KeyCode::Char('r'));
+    }
+    harness.settle().await;
+    let thrice = list_requests(&harness.ado).await;
+
+    for ((before, once), thrice) in before.iter().zip(once).zip(thrice) {
+        assert_eq!(thrice - once, once - before);
+    }
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 

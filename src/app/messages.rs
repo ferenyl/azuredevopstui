@@ -11,7 +11,22 @@ use super::{
 
 impl App {
     pub(super) fn handle_message(&mut self, message: Message) {
+        let message = match message {
+            Message::Loaded {
+                load,
+                generation,
+                message,
+            } => {
+                if !self.loads.finish(load, generation) {
+                    tracing::debug!(?load, generation, "dropped stale response");
+                    return;
+                }
+                *message
+            }
+            message => message,
+        };
         match message {
+            Message::Loaded { .. } => {}
             Message::Notified(url) => {
                 if let Some(url) = url {
                     self.open_url(&url);
@@ -132,7 +147,7 @@ impl App {
             Message::PullRequestCompleted { id, result } => match result {
                 Ok(()) => {
                     tracing::info!(id, "pull request completed");
-                    self.refresh();
+                    self.reload();
                 }
                 Err(err) => self.report_error(err),
             },
@@ -179,7 +194,7 @@ impl App {
             Message::WorkItemUpdated { id, result } => match result {
                 Ok(()) => {
                     tracing::info!(id, "work item updated");
-                    self.refresh();
+                    self.reload();
                 }
                 Err(err) => self.report_error(err),
             },
@@ -248,6 +263,7 @@ mod tests {
 
     use crate::api::{PullRequestChecks, PullRequestDetails};
     use crate::app::Detail;
+    use crate::app::loads::Load;
     use crate::app::message::Message;
     use crate::app::test_helpers::{app, open_pull_request};
     use crate::test_support::{ids_of_prs, pull_request};
@@ -338,5 +354,54 @@ mod tests {
         )])));
 
         assert!(!app.data.pr_signals().contains_key(&3));
+    }
+
+    fn sprint(name: &str) -> Message {
+        Message::SprintWorkItems(Ok(crate::api::SprintWorkItems {
+            iteration_name: name.into(),
+            start_date: None,
+            finish_date: None,
+            mine: Vec::new(),
+            ready: Vec::new(),
+        }))
+    }
+
+    fn start(app: &mut App, load: Load) -> u64 {
+        let generation = app.loads.next(load);
+        let task = tokio::spawn(std::future::pending::<()>());
+        app.loads.track(load, generation, task.abort_handle());
+        generation
+    }
+
+    fn loaded(load: Load, generation: u64, message: Message) -> Message {
+        Message::Loaded {
+            load,
+            generation,
+            message: Box::new(message),
+        }
+    }
+
+    #[tokio::test]
+    async fn response_for_an_older_sprint_is_dropped() {
+        let mut app = app();
+        let old = start(&mut app, Load::Sprint);
+        let new = start(&mut app, Load::Sprint);
+
+        app.handle_message(loaded(Load::Sprint, new, sprint("Sprint 2")));
+        app.handle_message(loaded(Load::Sprint, old, sprint("Sprint 1")));
+
+        assert_eq!(app.data.sprint_name.as_deref(), Some("Sprint 2"));
+        assert!(!app.loads.is_loading(Load::Sprint));
+    }
+
+    #[tokio::test]
+    async fn responses_after_the_project_changes_are_dropped() {
+        let mut app = app();
+        let old = start(&mut app, Load::Sprint);
+
+        app.sync_api();
+        app.handle_message(loaded(Load::Sprint, old, sprint("Old project")));
+
+        assert_eq!(app.data.sprint_name.as_deref(), Some("Sprint 1"));
     }
 }
