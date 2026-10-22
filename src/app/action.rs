@@ -29,7 +29,12 @@ pub enum Action {
     NextTab,
     PrevTab,
     Help,
+    NextLink,
+    PrevLink,
     Vote,
+    NextThread,
+    PrevThread,
+    ThreadStatus,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -44,6 +49,8 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::OpenInBrowser,
             Action::Copy,
             Action::CopyLink,
+            Action::NextLink,
+            Action::PrevLink,
             Action::Sprint,
             Action::Reload,
             Action::ChangeToken,
@@ -63,7 +70,17 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::Comment,
         ],
     ),
-    ("Pull requests", &[Action::Complete, Action::Vote]),
+    (
+        "Pull requests",
+        &[
+            Action::Complete,
+            Action::Vote,
+            Action::Comment,
+            Action::NextThread,
+            Action::PrevThread,
+            Action::ThreadStatus,
+        ],
+    ),
 ];
 
 impl Action {
@@ -96,8 +113,13 @@ impl Action {
             (KeyCode::Tab, _) => Some(Self::NextTab),
             (KeyCode::BackTab, _) => Some(Self::PrevTab),
             (KeyCode::Char('T'), _) => Some(Self::ChangeToken),
+            (KeyCode::Char('l'), _) => Some(Self::NextLink),
+            (KeyCode::Char('L'), _) => Some(Self::PrevLink),
             (KeyCode::Char('?'), _) => Some(Self::Help),
             (KeyCode::Char('v'), _) => Some(Self::Vote),
+            (KeyCode::Char(']'), _) => Some(Self::NextThread),
+            (KeyCode::Char('['), _) => Some(Self::PrevThread),
+            (KeyCode::Char('x'), _) => Some(Self::ThreadStatus),
             _ => None,
         }
     }
@@ -131,7 +153,12 @@ impl Action {
             Self::NextTab => "tab",
             Self::PrevTab => "shift+tab",
             Self::Help => "?",
+            Self::NextLink => "l",
+            Self::PrevLink => "L",
             Self::Vote => "v",
+            Self::NextThread => "]",
+            Self::PrevThread => "[",
+            Self::ThreadStatus => "x",
         }
     }
 
@@ -164,7 +191,12 @@ impl Action {
             Self::NextTab => "next tab",
             Self::PrevTab => "previous tab",
             Self::Help => "help",
+            Self::NextLink => "select link",
+            Self::PrevLink => "previous link",
             Self::Vote => "vote",
+            Self::NextThread => "next thread",
+            Self::PrevThread => "previous thread",
+            Self::ThreadStatus => "thread status",
         }
     }
 }
@@ -244,7 +276,7 @@ mod tests {
 
     #[test]
     fn unbound_key_is_ignored() {
-        assert_eq!(plain(KeyCode::Char('x')), None);
+        assert_eq!(plain(KeyCode::Char('z')), None);
         assert_eq!(plain(KeyCode::F(1)), None);
     }
 

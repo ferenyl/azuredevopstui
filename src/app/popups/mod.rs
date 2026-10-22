@@ -7,6 +7,7 @@ mod pr_filter;
 mod sort;
 mod sprint;
 mod tags;
+mod thread_status;
 mod types;
 mod vote;
 
@@ -21,15 +22,18 @@ impl App {
             Some(Popup::Complete(picker)) => self.confirm_complete(picker),
             Some(Popup::Tags(picker)) => self.confirm_tags(picker),
             Some(Popup::Sprint(picker)) => self.confirm_sprint(picker),
-            Some(Popup::Comment { work_item_id, text }) => {
-                self.confirm_comment(work_item_id, text.as_str())
-            }
+            Some(Popup::Text { target, text }) => self.confirm_text(target, text.as_str()),
             Some(Popup::Sort { kind, selection }) => self.confirm_sort(kind, selection.selected),
             Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
             Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
             Some(Popup::BuildFilter { text }) => self.confirm_build_filter(text.as_str()),
             Some(Popup::Vote { pr, selection }) => self.confirm_vote(pr, selection.selected),
             Some(Popup::Confirm { action, .. }) => self.confirm_action(action),
+            Some(Popup::ThreadStatus {
+                pr,
+                thread_id,
+                selection,
+            }) => self.confirm_thread_status(pr, thread_id, selection.selected),
             None => {}
         }
     }
@@ -45,7 +49,7 @@ impl App {
             }
             Some(Popup::Tags(picker)) => picker.handle_key(key),
             Some(Popup::Sprint(picker)) => picker.handle_key(key),
-            Some(Popup::Comment { text, .. }) => text.handle_key(key, true),
+            Some(Popup::Text { text, .. }) => text.handle_key(key, true),
             Some(Popup::BuildFilter { text }) => text.handle_key(key, false),
             _ => false,
         }
@@ -55,7 +59,7 @@ impl App {
     pub(super) fn apply_popup(&mut self, action: Action) -> bool {
         if matches!(
             self.popup,
-            Some(Popup::Comment { .. } | Popup::BuildFilter { .. } | Popup::Confirm { .. })
+            Some(Popup::Text { .. } | Popup::BuildFilter { .. } | Popup::Confirm { .. })
         ) {
             match action {
                 Action::Confirm => self.confirm_popup(),
@@ -73,11 +77,12 @@ impl App {
             Popup::Complete(picker) => &mut picker.selection,
             Popup::Tags(picker) => &mut picker.selection,
             Popup::Sprint(picker) => &mut picker.selection,
-            Popup::Comment { .. } | Popup::BuildFilter { .. } | Popup::Confirm { .. } => {
+            Popup::Text { .. } | Popup::BuildFilter { .. } | Popup::Confirm { .. } => {
                 return true;
             }
             Popup::Sort { selection, .. }
             | Popup::Vote { selection, .. }
+            | Popup::ThreadStatus { selection, .. }
             | Popup::Types { selection, .. }
             | Popup::PrFilter { selection, .. } => selection,
         };

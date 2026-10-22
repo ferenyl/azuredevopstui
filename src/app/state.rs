@@ -52,7 +52,12 @@ impl Detail {
 
     pub fn tabs(&self) -> &'static [DetailTab] {
         match self {
-            Self::PullRequest(_) => &[DetailTab::Overview, DetailTab::Comments, DetailTab::Checks],
+            Self::PullRequest(_) => &[
+                DetailTab::Overview,
+                DetailTab::Comments,
+                DetailTab::Checks,
+                DetailTab::Files,
+            ],
             Self::WorkItem(_) => &[
                 DetailTab::Overview,
                 DetailTab::Children,
@@ -72,6 +77,7 @@ pub enum DetailTab {
     Links,
     Comments,
     Checks,
+    Files,
 }
 
 impl DetailTab {
@@ -82,6 +88,7 @@ impl DetailTab {
             Self::Links => "Links",
             Self::Comments => "Comments",
             Self::Checks => "Checks",
+            Self::Files => "Files",
         }
     }
 }
@@ -97,8 +104,8 @@ pub enum Popup {
     Complete(CompletePicker),
     Tags(TagPicker),
     Sprint(SprintPicker),
-    Comment {
-        work_item_id: u32,
+    Text {
+        target: TextTarget,
         text: TextInput,
     },
     Sort {
@@ -124,6 +131,21 @@ pub enum Popup {
     Confirm {
         prompt: String,
         action: ConfirmAction,
+    },
+    ThreadStatus {
+        pr: Box<PullRequest>,
+        thread_id: u32,
+        selection: Selection,
+    },
+}
+
+/// What a text popup writes to.
+pub enum TextTarget {
+    WorkItemComment(u32),
+    /// A reply to the thread, or a new thread without one.
+    PrThread {
+        pr: Box<PullRequest>,
+        thread_id: Option<u32>,
     },
 }
 
@@ -347,7 +369,7 @@ impl SprintPicker {
 
 pub enum DetailInfo {
     PullRequest(PullRequestDetails),
-    WorkItem(WorkItemDetails),
+    WorkItem(Box<WorkItemDetails>),
 }
 
 /// `None` means not loaded yet.
@@ -974,7 +996,12 @@ mod tests {
 
         assert_eq!(
             pr.tabs(),
-            [DetailTab::Overview, DetailTab::Comments, DetailTab::Checks]
+            [
+                DetailTab::Overview,
+                DetailTab::Comments,
+                DetailTab::Checks,
+                DetailTab::Files
+            ]
         );
         assert_eq!(
             item.tabs(),

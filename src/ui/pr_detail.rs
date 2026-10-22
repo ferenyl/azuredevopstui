@@ -1,12 +1,10 @@
-use std::cmp::Ordering;
-
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::{
     badge, branch, empty, field, heading, loading, rich_lines, short_date, state_color, type_color,
 };
-use crate::api::{PullRequest, PullRequestDetails, Thread, compare_timestamps};
+use crate::api::{PullRequest, PullRequestDetails, Thread, thread_status_label};
 use crate::app::{App, DetailTab};
 
 pub fn lines(
@@ -18,6 +16,7 @@ pub fn lines(
 ) -> Vec<Line<'static>> {
     match (tab, details) {
         (DetailTab::Overview, _) => overview(app, pr, details, width),
+        (DetailTab::Files, _) => super::pr_files::lines(app, width),
         (_, None) => loading(app),
         (DetailTab::Comments, Some(details)) => comments(app, details, width),
         (_, Some(details)) => checks(app, details, width),
@@ -145,15 +144,8 @@ fn overview(
     lines
 }
 
-/// Newest first; threads without a date go last.
-fn newest_first(a: Option<String>, b: Option<String>) -> Ordering {
-    match (a, b) {
-        (Some(a), Some(b)) => compare_timestamps(&b, &a),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
+/// Starts the header of the selected thread.
+pub const SELECTED_THREAD: &str = "▶ ";
 
 fn comments(app: &App, details: &PullRequestDetails, width: u16) -> Vec<Line<'static>> {
     let theme = &app.theme;
@@ -161,27 +153,20 @@ fn comments(app: &App, details: &PullRequestDetails, width: u16) -> Vec<Line<'st
     if details.threads.is_empty() {
         return empty(app, "No comments");
     }
-    let latest = |thread: &&Thread| {
-        thread
-            .comments
-            .iter()
-            .filter_map(|comment| comment.published_date.clone())
-            .max_by(|a, b| compare_timestamps(a, b))
-    };
-    let (mut unresolved, mut resolved): (Vec<&Thread>, Vec<&Thread>) = details
-        .threads
-        .iter()
-        .partition(|thread| matches!(thread.status.as_deref(), None | Some("active" | "pending")));
-    unresolved.sort_by(|a, b| newest_first(latest(a), latest(b)));
-    resolved.sort_by(|a, b| newest_first(latest(a), latest(b)));
+    let ordered = details.ordered_threads();
     let bar = Span::styled("  │ ", Style::new().fg(theme.border));
     let mut lines = Vec::new();
-    for (title, threads) in [("Not resolved", unresolved), ("Resolved", resolved)] {
+    for (title, open) in [("Not resolved", true), ("Resolved", false)] {
+        let threads: Vec<(usize, &&Thread)> = ordered
+            .iter()
+            .enumerate()
+            .filter(|(_, thread)| thread.is_open() == open)
+            .collect();
         if threads.is_empty() {
             continue;
         }
         lines.push(heading(app, title, width));
-        for thread in threads {
+        for (position, thread) in threads {
             let status = thread.status.as_deref().unwrap_or("-");
             let color = match status {
                 "active" | "pending" => theme.pr_waiting,
@@ -193,10 +178,20 @@ fn comments(app: &App, details: &PullRequestDetails, width: u16) -> Vec<Line<'st
                 .as_ref()
                 .and_then(|context| context.file_path.clone())
                 .unwrap_or_default();
-            lines.push(Line::from(vec![
-                badge(status, color),
-                Span::styled(format!("  {file}"), muted),
-            ]));
+            let mut header = Vec::new();
+            if app.detail_thread.is_some() {
+                header.push(if app.detail_thread == Some(position) {
+                    Span::styled(
+                        SELECTED_THREAD,
+                        Style::new().fg(theme.title).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::raw("  ")
+                });
+            }
+            header.push(badge(thread_status_label(status), color));
+            header.push(Span::styled(format!("  {file}"), muted));
+            lines.push(Line::from(header));
             for (index, comment) in thread.comments.iter().enumerate() {
                 if index > 0 {
                     lines.push(Line::from(bar.clone()));

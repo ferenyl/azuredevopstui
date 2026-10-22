@@ -3,8 +3,12 @@
 //! Every file in `fixtures/` is one canned endpoint. Requests no fixture or override answers fail
 //! the test, so tests stay offline and deterministic. See `docs/e2e.md`.
 
+mod changes;
 mod completion;
 mod flows;
+mod links;
+mod notifications;
+mod threads;
 mod vote;
 
 use std::fs;

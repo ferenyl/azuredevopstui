@@ -21,8 +21,9 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - **Pipeline run**: pipeline, run number, branch, status, reason, times and duration.
   - **Pull request**:
     - **Overview** shows status, branches, merge status, reviewers and their votes, the linked work items (with a warning when there are none), and the description.
-    - **Comments** shows the comment threads with their status and file path.
+    - **Comments** shows the comment threads with their status (active, resolved, won't fix, closed) and file path. Select a thread with `]` / `[`, reply with `m`, and change its status with `x`. `m` without a selected thread starts a new one.
     - **Checks** shows the branch policies and statuses, with a summary of passed, failed and pending.
+    - **Files** lists the changed files (`A`dded, `M`odified, `D`eleted, `R`enamed) of the latest iteration against the target branch. With the detail panel focused, `j`/`k` select a file and `enter` shows its diff (unified, 3 lines of context); `esc` goes back to the list. The files load only when the tab is shown. Binary files and files over 512 KB are not diffed, and at most 2000 files are listed.
   - **Work item**:
     - **Overview** shows type, state, board column, priority, assignee, sprint, tags, linked pull requests, description, repro steps and acceptance criteria.
     - **Children** shows child items grouped by type (Task, Release Task, User Story, …), each with state and assignee.
@@ -325,6 +326,12 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
   "work_item_types": [],
   "show_images": true,
   "notifications": false,
+  "notify": {
+    "builds": true,
+    "mentions": true,
+    "pull_requests": true,
+    "quiet_hours": { "start": "22:00", "end": "07:00" }
+  },
   "sort": {
     "pull_requests": "newest",
     "work_items": "priority"
@@ -354,6 +361,10 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `merge_strategy` | not set | The merge strategy last used to complete a PR; preselected next time. Written by the app. |
 | `completion.delete_source_branch` | `false` | Preselect *Delete source branch* in the completion popup. Written by the app when you complete or set auto-complete. |
 | `completion.transition_work_items` | `false` | Preselect *Transition linked work items* in the completion popup. Written by the app like the above. Bypassing policies and the merge message are never remembered. |
+| `notify.builds` | `true` | Notify about failed builds. Only used when `notifications` is `true`. |
+| `notify.mentions` | `true` | Notify about work items that mention you. |
+| `notify.pull_requests` | `true` | Notify about pull requests waiting on you and changes to your own. |
+| `notify.quiet_hours` | not set | Local time range, `{ "start": "22:00", "end": "07:00" }` (`HH:MM`, may span midnight). Nothing is notified during it, and entries that arrive then are not notified afterwards. |
 | `sort.pull_requests` | `"newest"` | Sort order for both PR lists. |
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
 | `colors` | Catppuccin Mocha | Theme colors. See [Colors](#colors). |
@@ -411,9 +422,9 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `pr_approved` | `#A6E3A1` | Approved votes, completed PRs, done states |
 | `pr_waiting` | `#F9E2AF` | Waiting votes, drafts, active threads |
 | `pr_rejected` | `#F38BA8` | Rejected votes |
-| `build_succeeded` | `#A6E3A1` | Passed checks |
-| `build_failed` | `#F38BA8` | Failed checks |
-| `build_running` | `#89DCEB` | Pending checks, active PRs, active states |
+| `build_succeeded` | `#A6E3A1` | Passed checks, added lines and files |
+| `build_failed` | `#F38BA8` | Failed checks, removed lines and files |
+| `build_running` | `#89DCEB` | Pending checks, active PRs, active states, modified files |
 | `workitem_bug` | `#F38BA8` | Bugs |
 | `workitem_story` | `#89B4FA` | Stories and other types |
 | `workitem_task` | `#F9E2AF` | Tasks |
@@ -425,10 +436,10 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 
 | Key | Action |
 |---|---|
-| `j` / `k`, `↓` / `↑` | Move in a list, or scroll the detail panel |
+| `j` / `k`, `↓` / `↑` | Move in a list, or scroll the detail panel. On a PR's Files tab, select a file |
 | `ctrl+j` / `ctrl+k`, `ctrl+↓` / `ctrl+↑` | Previous or next box in the left column |
 | `ctrl+l` / `ctrl+h`, `ctrl+→` / `ctrl+←` | Switch between the left column and the detail panel |
-| `enter` | Open the selected item in the detail panel |
+| `enter` | Open the selected item in the detail panel. On a PR's Files tab, show the selected file's diff |
 | `tab` / `shift+tab` | Next or previous detail tab |
 | `S` | Choose the sort order for the focused list |
 | `f` | Choose which work item types are shown, or on a PR, filter others' PRs |
@@ -438,16 +449,19 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
 | `t` | Edit tags on your work item: type to search, `enter` adds the tag or removes it if it is already set (✓). A tag that does not exist is created |
-| `m` | Comment on a work item: type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels |
+| `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels |
+| `]` / `[` | Select the next or previous comment thread on a PR's Comments tab |
+| `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
 | `c` | Complete your PR or set auto-complete: pick the merge strategy, `space` ticks *Delete source branch*, *Transition linked work items*, *Set auto-complete* and *Bypass branch policies*, edit the merge commit message, then `enter`. A PR that is not ready starts with auto-complete ticked; if auto-complete is set, *Cancel auto-complete* is the last row. Bypassing asks `y` / `n` first. `esc` cancels and nothing is sent |
 | `v` | Vote on the PR: pick approve, approve with suggestions, wait for author, reject or reset vote, then `enter`. `esc` cancels and nothing is sent |
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `y` | Copy the PR (`!1234`) or work item (`#5678`) number |
 | `Y` | Copy the link to the PR, work item or pipeline run |
+| `l` / `L` | Select the next / previous link in the description or comments. While one is selected, `o` opens it and `Y` copies it. Switching tab or item clears the selection |
 | `r` | Reload everything |
 | `T` | Enter a new PAT |
 | `?` | Show all keys |
-| `esc` | Close a popup or cancel, or close the open item to show the sprint overview |
+| `esc` | Close a popup or cancel, go back from a diff to the file list, or close the open item to show the sprint overview |
 | `q`, `ctrl+c` | Quit |
 
 Actions apply to the selected row in the focused list. When the detail panel has focus, they apply to the item shown there. The toolbar always shows the keys that work in the current context.

@@ -1,8 +1,10 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::compare_timestamps;
 use crate::config::MergeStrategy;
 use crate::images::markdown_images;
 use crate::rich_text::RichText;
@@ -223,6 +225,8 @@ pub struct PullRequestDetails {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Thread {
+    #[serde(default)]
+    pub id: u32,
     pub status: Option<String>,
     #[serde(default)]
     pub is_deleted: bool,
@@ -231,7 +235,41 @@ pub struct Thread {
     pub properties: Option<Value>,
 }
 
+impl PullRequestDetails {
+    /// Threads as listed: not resolved before resolved, newest first within each.
+    pub fn ordered_threads(&self) -> Vec<&Thread> {
+        let (mut unresolved, mut resolved): (Vec<&Thread>, Vec<&Thread>) =
+            self.threads.iter().partition(|thread| thread.is_open());
+        unresolved.sort_by(|a, b| newest_first(a.latest(), b.latest()));
+        resolved.sort_by(|a, b| newest_first(a.latest(), b.latest()));
+        unresolved.extend(resolved);
+        unresolved
+    }
+}
+
+/// Newest first; threads without a date go last.
+fn newest_first(a: Option<String>, b: Option<String>) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => compare_timestamps(&b, &a),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 impl Thread {
+    pub fn is_open(&self) -> bool {
+        matches!(self.status.as_deref(), None | Some("active" | "pending"))
+    }
+
+    /// Date of the newest comment.
+    fn latest(&self) -> Option<String> {
+        self.comments
+            .iter()
+            .filter_map(|comment| comment.published_date.clone())
+            .max_by(|a, b| compare_timestamps(a, b))
+    }
+
     /// System thread kind such as `VoteUpdate` or `RefUpdate`.
     pub fn kind(&self) -> Option<&str> {
         self.properties
@@ -240,6 +278,22 @@ impl Thread {
             .get("$value")?
             .as_str()
     }
+}
+
+/// Statuses a thread can be set to, as the API names them and as they are shown.
+pub const THREAD_STATUSES: [(&str, &str); 4] = [
+    ("active", "active"),
+    ("fixed", "resolved"),
+    ("wontFix", "won't fix"),
+    ("closed", "closed"),
+];
+
+/// The status as shown to the user.
+pub fn thread_status_label(status: &str) -> &str {
+    THREAD_STATUSES
+        .iter()
+        .find(|(api, _)| *api == status)
+        .map_or(status, |(_, label)| label)
 }
 
 #[derive(Deserialize)]
@@ -251,6 +305,8 @@ pub struct ThreadContext {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Comment {
+    #[serde(default)]
+    pub id: u32,
     pub author: IdentityRef,
     pub content: Option<String>,
     /// `content` rendered once; filled when the threads are loaded.
@@ -573,6 +629,128 @@ pub struct BuildRepository {
     pub kind: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestIteration {
+    pub id: u32,
+    pub source_ref_commit: CommitRef,
+    pub common_ref_commit: CommitRef,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IterationChanges {
+    #[serde(default)]
+    pub change_entries: Vec<ChangeEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeEntry {
+    pub change_type: String,
+    pub item: ChangedItem,
+    pub original_path: Option<String>,
+    pub source_server_item: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedItem {
+    pub path: String,
+    pub git_object_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitItem {
+    #[serde(default)]
+    pub content: String,
+    pub content_metadata: Option<ContentMetadata>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentMetadata {
+    #[serde(default)]
+    pub is_binary: bool,
+}
+
+/// The files a pull request changes, between the merge base and its latest source commit.
+#[derive(Debug, Clone)]
+pub struct PullRequestChanges {
+    pub base: String,
+    pub head: String,
+    pub files: Vec<ChangedFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedFile {
+    pub kind: ChangeKind,
+    pub path: String,
+    /// The path before a rename.
+    pub original_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+}
+
+impl ChangeKind {
+    /// From a change type such as `edit` or `edit, rename`.
+    pub fn from_change_type(change_type: &str) -> Self {
+        let has = |kind| change_type.split(", ").any(|part| part == kind);
+        if has("delete") {
+            Self::Deleted
+        } else if has("add") {
+            Self::Added
+        } else if has("rename") {
+            Self::Renamed
+        } else {
+            Self::Modified
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Added => "A",
+            Self::Modified => "M",
+            Self::Deleted => "D",
+            Self::Renamed => "R",
+        }
+    }
+}
+
+impl ChangedFile {
+    /// `None` for folders.
+    pub fn from_entry(entry: ChangeEntry) -> Option<Self> {
+        if entry.item.git_object_type.as_deref() == Some("tree") {
+            return None;
+        }
+        let kind = ChangeKind::from_change_type(&entry.change_type);
+        let original_path = entry
+            .original_path
+            .or(entry.source_server_item)
+            .filter(|path| *path != entry.item.path);
+        Some(Self {
+            kind,
+            path: entry.item.path,
+            original_path,
+        })
+    }
+}
+
+/// A file's content at one commit.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FileContent {
+    Text(String),
+    /// Binary or too large to diff.
+    Skipped,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -603,6 +781,39 @@ mod tests {
         .unwrap();
 
         assert_eq!(user.unique_name(), "Anna Andersson");
+    }
+
+    #[test]
+    fn ordered_threads_lists_open_before_resolved_newest_first() {
+        let thread = |id: u32, status: &str, date: &str| {
+            json!({
+                "id": id,
+                "status": status,
+                "comments": [{
+                    "id": 1,
+                    "author": { "id": "a", "displayName": "Anna" },
+                    "publishedDate": date
+                }]
+            })
+        };
+        let threads: Vec<Thread> = serde_json::from_value(json!([
+            thread(1, "fixed", "2024-01-05T10:00:00Z"),
+            thread(2, "active", "2024-01-01T10:00:00Z"),
+            thread(3, "active", "2024-01-03T10:00:00Z"),
+            thread(4, "closed", "2024-01-04T10:00:00Z"),
+        ]))
+        .unwrap();
+        let details = PullRequestDetails {
+            description: None,
+            threads,
+            statuses: Vec::new(),
+            policies: Vec::new(),
+            work_items: Vec::new(),
+        };
+
+        let ids: Vec<u32> = details.ordered_threads().iter().map(|t| t.id).collect();
+
+        assert_eq!(ids, vec![3, 2, 1, 4]);
     }
 
     #[test]
@@ -655,6 +866,67 @@ mod tests {
         assert_eq!(pr.reviewers[0].is_required, Some(true));
         assert_eq!(pr.reviewers[1].is_required, None);
         assert!(!pr.is_draft);
+    }
+
+    #[test]
+    fn change_types_map_to_one_kind() {
+        let labels: Vec<&str> = [
+            "add",
+            "edit",
+            "delete",
+            "rename",
+            "edit, rename",
+            "encoding",
+        ]
+        .into_iter()
+        .map(|change_type| ChangeKind::from_change_type(change_type).label())
+        .collect();
+
+        assert_eq!(labels, ["A", "M", "D", "R", "R", "M"]);
+    }
+
+    #[test]
+    fn change_entries_skip_folders_and_keep_renamed_paths() {
+        let changes: IterationChanges = serde_json::from_value(json!({
+            "changeEntries": [
+                { "changeType": "edit", "item": { "path": "/src", "gitObjectType": "tree" } },
+                { "changeType": "edit", "item": { "path": "/src/a.rs", "gitObjectType": "blob" } },
+                {
+                    "changeType": "rename",
+                    "item": { "path": "/src/new.rs", "gitObjectType": "blob" },
+                    "sourceServerItem": "/src/old.rs"
+                },
+                { "changeType": "add", "item": { "path": "/README.md" }, "originalPath": "/README.md" }
+            ]
+        }))
+        .unwrap();
+
+        let files: Vec<ChangedFile> = changes
+            .change_entries
+            .into_iter()
+            .filter_map(ChangedFile::from_entry)
+            .collect();
+
+        assert_eq!(
+            files,
+            [
+                ChangedFile {
+                    kind: ChangeKind::Modified,
+                    path: "/src/a.rs".into(),
+                    original_path: None
+                },
+                ChangedFile {
+                    kind: ChangeKind::Renamed,
+                    path: "/src/new.rs".into(),
+                    original_path: Some("/src/old.rs".into())
+                },
+                ChangedFile {
+                    kind: ChangeKind::Added,
+                    path: "/README.md".into(),
+                    original_path: None
+                },
+            ]
+        );
     }
 
     #[test]

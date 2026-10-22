@@ -28,12 +28,16 @@ pub struct Marks {
 pub struct Segment {
     pub text: String,
     pub marks: Marks,
+    /// Index into `RichText::links` when this text is part of a selectable link.
+    pub link: Option<usize>,
 }
 
 /// Formatted text from HTML or markdown, one entry per line. Images are marker lines.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RichText {
     pub lines: Vec<Vec<Segment>>,
+    /// Targets of the links in the text, in reading order (mentions and `mailto:` excluded).
+    pub links: Vec<String>,
 }
 
 impl RichText {
@@ -52,14 +56,19 @@ impl RichText {
 
     pub fn from_html(html: &str) -> Self {
         let html = extract_html_images(html);
+        let mut links = Vec::new();
+        let mut carried = None;
         let lines = match html2text::config::rich()
             .link_footnotes(false)
             .lines_from_read(html.as_bytes(), RENDER_WIDTH)
         {
-            Ok(lines) => lines.iter().map(segments).collect(),
+            Ok(lines) => lines
+                .iter()
+                .map(|line| segments(line, &mut links, &mut carried))
+                .collect(),
             Err(_) => html.lines().map(|line| vec![plain(line)]).collect(),
         };
-        let mut text = Self { lines };
+        let mut text = Self { lines, links };
         text.trim();
         text
     }
@@ -94,12 +103,22 @@ fn plain(text: &str) -> Segment {
     Segment {
         text: text.to_string(),
         marks: Marks::default(),
+        link: None,
     }
 }
 
-fn segments(line: &TaggedLine<Vec<RichAnnotation>>) -> Vec<Segment> {
+/// The link a line ended in: its target and index, so a wrapped link stays one entry.
+type OpenLink = Option<(String, Option<usize>)>;
+
+fn segments(
+    line: &TaggedLine<Vec<RichAnnotation>>,
+    links: &mut Vec<String>,
+    carried: &mut OpenLink,
+) -> Vec<Segment> {
     let mut out: Vec<Segment> = Vec::new();
     let mut link: Option<(String, String)> = None;
+    let mut index = None;
+    let mut continued = carried.take();
     for piece in line.tagged_strings() {
         let mut marks = Marks::default();
         let mut url = None;
@@ -119,15 +138,29 @@ fn segments(line: &TaggedLine<Vec<RichAnnotation>>) -> Vec<Segment> {
         if link.as_ref().map(|(target, _)| target) != url.as_ref() {
             push_link_target(&mut out, link.take());
             link = url.map(|target| (target, String::new()));
+            index = match (&link, continued.take()) {
+                (Some((target, _)), Some((previous, index))) if *target == previous => index,
+                (Some((target, _)), _) => {
+                    let mention = piece.s.trim().starts_with(['#', '@']);
+                    (!mention && !target.starts_with("mailto:")).then(|| {
+                        links.push(target.clone());
+                        links.len() - 1
+                    })
+                }
+                (None, _) => None,
+            };
         }
+        continued = None;
         if let Some((_, text)) = &mut link {
             text.push_str(&piece.s);
         }
         out.push(Segment {
             text: piece.s.clone(),
             marks,
+            link: if marks.link { index } else { None },
         });
     }
+    *carried = link.as_ref().map(|(target, _)| (target.clone(), index));
     push_link_target(&mut out, link);
     decorate_prefix(&mut out);
     out
@@ -148,6 +181,7 @@ fn push_link_target(out: &mut Vec<Segment>, link: Option<(String, String)>) {
             muted: true,
             ..Marks::default()
         },
+        link: None,
     });
 }
 
@@ -183,4 +217,44 @@ fn decorate_prefix(line: &mut [Segment]) {
         }
     }
     first.text = prefix + &rest;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RichText;
+
+    #[test]
+    fn links_are_collected_in_reading_order_and_tag_their_segments() {
+        let text = RichText::from_markdown("[a](https://a.test) and\n\n[b](https://b.test)");
+
+        assert_eq!(text.links, ["https://a.test", "https://b.test"]);
+        let tagged: Vec<_> = text
+            .lines
+            .iter()
+            .flatten()
+            .filter_map(|s| s.link.map(|i| (s.text.as_str(), i)))
+            .collect();
+        assert_eq!(tagged, [("a", 0), ("b", 1)]);
+    }
+
+    #[test]
+    fn a_link_spanning_lines_is_collected_once() {
+        let text = RichText::from_html(
+            r#"<a href="https://a.test">one<br>two</a> <a href="https://b.test">b</a>"#,
+        );
+
+        assert_eq!(text.links, ["https://a.test", "https://b.test"]);
+        let tagged: Vec<_> = text.lines.iter().flatten().filter_map(|s| s.link).collect();
+        assert_eq!(tagged, [0, 0, 1]);
+    }
+
+    #[test]
+    fn mentions_and_mailto_links_are_not_selectable() {
+        let text = RichText::from_html(
+            r##"<a href="mailto:x@y.test">mail</a> <a href="https://u.test">@user</a> <a href="https://w.test">#12</a>"##,
+        );
+
+        assert!(text.links.is_empty());
+        assert!(text.lines.iter().flatten().all(|s| s.link.is_none()));
+    }
 }

@@ -7,8 +7,10 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::models::{
-    Comment, Identity, ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestChecks,
-    PullRequestDetails, PullRequestStatus, ResourceRef, ReviewSignals, Thread,
+    ChangeKind, ChangedFile, Comment, FileContent, GitItem, Identity, IterationChanges,
+    ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestChanges, PullRequestChecks,
+    PullRequestDetails, PullRequestIteration, PullRequestStatus, ResourceRef, ReviewSignals,
+    Thread,
 };
 use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps, is_unauthorized};
 use crate::config::{MergeStrategy, OtherPrsFilter};
@@ -36,6 +38,11 @@ pub struct CompletionOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bypass_reason: Option<String>,
 }
+
+/// Changed files listed per PR; one page, larger PRs are cut off.
+const MAX_CHANGES: &str = "2000";
+/// Larger files are not diffed.
+const MAX_DIFF_BYTES: usize = 512 * 1024;
 
 /// Review signals of someone else's PR and what they were computed from.
 pub(super) struct CachedReview {
@@ -319,6 +326,70 @@ impl ProjectApi {
             .await
     }
 
+    /// Starts a thread that is not tied to a file.
+    pub async fn create_thread(&self, pr: &PullRequest, content: &str) -> Result<()> {
+        let body = json!({
+            "comments": [{ "parentCommentId": 0, "content": content, "commentType": 1 }],
+            "status": "active"
+        });
+        self.post_thread(pr, &["threads"], &body).await
+    }
+
+    /// Replies to the first comment of a thread.
+    pub async fn reply(
+        &self,
+        pr: &PullRequest,
+        thread_id: u32,
+        parent_comment_id: u32,
+        content: &str,
+    ) -> Result<()> {
+        let body = json!({
+            "parentCommentId": parent_comment_id,
+            "content": content,
+            "commentType": 1
+        });
+        let thread_id = thread_id.to_string();
+        self.post_thread(pr, &["threads", &thread_id, "comments"], &body)
+            .await
+    }
+
+    /// `status` is one of [`THREAD_STATUSES`].
+    pub async fn set_thread_status(
+        &self,
+        pr: &PullRequest,
+        thread_id: u32,
+        status: &str,
+    ) -> Result<()> {
+        let id = pr.pull_request_id.to_string();
+        let thread_id = thread_id.to_string();
+        let path = [&self.pr_path(pr, &id)[..], &["threads", &thread_id]].concat();
+        let _: Value = self
+            .client
+            .patch(
+                &self.client.urls.dev_azure,
+                &path,
+                &json!({ "status": status }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn post_thread(&self, pr: &PullRequest, tail: &[&str], body: &Value) -> Result<()> {
+        let id = pr.pull_request_id.to_string();
+        let path = [&self.pr_path(pr, &id)[..], tail].concat();
+        let _: Value = self
+            .client
+            .post_versioned(
+                &self.client.urls.dev_azure,
+                &path,
+                &[],
+                body,
+                super::API_VERSION,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Approval and review signals of someone else's PR. Policies are loaded again only when the PR
     /// changed, threads also once they are older than [`THREADS_MAX_AGE`].
     async fn review(
@@ -474,6 +545,101 @@ impl ProjectApi {
             .expect("identity cache")
             .insert(name.to_string(), id.clone());
         Ok(id)
+    }
+
+    /// The files changed in the latest iteration, compared with the target branch.
+    pub async fn pull_request_changes(&self, pr: &PullRequest) -> Result<PullRequestChanges> {
+        let id = pr.pull_request_id.to_string();
+        let iterations_path = [&self.pr_path(pr, &id)[..], &["iterations"]].concat();
+        let iterations: ListResponse<PullRequestIteration> = self
+            .client
+            .get(&self.client.urls.dev_azure, &iterations_path, &[])
+            .await?;
+        let latest = iterations
+            .value
+            .into_iter()
+            .max_by_key(|iteration| iteration.id)
+            .context("pull request has no iterations")?;
+        let iteration = latest.id.to_string();
+        let changes_path = [&iterations_path[..], &[&iteration, "changes"]].concat();
+        let changes: IterationChanges = self
+            .client
+            .get(
+                &self.client.urls.dev_azure,
+                &changes_path,
+                &[("$compareTo", "0"), ("$top", MAX_CHANGES)],
+            )
+            .await?;
+        Ok(PullRequestChanges {
+            base: latest.common_ref_commit.commit_id,
+            head: latest.source_ref_commit.commit_id,
+            files: changes
+                .change_entries
+                .into_iter()
+                .filter_map(ChangedFile::from_entry)
+                .collect(),
+        })
+    }
+
+    /// `file` before and after the PR; empty on the side where it does not exist.
+    pub async fn file_versions(
+        &self,
+        pr: &PullRequest,
+        changes: &PullRequestChanges,
+        file: &ChangedFile,
+    ) -> Result<(FileContent, FileContent)> {
+        let old_path = file.original_path.as_deref().unwrap_or(&file.path);
+        let old = async {
+            match file.kind {
+                ChangeKind::Added => Ok(FileContent::Text(String::new())),
+                _ => self.file_at(pr, old_path, &changes.base).await,
+            }
+        };
+        let new = async {
+            match file.kind {
+                ChangeKind::Deleted => Ok(FileContent::Text(String::new())),
+                _ => self.file_at(pr, &file.path, &changes.head).await,
+            }
+        };
+        tokio::try_join!(old, new)
+    }
+
+    async fn file_at(&self, pr: &PullRequest, path: &str, commit: &str) -> Result<FileContent> {
+        let item: GitItem = self
+            .client
+            .get(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &pr.repository.project.id,
+                    "_apis",
+                    "git",
+                    "repositories",
+                    &pr.repository.id,
+                    "items",
+                ],
+                &[
+                    ("path", path),
+                    ("versionDescriptor.version", commit),
+                    ("versionDescriptor.versionType", "commit"),
+                    ("includeContent", "true"),
+                ],
+            )
+            .await?;
+        Ok(file_content(item))
+    }
+}
+
+/// Binary and too large files are skipped.
+fn file_content(item: GitItem) -> FileContent {
+    let binary = item
+        .content_metadata
+        .is_some_and(|metadata| metadata.is_binary)
+        || item.content.contains('\0');
+    if binary || item.content.len() > MAX_DIFF_BYTES {
+        FileContent::Skipped
+    } else {
+        FileContent::Text(item.content)
     }
 }
 
@@ -1318,6 +1484,84 @@ mod tests {
         assert!(client.vote(&pr, "me", 10).await.is_err());
     }
 
+    const THREADS: &str =
+        "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/7/threads";
+
+    async fn expect_thread_call(server: &MockServer, verb: &str, target: &str, body: Value) {
+        Mock::given(method(verb))
+            .and(path(target))
+            .and(body_json(body))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 1 })))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn create_thread_posts_an_active_thread() {
+        let server = MockServer::start().await;
+        expect_thread_call(
+            &server,
+            "POST",
+            THREADS,
+            json!({
+                "comments": [{ "parentCommentId": 0, "content": "Hi", "commentType": 1 }],
+                "status": "active"
+            }),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        client.create_thread(&pr, "Hi").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reply_posts_to_the_thread_under_its_first_comment() {
+        let server = MockServer::start().await;
+        expect_thread_call(
+            &server,
+            "POST",
+            &format!("{THREADS}/3/comments"),
+            json!({ "parentCommentId": 2, "content": "Done", "commentType": 1 }),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        client.reply(&pr, 3, 2, "Done").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_thread_status_patches_the_thread() {
+        let server = MockServer::start().await;
+        expect_thread_call(
+            &server,
+            "PATCH",
+            &format!("{THREADS}/3"),
+            json!({ "status": "fixed" }),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        client.set_thread_status(&pr, 3, "fixed").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_thread_call_is_an_error_and_not_retried() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(7, "PR", "other", "2026-10-01T10:00:00Z");
+
+        assert!(client.create_thread(&pr, "Hi").await.is_err());
+    }
+
     #[tokio::test]
     async fn complete_pull_request_needs_a_source_commit() {
         let client = ProjectApi::with_base_url("http://127.0.0.1:1");
@@ -1329,5 +1573,140 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.to_string(), "pull request has no source commit");
+    }
+
+    const PR_1: &str = "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/1";
+    const ITEMS: &str = "/contoso/project-id/_apis/git/repositories/repo-id/items";
+
+    #[tokio::test]
+    async fn pull_request_changes_list_the_latest_iteration_against_the_base() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("{PR_1}/iterations")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "id": 2, "sourceRefCommit": { "commitId": "head2" }, "commonRefCommit": { "commitId": "base2" } },
+                { "id": 1, "sourceRefCommit": { "commitId": "head1" }, "commonRefCommit": { "commitId": "base1" } }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("{PR_1}/iterations/2/changes")))
+            .and(query_param("$compareTo", "0"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "changeEntries": [
+                { "changeType": "edit", "item": { "path": "/src/a.rs", "gitObjectType": "blob" } }
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let api = ProjectApi::with_base_url(&server.uri());
+
+        let changes = api
+            .pull_request_changes(&pull_request(1, "PR", "me", "2026-10-01T10:00:00Z"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            (changes.base.as_str(), changes.head.as_str()),
+            ("base2", "head2")
+        );
+        assert_eq!(changes.files.len(), 1);
+        assert_eq!(changes.files[0].path, "/src/a.rs");
+    }
+
+    fn changes() -> PullRequestChanges {
+        PullRequestChanges {
+            base: "base".into(),
+            head: "head".into(),
+            files: Vec::new(),
+        }
+    }
+
+    async fn mount_item(server: &MockServer, file: &str, commit: &str, body: Value) {
+        Mock::given(method("GET"))
+            .and(path(ITEMS))
+            .and(query_param("path", file))
+            .and(query_param("versionDescriptor.version", commit))
+            .and(query_param("versionDescriptor.versionType", "commit"))
+            .and(query_param("includeContent", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn renamed_file_is_read_from_its_old_path_at_the_base() {
+        let server = MockServer::start().await;
+        mount_item(&server, "/old.rs", "base", json!({ "content": "old\n" })).await;
+        mount_item(&server, "/new.rs", "head", json!({ "content": "new\n" })).await;
+        let api = ProjectApi::with_base_url(&server.uri());
+        let file = ChangedFile {
+            kind: ChangeKind::Renamed,
+            path: "/new.rs".into(),
+            original_path: Some("/old.rs".into()),
+        };
+
+        let versions = api
+            .file_versions(
+                &pull_request(1, "PR", "me", "2026-10-01T10:00:00Z"),
+                &changes(),
+                &file,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            versions,
+            (
+                FileContent::Text("old\n".into()),
+                FileContent::Text("new\n".into())
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn added_and_deleted_files_are_read_on_one_side_only() {
+        let server = MockServer::start().await;
+        mount_item(&server, "/added.rs", "head", json!({ "content": "a\n" })).await;
+        mount_item(&server, "/deleted.rs", "base", json!({ "content": "d\n" })).await;
+        let api = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(1, "PR", "me", "2026-10-01T10:00:00Z");
+        let file = |kind, path: &str| ChangedFile {
+            kind,
+            path: path.into(),
+            original_path: None,
+        };
+
+        let added = api
+            .file_versions(&pr, &changes(), &file(ChangeKind::Added, "/added.rs"))
+            .await
+            .unwrap();
+        let deleted = api
+            .file_versions(&pr, &changes(), &file(ChangeKind::Deleted, "/deleted.rs"))
+            .await
+            .unwrap();
+
+        let empty = || FileContent::Text(String::new());
+        assert_eq!(added, (empty(), FileContent::Text("a\n".into())));
+        assert_eq!(deleted, (FileContent::Text("d\n".into()), empty()));
+    }
+
+    #[test]
+    fn binary_and_too_large_files_are_skipped() {
+        let item = |value: Value| file_content(serde_json::from_value(value).unwrap());
+
+        assert_eq!(
+            item(json!({ "content": "text" })),
+            FileContent::Text("text".into())
+        );
+        assert_eq!(
+            item(json!({ "content": "iVBOR", "contentMetadata": { "isBinary": true } })),
+            FileContent::Skipped
+        );
+        assert_eq!(item(json!({ "content": "a\u{0}b" })), FileContent::Skipped);
+        assert_eq!(
+            item(json!({ "content": "x".repeat(MAX_DIFF_BYTES + 1) })),
+            FileContent::Skipped
+        );
     }
 }
