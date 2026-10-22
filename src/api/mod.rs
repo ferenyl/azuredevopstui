@@ -14,6 +14,7 @@ pub use pull_requests::{is_approved, is_reviewer_policy};
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::header::CONTENT_TYPE;
@@ -29,6 +30,9 @@ const DEV_AZURE: &str = "https://dev.azure.com";
 const VSSPS: &str = "https://app.vssps.visualstudio.com";
 const VSSPS_DEV_AZURE: &str = "https://vssps.dev.azure.com";
 const MAX_DOWNLOAD_BYTES: u64 = 20 * 1024 * 1024;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const USER_AGENT: &str = concat!("azuredevopstui/", env!("CARGO_PKG_VERSION"));
 
 /// Service roots, replaceable so tests can point them at a mock server.
 #[derive(Clone)]
@@ -70,10 +74,20 @@ pub struct AdoClient {
     urls: BaseUrls,
 }
 
+/// Builds the shared HTTP client. `request_timeout` bounds each whole request, including the body.
+fn http_client(request_timeout: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(request_timeout)
+        .build()
+        .expect("HTTP client with static settings")
+}
+
 impl AdoClient {
     pub fn new(auth: Auth) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: http_client(REQUEST_TIMEOUT),
             auth,
             urls: BaseUrls::default(),
         }
@@ -82,7 +96,7 @@ impl AdoClient {
     #[cfg(test)]
     fn with_base_url(auth: Auth, url: &str) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: http_client(REQUEST_TIMEOUT),
             auth,
             urls: BaseUrls {
                 dev_azure: url.into(),
@@ -90,6 +104,12 @@ impl AdoClient {
                 vssps_dev_azure: url.into(),
             },
         }
+    }
+
+    #[cfg(test)]
+    fn with_request_timeout(mut self, request_timeout: Duration) -> Self {
+        self.http = http_client(request_timeout);
+        self
     }
 
     pub fn auth(&self) -> &Auth {
@@ -446,6 +466,60 @@ mod tests {
             .unwrap();
 
         assert_eq!(bytes, [1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn requests_send_user_agent() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_apis/test"))
+            .and(header(
+                "user-agent",
+                concat!("azuredevopstui/", env!("CARGO_PKG_VERSION")),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri());
+
+        client
+            .get::<Value>(&server.uri(), &["_apis", "test"], &[])
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn stalled_request_fails_with_timeout() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/_apis/test"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_secs(5))
+                    .set_body_json(serde_json::json!({})),
+            )
+            .mount(&server)
+            .await;
+        let client = AdoClient::with_base_url(Auth::from_pat("pat"), &server.uri())
+            .with_request_timeout(Duration::from_millis(100));
+
+        let err = client
+            .get::<Value>(&server.uri(), &["_apis", "test"], &[])
+            .await
+            .unwrap_err();
+
+        assert!(err.chain().any(|cause| {
+            cause
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(reqwest::Error::is_timeout)
+        }));
     }
 
     #[tokio::test]
