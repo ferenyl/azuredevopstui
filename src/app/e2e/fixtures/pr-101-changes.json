@@ -1,0 +1,20 @@
+{
+  "method": "GET",
+  "path": "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/101/iterations/2/changes",
+  "body": {
+    "changeEntries": [
+      {
+        "changeType": "edit",
+        "item": { "path": "/src/orders", "gitObjectType": "tree" }
+      },
+      {
+        "changeType": "edit",
+        "item": { "path": "/src/orders/filter.rs", "gitObjectType": "blob" }
+      },
+      {
+        "changeType": "add",
+        "item": { "path": "/docs/filter.md", "gitObjectType": "blob" }
+      }
+    ]
+  }
+}

@@ -1,11 +1,12 @@
 use anyhow::Result;
 
 use crate::api::{
-    Board, Build, CurrentUser, Iteration, Mention, Partial, PullRequest, PullRequestChecks,
-    PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
+    Board, Build, CurrentUser, Iteration, Mention, Partial, PullRequest, PullRequestChanges,
+    PullRequestChecks, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
 };
 use crate::auth::Auth;
 use crate::config::MergeStrategy;
+use crate::diff::FileDiff;
 
 use super::loads::Load;
 
@@ -69,6 +70,16 @@ pub enum Message {
     PullRequestCompleted {
         id: u32,
         result: Result<()>,
+    },
+    PullRequestChanges {
+        id: u32,
+        result: Result<PullRequestChanges>,
+    },
+    FileDiff {
+        id: u32,
+        /// Index into the changed files.
+        file: usize,
+        result: Result<FileDiff>,
     },
     PullRequestUpdated {
         id: u32,

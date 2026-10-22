@@ -238,6 +238,8 @@ impl App {
                     }
                 }
             }
+            Message::PullRequestChanges { id, result } => self.files_loaded(id, result),
+            Message::FileDiff { id, file, result } => self.diff_loaded(id, file, result),
         }
         if let Some(config) = &self.config {
             self.data.sort(&config.sort);

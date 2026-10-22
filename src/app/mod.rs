@@ -2,6 +2,7 @@ mod action;
 mod actions;
 #[cfg(test)]
 mod e2e;
+mod files;
 mod inbox;
 mod input;
 mod loads;
@@ -18,6 +19,7 @@ mod toolbar;
 mod wizard;
 
 pub use action::{Action, HELP};
+pub use files::Files;
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
     ColumnPicker, CompletePicker, Data, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS,
@@ -65,6 +67,8 @@ pub struct App {
     pub detail_info: Option<DetailInfo>,
     pub detail_scroll: u16,
     pub detail_tab: DetailTab,
+    /// Changed files of the shown PR, once its Files tab was shown.
+    pub files: Option<Files>,
     /// Targets of the links drawn in the detail pane last frame, in reading order.
     pub detail_links: RefCell<Vec<String>>,
     /// Selected entry of `detail_links`.
@@ -115,6 +119,7 @@ impl App {
             detail_info: None,
             detail_scroll: 0,
             detail_tab: DetailTab::default(),
+            files: None,
             detail_links: RefCell::default(),
             link_index: None,
             #[cfg(test)]

@@ -1,6 +1,8 @@
 use crossterm::event::KeyEvent;
 
-use super::{Action, App, Detail, LEFT_PANELS, Panel, Popup, Retry, Screen, SetupStep, TextInput};
+use super::{
+    Action, App, Detail, DetailTab, LEFT_PANELS, Panel, Popup, Retry, Screen, SetupStep, TextInput,
+};
 
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) {
@@ -37,7 +39,11 @@ impl App {
                     cancelable: true, ..
                 }) => self.screen = Screen::Main,
                 Screen::Setup(_) => self.should_quit = true,
-                Screen::Main => self.close_detail(),
+                Screen::Main => {
+                    if !self.close_file_diff() {
+                        self.close_detail();
+                    }
+                }
             },
             Action::Help => self.show_help = matches!(self.screen, Screen::Main),
             Action::ChangeToken => match self.screen {
@@ -58,7 +64,9 @@ impl App {
             },
             Action::Up | Action::Down => match &mut self.screen {
                 Screen::Main if self.focus == Panel::Detail => {
-                    self.scroll_detail(action == Action::Down);
+                    if !self.move_file_selection(action == Action::Down) {
+                        self.scroll_detail(action == Action::Down);
+                    }
                 }
                 Screen::Main => self.move_selection(action == Action::Down),
                 Screen::Setup(step) => {
@@ -72,6 +80,7 @@ impl App {
                 }
             },
             Action::Confirm => match self.screen {
+                Screen::Main if self.focus == Panel::Detail => self.open_file_diff(),
                 Screen::Main => self.open_selected(),
                 Screen::Setup(_) => self.confirm_setup_step(),
             },
@@ -187,6 +196,9 @@ impl App {
         self.detail_tab = tabs[index];
         self.detail_scroll = 0;
         self.link_index = None;
+        if self.detail_tab == DetailTab::Files {
+            self.load_files();
+        }
     }
 
     pub(super) fn clamp_selections(&mut self) {
@@ -313,9 +325,11 @@ mod tests {
         press(&mut app, KeyCode::Tab);
         assert_eq!(app.detail_tab, DetailTab::Checks);
         press(&mut app, KeyCode::Tab);
+        assert_eq!(app.detail_tab, DetailTab::Files);
+        press(&mut app, KeyCode::Tab);
         assert_eq!(app.detail_tab, DetailTab::Overview);
         press(&mut app, KeyCode::BackTab);
-        assert_eq!(app.detail_tab, DetailTab::Checks);
+        assert_eq!(app.detail_tab, DetailTab::Files);
     }
 
     #[test]
