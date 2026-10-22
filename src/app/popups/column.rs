@@ -62,3 +62,40 @@ impl App {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::app::Popup;
+    use crate::app::test_helpers::{app, board};
+    use crate::test_support::work_item;
+
+    #[test]
+    fn picker_preselects_current_column() {
+        let mut app = app();
+        let mut item = work_item(10, "Story", "User Story", "Active");
+        item.fields.board_column = Some("Active".into());
+        item.fields.board_column_done = Some(false);
+
+        app.open_column_picker(item, &board(), false);
+
+        let Some(Popup::Column(picker)) = &app.popup else {
+            panic!("column picker not open");
+        };
+        assert!(!picker.unassign);
+        assert_eq!(picker.selection.current(), Some("Active (Doing)"));
+    }
+
+    #[test]
+    fn type_not_on_board_shows_error() {
+        let mut app = app();
+        let item = work_item(10, "Epic", "Epic", "New");
+
+        app.open_column_picker(item, &board(), false);
+
+        assert!(app.popup.is_none());
+        assert_eq!(
+            app.error.as_deref(),
+            Some("Epic items are not on the board")
+        );
+    }
+}

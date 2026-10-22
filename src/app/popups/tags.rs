@@ -86,3 +86,62 @@ impl TagPicker {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use crate::app::test_helpers::{app, press};
+    use crate::app::{Popup, TagPicker};
+
+    fn tag_app() -> crate::app::App {
+        let mut app = app();
+        app.popup = Some(Popup::Tags(TagPicker::new(
+            10,
+            Vec::new(),
+            vec!["backend".into(), "frontend".into()],
+        )));
+        app
+    }
+
+    fn items(app: &crate::app::App) -> Vec<String> {
+        let Some(Popup::Tags(picker)) = &app.popup else {
+            panic!("tag picker not open");
+        };
+        picker.selection.items.clone()
+    }
+
+    #[test]
+    fn typing_filters_tags_and_backspace_widens() {
+        let mut app = tag_app();
+
+        press(&mut app, KeyCode::Char('f'));
+        press(&mut app, KeyCode::Char('r'));
+        assert_eq!(items(&app), ["frontend", "fr"]);
+
+        press(&mut app, KeyCode::Backspace);
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(items(&app), ["backend", "frontend"]);
+    }
+
+    #[test]
+    fn unknown_query_is_offered_as_new_tag() {
+        let mut app = tag_app();
+
+        for c in "ops".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+
+        assert_eq!(items(&app), ["ops"]);
+    }
+
+    #[test]
+    fn ctrl_keys_are_not_taken_by_the_query() {
+        let mut picker = TagPicker::new(10, Vec::new(), vec!["backend".into()]);
+
+        let taken = picker.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL));
+
+        assert!(!taken);
+        assert_eq!(picker.query, "");
+    }
+}

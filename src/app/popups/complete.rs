@@ -54,3 +54,52 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyCode;
+
+    use crate::app::Popup;
+    use crate::app::test_helpers::{app, press};
+    use crate::config::MergeStrategy;
+    use crate::test_support::pull_request;
+
+    #[test]
+    fn picker_preselects_last_used_strategy() {
+        let mut app = app();
+        app.config.as_mut().unwrap().merge_strategy = Some(MergeStrategy::Rebase);
+        let pr = Box::new(pull_request(1, "First", "me", "2026-10-03T10:00:00Z"));
+
+        app.open_complete_picker(pr, vec![MergeStrategy::Squash, MergeStrategy::Rebase]);
+
+        let Some(Popup::Complete(picker)) = &app.popup else {
+            panic!("complete picker not open");
+        };
+        assert_eq!(picker.selection.selected, 1);
+    }
+
+    #[test]
+    fn no_allowed_strategy_shows_error() {
+        let mut app = app();
+        let pr = Box::new(pull_request(1, "First", "me", "2026-10-03T10:00:00Z"));
+
+        app.open_complete_picker(pr, Vec::new());
+
+        assert!(app.popup.is_none());
+        assert_eq!(
+            app.error.as_deref(),
+            Some("no merge strategy is allowed for !1")
+        );
+    }
+
+    #[test]
+    fn esc_cancels_complete() {
+        let mut app = app();
+        let pr = Box::new(pull_request(1, "First", "me", "2026-10-03T10:00:00Z"));
+        app.open_complete_picker(pr, vec![MergeStrategy::Squash]);
+
+        press(&mut app, KeyCode::Esc);
+
+        assert!(app.popup.is_none());
+    }
+}

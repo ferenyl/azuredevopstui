@@ -54,3 +54,75 @@ pub(super) fn handle_key(text: &mut String, key: KeyEvent) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use crate::app::Popup;
+    use crate::app::test_helpers::{app, press};
+
+    #[test]
+    fn shift_or_alt_enter_adds_a_line() {
+        let mut text = String::from("a");
+
+        assert!(handle_key(
+            &mut text,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)
+        ));
+        assert!(handle_key(
+            &mut text,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)
+        ));
+
+        assert_eq!(text, "a\n\n");
+    }
+
+    #[test]
+    fn plain_enter_and_ctrl_keys_are_not_taken() {
+        let mut text = String::from("a");
+
+        assert!(!handle_key(
+            &mut text,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ));
+        assert!(!handle_key(
+            &mut text,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)
+        ));
+
+        assert_eq!(text, "a");
+    }
+
+    #[test]
+    fn m_opens_comment_for_selected_work_item() {
+        let mut app = app();
+        app.focus = crate::app::Panel::MyWorkItems;
+
+        press(&mut app, KeyCode::Char('m'));
+
+        assert!(matches!(
+            &app.popup,
+            Some(Popup::Comment { work_item_id: 10, text }) if text.is_empty()
+        ));
+    }
+
+    #[test]
+    fn blank_comment_is_dropped_on_confirm() {
+        let mut app = app();
+        app.popup = Some(Popup::Comment {
+            work_item_id: 10,
+            text: String::new(),
+        });
+        press(&mut app, KeyCode::Char(' '));
+        press(&mut app, KeyCode::Backspace);
+        press(&mut app, KeyCode::Char(' '));
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(app.popup.is_none());
+        assert!(app.error.is_none());
+    }
+}
