@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/Web/_apis/work/backlogs",
+  "body": {
+    "value": [
+      {
+        "name": "Epics",
+        "type": "portfolio"
+      },
+      {
+        "name": "Stories",
+        "type": "requirement"
+      }
+    ]
+  }
+}

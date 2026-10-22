@@ -1,0 +1,21 @@
+{
+  "method": "POST",
+  "path": "/contoso/Fabrikam/_apis/wit/workitemsbatch",
+  "bodyContains": "\"ids\":[303]",
+  "body": {
+    "value": [
+      {
+        "id": 303,
+        "fields": {
+          "System.Title": "Export orders to CSV",
+          "System.WorkItemType": "User Story",
+          "System.State": "New",
+          "System.BoardColumn": "Ready",
+          "System.ChangedDate": "2026-10-23T10:00:00Z",
+          "System.CreatedDate": "2026-10-01T10:00:00Z",
+          "Microsoft.VSTS.Common.Priority": 2
+        }
+      }
+    ]
+  }
+}

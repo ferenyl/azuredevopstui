@@ -1,0 +1,24 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/build/builds",
+  "body": {
+    "value": [
+      {
+        "id": 501,
+        "buildNumber": "20261020.1",
+        "status": "completed",
+        "result": "failed",
+        "definition": {
+          "id": 7,
+          "name": "orders-ci"
+        },
+        "sourceBranch": "refs/heads/feature/101",
+        "repository": {
+          "id": "gh-orders",
+          "type": "GitHub"
+        },
+        "queueTime": "2026-10-20T09:30:00Z"
+      }
+    ]
+  }
+}

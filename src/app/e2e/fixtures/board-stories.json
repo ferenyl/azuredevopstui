@@ -1,0 +1,45 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/Web/_apis/work/boards/Stories",
+  "body": {
+    "columns": [
+      {
+        "name": "New",
+        "stateMappings": {
+          "User Story": "New",
+          "Bug": "New"
+        }
+      },
+      {
+        "name": "Ready",
+        "stateMappings": {
+          "User Story": "New",
+          "Bug": "New"
+        }
+      },
+      {
+        "name": "Active",
+        "isSplit": true,
+        "stateMappings": {
+          "User Story": "Active",
+          "Bug": "Active"
+        }
+      },
+      {
+        "name": "Closed",
+        "stateMappings": {
+          "User Story": "Closed",
+          "Bug": "Closed"
+        }
+      }
+    ],
+    "fields": {
+      "columnField": {
+        "referenceName": "WEF_Web_Kanban.Column"
+      },
+      "doneField": {
+        "referenceName": "WEF_Web_Kanban.Column.Done"
+      }
+    }
+  }
+}

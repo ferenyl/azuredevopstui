@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/wit/tags",
+  "body": {
+    "value": [
+      {
+        "name": "backend"
+      },
+      {
+        "name": "frontend"
+      }
+    ]
+  }
+}

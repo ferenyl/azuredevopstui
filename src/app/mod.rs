@@ -1,5 +1,7 @@
 mod action;
 mod actions;
+#[cfg(test)]
+mod e2e;
 mod inbox;
 mod input;
 mod message;

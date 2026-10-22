@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/contoso/_apis/connectionData",
+  "body": {
+    "authenticatedUser": {
+      "id": "me-id",
+      "providerDisplayName": "Mona Me"
+    }
+  }
+}

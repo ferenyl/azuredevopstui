@@ -1,0 +1,7 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/policy/evaluations",
+  "body": {
+    "value": []
+  }
+}
