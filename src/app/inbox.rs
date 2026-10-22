@@ -1,15 +1,24 @@
 use std::collections::HashSet;
 
+use chrono::{Local, NaiveTime};
+
 use super::message::Message;
 use super::{App, Detail};
 
 impl App {
     /// Inbox entries that showed up or changed status after the first load and are not notified yet.
-    /// Marks them as notified. Empty when notifications are off.
+    /// Marks them as notified. Empty when notifications are off, a kind is disabled or it is quiet
+    /// hours; entries seen then still count as notified, so they do not burst when quiet hours end.
     pub(super) fn new_inbox_entries(&mut self) -> Vec<Detail> {
-        if !self.config.as_ref().is_some_and(|c| c.notifications) {
+        self.new_inbox_entries_at(Local::now().time())
+    }
+
+    pub(super) fn new_inbox_entries_at(&mut self, now: NaiveTime) -> Vec<Detail> {
+        let Some(config) = self.config.as_ref().filter(|c| c.notifications) else {
             return Vec::new();
-        }
+        };
+        let notify = config.notify.clone();
+        let quiet = notify.quiet_hours.as_ref().is_some_and(|q| q.contains(now));
         let Some(notified) = &mut self.notified else {
             return Vec::new();
         };
@@ -19,7 +28,14 @@ impl App {
             .map(|entry| &entry.detail)
             .filter(|detail| {
                 let status = self.data.status(detail);
-                notified.insert(detail.key(), status.clone()).as_ref() != Some(&status)
+                let changed =
+                    notified.insert(detail.key(), status.clone()).as_ref() != Some(&status);
+                let enabled = match detail {
+                    Detail::Build(_) => notify.builds,
+                    Detail::WorkItem(_) => notify.mentions,
+                    Detail::PullRequest(_) => notify.pull_requests,
+                };
+                changed && enabled && !quiet
             })
             .cloned()
             .collect()
@@ -87,10 +103,23 @@ impl App {
 mod tests {
     use std::time::Instant;
 
+    use chrono::NaiveTime;
+
     use crate::api::{Mention, Partial};
     use crate::app::message::Message;
     use crate::app::{App, Detail, Screen};
+    use crate::config::QuietHours;
     use crate::test_support::{config, work_item};
+
+    fn noon() -> NaiveTime {
+        NaiveTime::from_hms_opt(12, 0, 0).unwrap()
+    }
+
+    fn set_notify(app: &mut App, edit: impl FnOnce(&mut crate::config::NotifyConfig)) {
+        let mut config = (**app.config.as_ref().unwrap()).clone();
+        edit(&mut config.notify);
+        app.config = Some(std::sync::Arc::new(config));
+    }
 
     fn mention(id: u32) -> Mention {
         Mention {
@@ -211,5 +240,65 @@ mod tests {
         let entries = app.new_inbox_entries();
 
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn disabled_kind_is_not_notified() {
+        let mut app = notifying_app(true);
+        set_notify(&mut app, |n| n.mentions = false);
+        loaded(&mut app, &[20]);
+
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)].into())));
+        let entries = app.new_inbox_entries_at(noon());
+
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn other_kinds_stay_enabled_when_one_is_disabled() {
+        let mut app = notifying_app(true);
+        set_notify(&mut app, |n| n.builds = false);
+        loaded(&mut app, &[20]);
+
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)].into())));
+        let entries = app.new_inbox_entries_at(noon());
+
+        assert_eq!(keys(&entries), ["#21"]);
+    }
+
+    #[test]
+    fn quiet_hours_suppress_without_a_burst_afterwards() {
+        let mut app = notifying_app(true);
+        set_notify(&mut app, |n| {
+            n.quiet_hours = Some(QuietHours {
+                start: "22:00".into(),
+                end: "07:00".into(),
+            });
+        });
+        loaded(&mut app, &[20]);
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)].into())));
+
+        let quiet = app.new_inbox_entries_at(NaiveTime::from_hms_opt(23, 0, 0).unwrap());
+        let after = app.new_inbox_entries_at(noon());
+
+        assert!(quiet.is_empty());
+        assert!(after.is_empty());
+    }
+
+    #[test]
+    fn outside_quiet_hours_entries_are_notified() {
+        let mut app = notifying_app(true);
+        set_notify(&mut app, |n| {
+            n.quiet_hours = Some(QuietHours {
+                start: "22:00".into(),
+                end: "07:00".into(),
+            });
+        });
+        loaded(&mut app, &[20]);
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)].into())));
+
+        let entries = app.new_inbox_entries_at(noon());
+
+        assert_eq!(keys(&entries), ["#21"]);
     }
 }

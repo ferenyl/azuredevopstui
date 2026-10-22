@@ -522,7 +522,7 @@ async fn repeated_refresh_does_not_stack_requests() {
 }
 
 /// Answers the mentions query with work item 601 whose last comment mentions the user, `loads` times.
-async fn mention_601(harness: &Harness, loads: u64) {
+pub(super) async fn mention_601(harness: &Harness, loads: u64) {
     harness
         .ado
         .expect(
@@ -1031,7 +1031,7 @@ async fn mention_601_once(harness: &Harness, state: &str, assigned: bool) {
         .await;
 }
 
-async fn mention_601_comment(harness: &Harness) {
+pub(super) async fn mention_601_comment(harness: &Harness) {
     harness
         .ado
         .expect(
