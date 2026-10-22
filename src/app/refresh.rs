@@ -212,7 +212,7 @@ impl App {
         for pr in prs {
             let (api, pr) = (api.clone(), pr.clone());
             self.spawn_load(Load::Signals(pr.pull_request_id), async move {
-                let result = api.pull_request_details(&pr).await;
+                let result = api.pull_request_checks(&pr).await;
                 Message::PullRequestSignals {
                     id: pr.pull_request_id,
                     result,

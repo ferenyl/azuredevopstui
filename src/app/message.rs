@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::api::{
-    Board, Build, CurrentUser, Iteration, Mention, Partial, PullRequest, PullRequestDetails,
-    SprintWorkItems, WorkItem, WorkItemDetails,
+    Board, Build, CurrentUser, Iteration, Mention, Partial, PullRequest, PullRequestChecks,
+    PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
 };
 use crate::auth::Auth;
 use crate::config::MergeStrategy;
@@ -46,7 +46,7 @@ pub enum Message {
     },
     PullRequestSignals {
         id: u32,
-        result: Result<PullRequestDetails>,
+        result: Result<PullRequestChecks>,
     },
     Image {
         url: String,

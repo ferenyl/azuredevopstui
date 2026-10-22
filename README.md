@@ -475,6 +475,8 @@ Others' PRs show what waits on you:
 | `↩2` | Unresolved threads you started where someone else wrote last, here 2 |
 | `@1` | Unresolved threads that mention you and that you have not answered, here 1 |
 
+To keep refreshes light, these are loaded again only for PRs that changed (new commits, votes, reviewers or draft state). Comment threads of unchanged PRs are reloaded at most every 10 minutes, so `↩` and `@` can lag a new comment by that long.
+
 Work items in the inbox are marked `@` when a comment from the last 30 days mentions you and you have not commented after it.
 
 ## Images

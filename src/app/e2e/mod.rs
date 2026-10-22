@@ -148,6 +148,17 @@ impl MockAdo {
             .count()
     }
 
+    /// Every request received so far, as `METHOD /path`.
+    pub async fn requests(&self) -> Vec<String> {
+        self.server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|request| format!("{} {}", request.method, request.url.path()))
+            .collect()
+    }
+
     /// Mounts `mock` ahead of fixtures; its `expect` is verified when the test ends.
     pub async fn expect(
         &self,

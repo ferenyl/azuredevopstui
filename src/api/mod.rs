@@ -8,13 +8,15 @@ mod work_items;
 pub use boards::ColumnTarget;
 pub use models::{
     Board, Build, CurrentUser, Iteration, Link, LinkTarget, Mention, Partial, PullRequest,
-    PullRequestDetails, ReviewSignals, SprintWorkItems, Thread, WorkItem, WorkItemDetails,
+    PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems, Thread, WorkItem,
+    WorkItemDetails,
 };
 pub use pull_requests::{is_approved, is_reviewer_policy};
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -320,6 +322,12 @@ pub struct ProjectApi {
     team: Arc<str>,
     /// State names in the Completed and Removed categories, fetched once per session.
     closed_states: Arc<OnceCell<Vec<String>>>,
+    /// Identity ids of the names in the PR filter, resolved once per session.
+    identities: Arc<Mutex<HashMap<String, String>>>,
+    /// Review signals of others' PRs by id, reused while a PR is unchanged.
+    reviews: Arc<Mutex<HashMap<u32, pull_requests::CachedReview>>>,
+    /// Changed dates of work items without an unanswered mention, skipped while unchanged.
+    answered_mentions: Arc<Mutex<HashMap<u32, String>>>,
 }
 
 impl ProjectApi {
@@ -346,6 +354,9 @@ impl ProjectApi {
             project: project.into(),
             team: team.into(),
             closed_states: Arc::default(),
+            identities: Arc::default(),
+            reviews: Arc::default(),
+            answered_mentions: Arc::default(),
         }
     }
 }
