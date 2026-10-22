@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use futures::{StreamExt, stream};
@@ -15,6 +16,41 @@ use crate::images::markdown_images;
 const POLICY_API_VERSION: &str = "7.1-preview";
 const REVIEWER_POLICIES: [&str; 2] = ["Minimum number of reviewers", "Required reviewers"];
 const MERGE_STRATEGY_POLICY: &str = "Require a merge strategy";
+/// How long the threads of an unchanged PR are reused; new comments do not change the PR itself.
+const THREADS_MAX_AGE: Duration = Duration::from_secs(10 * 60);
+
+/// Review signals of someone else's PR and what they were computed from.
+pub(super) struct CachedReview {
+    fingerprint: Fingerprint,
+    approved: bool,
+    review: ReviewSignals,
+    threads_loaded: Instant,
+}
+
+/// The parts of a PR its policies and review signals depend on, besides its threads.
+#[derive(PartialEq)]
+struct Fingerprint {
+    commit: Option<String>,
+    is_draft: bool,
+    reviewers: Vec<(String, i32, Option<bool>)>,
+}
+
+impl Fingerprint {
+    fn of(pr: &PullRequest) -> Self {
+        Self {
+            commit: pr
+                .last_merge_source_commit
+                .as_ref()
+                .map(|commit| commit.commit_id.clone()),
+            is_draft: pr.is_draft,
+            reviewers: pr
+                .reviewers
+                .iter()
+                .map(|reviewer| (reviewer.id.clone(), reviewer.vote, reviewer.is_required))
+                .collect(),
+        }
+    }
+}
 
 impl ProjectApi {
     pub async fn my_pull_requests(&self, user_id: &str) -> Result<Vec<PullRequest>> {
@@ -27,6 +63,16 @@ impl ProjectApi {
         &self,
         user_id: &str,
         filter: &OtherPrsFilter,
+    ) -> Result<Partial<PullRequest>> {
+        self.other_pull_requests_at(user_id, filter, Instant::now())
+            .await
+    }
+
+    async fn other_pull_requests_at(
+        &self,
+        user_id: &str,
+        filter: &OtherPrsFilter,
+        now: Instant,
     ) -> Result<Partial<PullRequest>> {
         let mut pull_requests = Vec::new();
         if filter.reviewers.is_empty() && filter.creators.is_empty() {
@@ -47,30 +93,34 @@ impl ProjectApi {
                 pull_requests.extend(self.active_pull_requests(&[(key, &id)]).await?);
             }
         }
-        let results: Vec<Result<(PullRequest, bool)>> =
-            stream::iter(without_own(pull_requests, user_id))
-                .map(|mut pr| async move {
-                    let signals = tokio::try_join!(self.policy_evaluations(&pr), self.threads(&pr));
-                    let complete = match signals {
-                        Ok((policies, threads)) => {
-                            pr.approved = is_approved(&pr, &policies);
-                            pr.review = review_signals(&pr, &threads, user_id);
-                            true
-                        }
-                        Err(err) if is_unauthorized(&err) => return Err(err),
-                        Err(err) => {
-                            tracing::warn!(
-                                id = pr.pull_request_id,
-                                "PR loaded without review signals: {err:#}"
-                            );
-                            false
-                        }
-                    };
-                    Ok((pr, complete))
-                })
-                .buffered(MAX_CONCURRENT_REQUESTS)
-                .collect()
-                .await;
+        let pull_requests = without_own(pull_requests, user_id);
+        let ids: HashSet<u32> = pull_requests.iter().map(|pr| pr.pull_request_id).collect();
+        self.reviews
+            .lock()
+            .expect("review cache")
+            .retain(|id, _| ids.contains(id));
+        let results: Vec<Result<(PullRequest, bool)>> = stream::iter(pull_requests)
+            .map(|mut pr| async move {
+                let complete = match self.review(&pr, user_id, now).await {
+                    Ok((approved, review)) => {
+                        pr.approved = approved;
+                        pr.review = review;
+                        true
+                    }
+                    Err(err) if is_unauthorized(&err) => return Err(err),
+                    Err(err) => {
+                        tracing::warn!(
+                            id = pr.pull_request_id,
+                            "PR loaded without review signals: {err:#}"
+                        );
+                        false
+                    }
+                };
+                Ok((pr, complete))
+            })
+            .buffered(MAX_CONCURRENT_REQUESTS)
+            .collect()
+            .await;
         let results = results.into_iter().collect::<Result<Vec<_>>>()?;
         let failed = results.iter().filter(|(_, complete)| !complete).count();
         Ok(Partial {
@@ -197,6 +247,59 @@ impl ProjectApi {
         Ok(())
     }
 
+    /// Approval and review signals of someone else's PR. Policies are loaded again only when the PR
+    /// changed, threads also once they are older than [`THREADS_MAX_AGE`].
+    async fn review(
+        &self,
+        pr: &PullRequest,
+        user_id: &str,
+        now: Instant,
+    ) -> Result<(bool, ReviewSignals)> {
+        let fingerprint = Fingerprint::of(pr);
+        let cached = self
+            .reviews
+            .lock()
+            .expect("review cache")
+            .get(&pr.pull_request_id)
+            .filter(|cached| cached.fingerprint == fingerprint)
+            .map(|cached| {
+                (
+                    cached.approved,
+                    cached.review.clone(),
+                    cached.threads_loaded,
+                )
+            });
+        let (approved, review) = match cached {
+            Some((approved, review, loaded))
+                if now.saturating_duration_since(loaded) < THREADS_MAX_AGE =>
+            {
+                return Ok((approved, review));
+            }
+            Some((approved, _, _)) => (
+                approved,
+                review_signals(pr, &self.threads(pr).await?, user_id),
+            ),
+            None => {
+                let (policies, threads) =
+                    tokio::try_join!(self.policy_evaluations(pr), self.threads(pr))?;
+                (
+                    is_approved(pr, &policies),
+                    review_signals(pr, &threads, user_id),
+                )
+            }
+        };
+        self.reviews.lock().expect("review cache").insert(
+            pr.pull_request_id,
+            CachedReview {
+                fingerprint,
+                approved,
+                review: review.clone(),
+                threads_loaded: now,
+            },
+        );
+        Ok((approved, review))
+    }
+
     /// All threads, including system threads such as votes and pushes.
     async fn threads(&self, pr: &PullRequest) -> Result<Vec<Thread>> {
         let id = pr.pull_request_id.to_string();
@@ -268,7 +371,17 @@ impl ProjectApi {
         ]
     }
 
+    /// Cached for the session.
     async fn identity_id(&self, name: &str) -> Result<String> {
+        let cached = self
+            .identities
+            .lock()
+            .expect("identity cache")
+            .get(name)
+            .cloned();
+        if let Some(id) = cached {
+            return Ok(id);
+        }
         let base = format!("{}/{}", self.client.urls.vssps_dev_azure, self.organization);
         let identities: ListResponse<Identity> = self
             .client
@@ -278,12 +391,17 @@ impl ProjectApi {
                 &[("searchFilter", "General"), ("filterValue", name)],
             )
             .await?;
-        identities
+        let id = identities
             .value
             .into_iter()
             .next()
             .map(|identity| identity.id)
-            .with_context(|| format!("identity not found: {name}"))
+            .with_context(|| format!("identity not found: {name}"))?;
+        self.identities
+            .lock()
+            .expect("identity cache")
+            .insert(name.to_string(), id.clone());
+        Ok(id)
     }
 }
 
@@ -732,7 +850,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
                 pull_request_json(5, "Review me", "other", "2026-10-01T10:00:00Z")
             ]})))
-            .expect(1)
+            .expect(2)
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -748,9 +866,71 @@ mod tests {
             ..Default::default()
         };
 
+        client.other_pull_requests("me", &filter).await.unwrap();
         let prs = client.other_pull_requests("me", &filter).await.unwrap();
 
         assert_eq!(ids_of_prs(&prs.items), [5]);
+    }
+
+    async fn mount_pull_requests(server: &MockServer, prs: Value, times: Option<u64>) {
+        let mock = Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/git/pullrequests"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": prs })));
+        match times {
+            Some(times) => mock.up_to_n_times(times).mount(server).await,
+            None => mock.mount(server).await,
+        }
+    }
+
+    async fn expect_signal_requests(server: &MockServer, policies: u64, threads: u64) {
+        Mock::given(method("GET"))
+            .and(path("/contoso/project-id/_apis/policy/evaluations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .expect(policies)
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/pullRequests/\d+/threads$"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .expect(threads)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn unchanged_pull_requests_reuse_policies_and_recent_threads() {
+        let server = MockServer::start().await;
+        let pr = pull_request_json(1, "Theirs", "other", "2026-10-01T10:00:00Z");
+        mount_pull_requests(&server, json!([pr]), None).await;
+        expect_signal_requests(&server, 1, 2).await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let filter = OtherPrsFilter::default();
+        let start = Instant::now();
+
+        for later in [Duration::ZERO, Duration::from_secs(60), THREADS_MAX_AGE] {
+            let prs = client
+                .other_pull_requests_at("me", &filter, start + later)
+                .await
+                .unwrap();
+            assert!(prs.items[0].approved);
+        }
+    }
+
+    #[tokio::test]
+    async fn changed_pull_requests_load_policies_and_threads_again() {
+        let server = MockServer::start().await;
+        let mut pr = pull_request_json(1, "Theirs", "other", "2026-10-01T10:00:00Z");
+        pr["lastMergeSourceCommit"] = json!({ "commitId": "c1" });
+        mount_pull_requests(&server, json!([pr.clone()]), Some(1)).await;
+        pr["lastMergeSourceCommit"] = json!({ "commitId": "c2" });
+        mount_pull_requests(&server, json!([pr]), None).await;
+        expect_signal_requests(&server, 2, 2).await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let filter = OtherPrsFilter::default();
+
+        for _ in 0..2 {
+            client.other_pull_requests("me", &filter).await.unwrap();
+        }
     }
 
     #[tokio::test]

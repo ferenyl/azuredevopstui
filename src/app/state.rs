@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
-    Build, ColumnTarget, Iteration, Mention, PullRequest, PullRequestChecks, PullRequestDetails, WorkItem,
-    WorkItemDetails, compare_timestamps, is_approved, is_reviewer_policy,
+    Build, ColumnTarget, Iteration, Mention, PullRequest, PullRequestChecks, PullRequestDetails,
+    WorkItem, WorkItemDetails, compare_timestamps, is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 
