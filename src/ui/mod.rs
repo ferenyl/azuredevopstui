@@ -341,9 +341,11 @@ fn place_images(
     let muted = Style::new().fg(app.theme.muted);
     let mut out: Vec<Line<'static>> = Vec::with_capacity(lines.len());
     let mut slots = Vec::new();
+    let mut row = 0;
     for line in lines {
         let text = line.to_string();
         let Some(url) = image_marker(&text).map(String::from) else {
+            row += wrapped_rows(&line, width);
             out.push(line);
             continue;
         };
@@ -355,26 +357,34 @@ fn place_images(
         });
         match size {
             Ok((cols, rows)) => {
-                let row = Paragraph::new(out.clone())
-                    .wrap(Wrap { trim: false })
-                    .line_count(width);
+                let filler = Line::from(prefix);
                 slots.push(ImageSlot {
                     url,
                     row: u16::try_from(row).unwrap_or(u16::MAX),
-                    indent: Line::from(prefix.clone()).width() as u16,
+                    indent: filler.width() as u16,
                     cols,
                     rows,
                 });
-                out.extend((0..rows).map(|_| Line::from(prefix.clone())));
+                row += wrapped_rows(&filler, width) * usize::from(rows);
+                out.extend((0..rows).map(|_| filler.clone()));
             }
             Err(placeholder) => {
                 let mut spans = prefix;
                 spans.push(Span::styled(placeholder, muted));
-                out.push(Line::from(spans));
+                let line = Line::from(spans);
+                row += wrapped_rows(&line, width);
+                out.push(line);
             }
         }
     }
     (out, slots)
+}
+
+/// Rows `line` takes when wrapped to `width`; lines wrap independently with `trim: false`.
+fn wrapped_rows(line: &Line<'static>, width: u16) -> usize {
+    Paragraph::new(line.clone())
+        .wrap(Wrap { trim: false })
+        .line_count(width)
 }
 
 fn tab_title(app: &App, tab: DetailTab) -> String {
@@ -1154,6 +1164,112 @@ mod tests {
         assert!(screen.contains("Setup failed"));
         assert!(screen.contains("az login required"));
         assert!(screen.contains("[r] reload"));
+    }
+
+    /// The previous quadratic placement, kept as an oracle for `place_images`.
+    fn place_images_oracle(app: &App, lines: Vec<Line<'static>>, width: u16) -> Vec<u16> {
+        let mut out: Vec<Line<'static>> = Vec::new();
+        let mut rows = Vec::new();
+        for line in lines {
+            let text = line.to_string();
+            let Some(url) = image_marker(&text).map(String::from) else {
+                out.push(line);
+                continue;
+            };
+            let prefix = line.spans[..line.spans.len().saturating_sub(1)].to_vec();
+            let ready = app.images.with(&url, |state| match state {
+                Some(ImageState::Ready { rows, .. }) => Some(*rows),
+                _ => None,
+            });
+            if let Some(height) = ready {
+                let row = Paragraph::new(out.clone())
+                    .wrap(Wrap { trim: false })
+                    .line_count(width);
+                rows.push(u16::try_from(row).unwrap_or(u16::MAX));
+                out.extend((0..height).map(|_| Line::from(prefix.clone())));
+            } else {
+                out.push(Line::from(format!("  [image: {}]", file_name(&url))));
+            }
+        }
+        rows
+    }
+
+    fn image_app(ready: usize) -> App {
+        let mut picker = ratatui_image::picker::Picker::halfblocks();
+        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Kitty);
+        let app = App::new(Some(config()), Some(picker));
+        for i in 0..ready {
+            let url = format!("ready{i}");
+            app.images.start_loading(vec![url.clone()]);
+            app.images
+                .insert(url, Ok(image::DynamicImage::new_rgb8(40, 40 + i as u32)));
+        }
+        app
+    }
+
+    fn mixed_lines(count: usize) -> Vec<Line<'static>> {
+        let long =
+            "a long line of prose that has to wrap more than once at narrow widths ".repeat(2);
+        let mut lines = Vec::new();
+        for i in 0..count {
+            lines.push(Line::from(format!("{i} {long}")));
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::raw(crate::images::marker(&format!("ready{}", i % 3))),
+            ]));
+            if i % 4 == 0 {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::raw(crate::images::marker("missing")),
+                ]));
+            }
+            lines.push(Line::from("short"));
+        }
+        lines
+    }
+
+    #[test]
+    fn place_images_matches_the_quadratic_oracle() {
+        let app = image_app(3);
+        for width in [1, 7, 20, 33, 80] {
+            let lines = mixed_lines(12);
+
+            let expected = place_images_oracle(&app, lines.clone(), width);
+            let (placed, slots) = place_images(&app, lines, width);
+
+            let rows: Vec<u16> = slots.iter().map(|slot| slot.row).collect();
+            assert_eq!(rows, expected, "width {width}");
+            assert!(!placed.is_empty());
+        }
+    }
+
+    #[test]
+    fn place_images_handles_many_images() {
+        let app = image_app(3);
+        let lines = mixed_lines(300);
+        let width = 40;
+
+        let expected = place_images_oracle(&app, lines.clone(), width);
+        let (_, slots) = place_images(&app, lines, width);
+
+        assert_eq!(slots.len(), 300);
+        assert_eq!(
+            slots.iter().map(|slot| slot.row).collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[test]
+    fn place_images_first_row_is_zero_and_empty_input_is_empty() {
+        let app = image_app(1);
+        let marker = Line::from(crate::images::marker("ready0"));
+
+        let (_, slots) = place_images(&app, vec![marker], 10);
+        let (lines, none) = place_images(&app, Vec::new(), 10);
+
+        assert_eq!(slots[0].row, 0);
+        assert!(lines.is_empty() && none.is_empty());
     }
 
     #[test]
