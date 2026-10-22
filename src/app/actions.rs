@@ -1,10 +1,13 @@
-use super::message::Message;
-use super::{App, Detail};
-use crate::api;
-use crate::api::{PullRequest, WorkItem};
-use crossterm::clipboard::CopyToClipboard;
 use std::process::{Command, Stdio};
 use std::time::Instant;
+
+use crossterm::clipboard::CopyToClipboard;
+
+use crate::api;
+use crate::api::{PullRequest, WorkItem};
+
+use super::message::Message;
+use super::{App, Detail};
 
 impl App {
     pub(super) fn current_url(&self) -> Option<String> {
@@ -199,5 +202,71 @@ impl App {
             .flat_map(|board| &board.columns)
             .map(|column| column.name.clone())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyCode;
+
+    use crate::app::Popup;
+    use crate::app::test_helpers::{app, assign_first_item_to, board, ctrl, me, press};
+
+    #[test]
+    fn unassign_asks_for_new_status_first() {
+        let mut app = app();
+        app.user = Some(me());
+        app.board = Some(board());
+        assign_first_item_to(&mut app, "me-id");
+        ctrl(&mut app, 'j');
+
+        press(&mut app, KeyCode::Char('u'));
+
+        let Some(Popup::Column(picker)) = &app.popup else {
+            panic!("column picker not open");
+        };
+        assert!(picker.unassign);
+        assert_eq!(picker.work_item_id, 10);
+        assert_eq!(picker.selection.current(), Some("Active (Doing)"));
+    }
+
+    #[test]
+    fn esc_cancels_unassign() {
+        let mut app = app();
+        app.user = Some(me());
+        app.board = Some(board());
+        assign_first_item_to(&mut app, "me-id");
+        ctrl(&mut app, 'j');
+        press(&mut app, KeyCode::Char('u'));
+
+        press(&mut app, KeyCode::Esc);
+
+        assert!(app.popup.is_none());
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn unassign_needs_item_assigned_to_me() {
+        let mut app = app();
+        app.user = Some(me());
+        app.board = Some(board());
+        assign_first_item_to(&mut app, "someone-else");
+        ctrl(&mut app, 'j');
+
+        press(&mut app, KeyCode::Char('u'));
+
+        assert!(app.popup.is_none());
+        assert_eq!(app.error.as_deref(), Some("#10 is not assigned to you"));
+    }
+
+    #[test]
+    fn change_status_does_not_unassign() {
+        let mut app = app();
+        app.board = Some(board());
+        ctrl(&mut app, 'j');
+
+        press(&mut app, KeyCode::Char('s'));
+
+        assert!(matches!(&app.popup, Some(Popup::Column(picker)) if !picker.unassign));
     }
 }

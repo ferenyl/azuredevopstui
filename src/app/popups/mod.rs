@@ -85,3 +85,27 @@ impl App {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyCode;
+
+    use crate::app::Popup;
+    use crate::app::test_helpers::{app, press};
+
+    #[test]
+    fn popup_selection_moves_with_j_and_k() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('S'));
+
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('k'));
+
+        let Some(Popup::Sort { selection, .. }) = &app.popup else {
+            panic!("sort picker not open");
+        };
+        assert_eq!(selection.current(), Some("oldest"));
+        assert_eq!(app.selections[1], 0);
+    }
+}

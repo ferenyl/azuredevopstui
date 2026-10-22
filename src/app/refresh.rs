@@ -1,9 +1,11 @@
-use super::message::Message;
-use super::{App, Detail, DetailInfo, DetailTab, Panel, Screen};
+use std::time::{Duration, Instant};
+
 use crate::api::PullRequest;
 use crate::images::image_urls;
 use crate::rich_text::RichText;
-use std::time::{Duration, Instant};
+
+use super::message::Message;
+use super::{App, Detail, DetailInfo, DetailTab, Panel, Screen};
 
 impl App {
     pub(super) fn refresh(&mut self) {
@@ -269,5 +271,28 @@ impl App {
         if let Some(fresh) = self.detail.as_ref().and_then(|d| self.data.find(d)) {
             self.detail = Some(fresh);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyCode;
+
+    use crate::app::DetailTab;
+    use crate::app::test_helpers::{app, press};
+
+    #[test]
+    fn enter_opens_selected_item_on_overview() {
+        let mut app = app();
+        app.detail_tab = DetailTab::Checks;
+        app.detail_scroll = 5;
+        press(&mut app, KeyCode::Char('j'));
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(app.detail.as_ref().is_some_and(|d| d.is_pull_request(2)));
+        assert_eq!(app.detail_tab, DetailTab::Overview);
+        assert_eq!(app.detail_scroll, 0);
+        assert!(app.detail_info.is_none());
     }
 }

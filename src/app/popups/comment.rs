@@ -1,6 +1,7 @@
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
 use crate::app::message::Message;
 use crate::app::{App, Popup};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl App {
     pub(in crate::app) fn open_comment(&mut self) {

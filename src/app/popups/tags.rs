@@ -1,7 +1,8 @@
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
 use crate::api::WorkItem;
 use crate::app::message::Message;
 use crate::app::{App, Popup, TagPicker};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const MAX_RECENT_TAGS: usize = 20;
 

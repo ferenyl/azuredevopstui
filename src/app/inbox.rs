@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+
+use crate::notify;
+
 use super::message::Message;
 use super::{App, Detail};
-use crate::notify;
-use std::collections::HashSet;
 
 impl App {
     /// Inbox entries that showed up or changed status after the first load and are not notified yet.
@@ -78,5 +80,111 @@ impl App {
             );
             self.data.inbox_seen = Some(seen);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use crate::api::Mention;
+    use crate::app::message::Message;
+    use crate::app::{App, Detail, Screen};
+    use crate::test_support::{config, work_item};
+
+    fn mention(id: u32) -> Mention {
+        Mention {
+            item: work_item(id, "Mentioned", "Bug", "Active"),
+            date: "2026-10-01T10:00:00Z".into(),
+        }
+    }
+
+    fn notifying_app(notifications: bool) -> App {
+        let mut config = config();
+        config.notifications = notifications;
+        let mut app = App::new(Some(config), None);
+        app.screen = Screen::Main;
+        app
+    }
+
+    fn keys(details: &[Detail]) -> Vec<String> {
+        details.iter().map(Detail::key).collect()
+    }
+
+    /// Loads the inbox with mentions and starts tracking it, like the second refresh.
+    fn loaded(app: &mut App, ids: &[u32]) {
+        app.handle_message(Message::Mentions(Ok(ids
+            .iter()
+            .map(|id| mention(*id))
+            .collect())));
+        app.last_updated = Some(Instant::now());
+        app.track_inbox();
+    }
+
+    #[test]
+    fn first_load_is_not_notified() {
+        let mut app = notifying_app(true);
+
+        app.handle_message(Message::Mentions(Ok(vec![mention(20)])));
+        let first = app.new_inbox_entries();
+        app.last_updated = Some(Instant::now());
+        app.track_inbox();
+        let after_tracking = app.new_inbox_entries();
+
+        assert!(first.is_empty());
+        assert!(after_tracking.is_empty());
+    }
+
+    #[test]
+    fn new_inbox_entry_is_notified_once() {
+        let mut app = notifying_app(true);
+        loaded(&mut app, &[20]);
+
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        let first = app.new_inbox_entries();
+        let second = app.new_inbox_entries();
+
+        assert_eq!(keys(&first), ["#21"]);
+        assert!(second.is_empty());
+    }
+
+    #[test]
+    fn notified_entry_is_not_notified_after_refresh() {
+        let mut app = notifying_app(true);
+        loaded(&mut app, &[20]);
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        app.new_inbox_entries();
+
+        app.track_inbox();
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        let entries = app.new_inbox_entries();
+
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn returning_entry_is_not_notified_again() {
+        let mut app = notifying_app(true);
+        loaded(&mut app, &[20]);
+        app.handle_message(Message::Mentions(Ok(vec![mention(21)])));
+        app.new_inbox_entries();
+        app.handle_message(Message::Mentions(Ok(Vec::new())));
+        app.new_inbox_entries();
+
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        let entries = app.new_inbox_entries();
+
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn nothing_is_notified_when_notifications_are_off() {
+        let mut app = notifying_app(false);
+        loaded(&mut app, &[20]);
+
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        let entries = app.new_inbox_entries();
+
+        assert!(entries.is_empty());
     }
 }

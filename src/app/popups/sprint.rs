@@ -1,5 +1,6 @@
-use crate::app::{App, SprintPicker};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use crate::app::{App, SprintPicker};
 
 impl App {
     pub(in crate::app) fn confirm_sprint(&mut self, picker: SprintPicker) {

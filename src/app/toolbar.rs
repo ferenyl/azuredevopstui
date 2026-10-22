@@ -134,3 +134,47 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyCode;
+
+    use crate::app::Action;
+    use crate::app::test_helpers::{app, assign_first_item_to, ctrl, me, press};
+
+    #[test]
+    fn toolbar_actions_follow_context() {
+        let mut app = app();
+        assert!(app.actions().contains(&Action::OpenInBrowser));
+        assert!(!app.actions().contains(&Action::ChangeColumn));
+
+        ctrl(&mut app, 'j');
+        assert!(app.actions().contains(&Action::ChangeColumn));
+
+        press(&mut app, KeyCode::Char('?'));
+        assert_eq!(app.actions(), [Action::Cancel]);
+    }
+
+    #[test]
+    fn toolbar_offers_unassign_only_for_my_items() {
+        let mut app = app();
+        app.user = Some(me());
+        assign_first_item_to(&mut app, "me-id");
+        ctrl(&mut app, 'j');
+        assert!(app.actions().contains(&Action::Unassign));
+
+        press(&mut app, KeyCode::Char('j'));
+
+        assert!(!app.actions().contains(&Action::Unassign));
+        assert!(app.actions().contains(&Action::AssignToMe));
+    }
+
+    #[test]
+    fn toolbar_offers_down_for_unassigned_items() {
+        let mut app = app();
+        ctrl(&mut app, 'j');
+
+        assert!(app.actions().contains(&Action::AssignToMe));
+        assert!(app.actions().contains(&Action::Down));
+    }
+}

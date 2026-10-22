@@ -1,5 +1,6 @@
-use super::{Action, App, Detail, LEFT_PANELS, Panel, Popup, Retry, Screen, SetupStep};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use super::{Action, App, Detail, LEFT_PANELS, Panel, Popup, Retry, Screen, SetupStep};
 
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) {
@@ -223,5 +224,213 @@ impl App {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyCode;
+
+    use crate::app::message::Message;
+    use crate::app::test_helpers::{app, ctrl, open_pull_request, press};
+    use crate::app::{App, DetailTab, Panel, Popup, Screen, SetupStep};
+    use crate::test_support::pull_request;
+
+    #[test]
+    fn focus_moves_between_boxes_and_stops_at_edges() {
+        let mut app = app();
+
+        ctrl(&mut app, 'k');
+        assert_eq!(app.focus, Panel::Inbox);
+        ctrl(&mut app, 'k');
+        assert_eq!(app.focus, Panel::Inbox);
+        for _ in 0..5 {
+            ctrl(&mut app, 'j');
+        }
+        assert_eq!(app.focus, Panel::Builds);
+    }
+
+    #[test]
+    fn focus_returns_to_last_left_box() {
+        let mut app = app();
+        ctrl(&mut app, 'j');
+        ctrl(&mut app, 'j');
+
+        ctrl(&mut app, 'l');
+        assert_eq!(app.focus, Panel::Detail);
+        ctrl(&mut app, 'h');
+
+        assert_eq!(app.focus, Panel::OtherPrs);
+    }
+
+    #[test]
+    fn selection_stays_within_list() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.selections[1], 0);
+        for _ in 0..5 {
+            press(&mut app, KeyCode::Char('j'));
+        }
+        assert_eq!(app.selections[1], 2);
+    }
+
+    #[test]
+    fn selection_is_clamped_when_list_shrinks() {
+        let mut app = app();
+        app.selections[1] = 2;
+
+        app.handle_message(Message::MyPullRequests(Ok(vec![pull_request(
+            1,
+            "Only",
+            "me",
+            "2026-10-01T10:00:00Z",
+        )])));
+
+        assert_eq!(app.selections[1], 0);
+    }
+
+    #[test]
+    fn j_scrolls_detail_when_it_has_focus() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        ctrl(&mut app, 'l');
+
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('k'));
+
+        assert_eq!(app.detail_scroll, 1);
+        assert_eq!(app.selections[1], 0);
+    }
+
+    #[test]
+    fn tab_cycles_through_detail_tabs() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        app.detail_scroll = 3;
+
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.detail_tab, DetailTab::Comments);
+        assert_eq!(app.detail_scroll, 0);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.detail_tab, DetailTab::Checks);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.detail_tab, DetailTab::Overview);
+        press(&mut app, KeyCode::BackTab);
+        assert_eq!(app.detail_tab, DetailTab::Checks);
+    }
+
+    #[test]
+    fn tab_without_detail_does_nothing() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Tab);
+
+        assert_eq!(app.detail_tab, DetailTab::Overview);
+    }
+
+    #[test]
+    fn help_popup_blocks_other_actions() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('?'));
+        assert!(app.show_help);
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.selections[1], 0);
+        press(&mut app, KeyCode::Esc);
+
+        assert!(!app.show_help);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn esc_in_setup_quits() {
+        let mut app = App::new(None, None);
+
+        press(&mut app, KeyCode::Esc);
+
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn esc_in_cancelable_pat_dialog_returns_to_main() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('T'));
+        assert!(matches!(
+            app.screen,
+            Screen::Setup(SetupStep::EnterPat { .. })
+        ));
+        press(&mut app, KeyCode::Esc);
+
+        assert!(matches!(app.screen, Screen::Main));
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn text_input_takes_letters_instead_of_actions() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('T'));
+
+        for c in "qj?".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        press(&mut app, KeyCode::Backspace);
+
+        assert!(!app.should_quit);
+        assert!(
+            matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input == "qj")
+        );
+    }
+
+    #[test]
+    fn paste_into_comment_keeps_lines_and_triggers_no_actions() {
+        let mut app = app();
+        app.popup = Some(Popup::Comment {
+            work_item_id: 10,
+            text: String::new(),
+        });
+
+        app.handle_paste("# Title\r\n\r\n- q item\r- j item\n```rust\nfn x() {}\n```");
+
+        assert!(!app.should_quit);
+        assert!(matches!(
+            &app.popup,
+            Some(Popup::Comment { text, .. })
+                if text == "# Title\n\n- q item\n- j item\n```rust\nfn x() {}\n```"
+        ));
+    }
+
+    #[test]
+    fn paste_into_setup_input_takes_first_line() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('T'));
+
+        app.handle_paste("token\nq");
+
+        assert!(!app.should_quit);
+        assert!(
+            matches!(&app.screen, Screen::Setup(SetupStep::EnterPat { input, .. }) if input == "token")
+        );
+    }
+
+    #[test]
+    fn paste_without_input_is_ignored() {
+        let mut app = app();
+
+        app.handle_paste("q");
+
+        assert!(!app.should_quit);
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn q_quits_from_main() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('q'));
+
+        assert!(app.should_quit);
     }
 }

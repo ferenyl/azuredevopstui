@@ -49,3 +49,39 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyCode;
+
+    use crate::app::test_helpers::{app, ctrl, press};
+    use crate::app::{Popup, SortKind};
+    use crate::config::WorkItemSort;
+
+    #[test]
+    fn sort_picker_preselects_current_sort() {
+        let mut app = app();
+        app.config.as_mut().unwrap().sort.work_items = WorkItemSort::Changed;
+        ctrl(&mut app, 'j');
+
+        press(&mut app, KeyCode::Char('S'));
+
+        let Some(Popup::Sort { kind, selection }) = &app.popup else {
+            panic!("sort picker not open");
+        };
+        assert_eq!(*kind, SortKind::WorkItems);
+        assert_eq!(selection.current(), Some("changed"));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn sort_picker_needs_a_list_focus() {
+        let mut app = app();
+        ctrl(&mut app, 'l');
+
+        press(&mut app, KeyCode::Char('S'));
+
+        assert!(app.popup.is_none());
+    }
+}

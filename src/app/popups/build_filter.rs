@@ -1,5 +1,6 @@
-use crate::app::{App, Panel, Popup};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use crate::app::{App, Panel, Popup};
 
 impl App {
     pub(in crate::app) fn open_build_filter(&mut self) {

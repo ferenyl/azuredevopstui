@@ -1,8 +1,9 @@
+use crate::auth::Auth;
+use crate::config::{AuthMethod, Config};
+
 use super::message::Message;
 use super::setup::organization_name;
 use super::{App, Retry, Screen, SetupStep};
-use crate::auth::Auth;
-use crate::config::{AuthMethod, Config};
 
 impl App {
     pub(super) fn authenticate(&mut self) {
