@@ -160,7 +160,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-The tests are unit tests next to the code (`#[cfg(test)] mod tests`). API calls are tested against a local mock server ([wiremock](https://crates.io/crates/wiremock)), and the UI is rendered to ratatui's `TestBackend`. No test talks to Azure DevOps, the keyring, `az` or your config file.
+The tests are unit tests next to the code (`#[cfg(test)] mod tests`). API calls are tested against a local mock server ([wiremock](https://crates.io/crates/wiremock)), and the UI is rendered to ratatui's `TestBackend`. No test talks to Azure DevOps, the keyring, `az` or your config file. End-to-end tests drive the whole app against a static mock API; see [docs/e2e.md](docs/e2e.md).
 
 ### Publishing a release
 

@@ -1,0 +1,35 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/git/repositories/repo-api/pullRequests/101",
+  "body": {
+    "pullRequestId": 101,
+    "title": "Add order filter",
+    "createdBy": {
+      "id": "me-id",
+      "displayName": "Mona Me"
+    },
+    "repository": {
+      "id": "repo-api",
+      "name": "orders-api",
+      "project": {
+        "id": "project-fabrikam"
+      }
+    },
+    "status": "active",
+    "sourceRefName": "refs/heads/feature/101",
+    "targetRefName": "refs/heads/main",
+    "creationDate": "2026-10-20T09:00:00Z",
+    "mergeStatus": "succeeded",
+    "lastMergeSourceCommit": {
+      "commitId": "c101"
+    },
+    "reviewers": [
+      {
+        "displayName": "Anna Reviewer",
+        "vote": 0,
+        "isRequired": true
+      }
+    ],
+    "description": "Adds a status filter to the order list."
+  }
+}

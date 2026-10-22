@@ -1,0 +1,26 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/Web/_apis/work/teamsettings/iterations",
+  "body": {
+    "value": [
+      {
+        "name": "Sprint 41",
+        "path": "Fabrikam\\Sprint 41",
+        "attributes": {
+          "timeFrame": "current",
+          "startDate": "2026-10-12T00:00:00Z",
+          "finishDate": "2026-10-25T00:00:00Z"
+        }
+      },
+      {
+        "name": "Sprint 40",
+        "path": "Fabrikam\\Sprint 40",
+        "attributes": {
+          "timeFrame": "past",
+          "startDate": "2026-09-28T00:00:00Z",
+          "finishDate": "2026-10-11T00:00:00Z"
+        }
+      }
+    ]
+  }
+}

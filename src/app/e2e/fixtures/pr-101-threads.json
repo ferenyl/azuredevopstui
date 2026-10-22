@@ -1,0 +1,27 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/git/repositories/repo-api/pullRequests/101/threads",
+  "body": {
+    "value": [
+      {
+        "id": 1,
+        "status": "active",
+        "threadContext": {
+          "filePath": "/src/orders.rs"
+        },
+        "comments": [
+          {
+            "id": 1,
+            "author": {
+              "id": "other-id",
+              "displayName": "Olle Other"
+            },
+            "content": "Please add a test for the empty filter",
+            "publishedDate": "2026-10-20T11:00:00Z",
+            "commentType": "text"
+          }
+        ]
+      }
+    ]
+  }
+}

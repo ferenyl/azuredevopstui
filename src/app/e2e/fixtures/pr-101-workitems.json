@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/git/repositories/repo-api/pullRequests/101/workitems",
+  "body": {
+    "value": [
+      {
+        "id": "301"
+      }
+    ]
+  }
+}

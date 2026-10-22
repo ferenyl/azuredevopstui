@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/contoso/Fabrikam/Web/_apis/wit/wiql",
+  "bodyContains": "@RecentMentions",
+  "body": {
+    "workItems": []
+  }
+}

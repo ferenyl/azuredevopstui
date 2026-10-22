@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "path": "/contoso/Fabrikam/Web/_apis/wit/wiql",
+  "bodyContains": "[System.AssignedTo] = @Me",
+  "body": {
+    "workItems": [
+      {
+        "id": 301
+      },
+      {
+        "id": 302
+      }
+    ]
+  }
+}
