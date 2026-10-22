@@ -599,15 +599,19 @@ impl Data {
 
 fn sort_pull_requests(prs: &mut [PullRequest], sort: PrSort) {
     match sort {
-        PrSort::Newest => prs.sort_by(|a, b| b.creation_date.cmp(&a.creation_date)),
-        PrSort::Oldest => prs.sort_by(|a, b| a.creation_date.cmp(&b.creation_date)),
+        PrSort::Newest => {
+            prs.sort_by(|a, b| compare_timestamps(&b.creation_date, &a.creation_date));
+        }
+        PrSort::Oldest => {
+            prs.sort_by(|a, b| compare_timestamps(&a.creation_date, &b.creation_date));
+        }
         PrSort::Title => prs.sort_by_key(|pr| pr.title.to_lowercase()),
         PrSort::Repository => prs.sort_by(|a, b| {
             a.repository
                 .name
                 .to_lowercase()
                 .cmp(&b.repository.name.to_lowercase())
-                .then_with(|| b.creation_date.cmp(&a.creation_date))
+                .then_with(|| compare_timestamps(&b.creation_date, &a.creation_date))
         }),
     }
 }
@@ -714,6 +718,23 @@ mod tests {
     #[test]
     fn pull_requests_sort_oldest_first() {
         assert_eq!(sorted_prs(PrSort::Oldest), [3, 1, 2]);
+    }
+
+    #[test]
+    fn pull_requests_sort_by_creation_across_precision_and_offsets() {
+        let created = |id, date: &str| pull_request(id, "PR", "u", date);
+        let mut prs = vec![
+            created(1, "2026-10-01T10:00:00Z"),
+            created(2, "2026-10-01T10:00:00.5Z"),
+            created(3, "2026-10-01T12:00:00.25+02:00"),
+            created(4, "2026-10-01T10:00:00.1Z"),
+        ];
+
+        sort_pull_requests(&mut prs, PrSort::Newest);
+        assert_eq!(ids_of_prs(&prs), [2, 3, 4, 1]);
+
+        sort_pull_requests(&mut prs, PrSort::Oldest);
+        assert_eq!(ids_of_prs(&prs), [1, 4, 3, 2]);
     }
 
     #[test]

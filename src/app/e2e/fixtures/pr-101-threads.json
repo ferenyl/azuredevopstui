@@ -21,6 +21,25 @@
             "commentType": "text"
           }
         ]
+      },
+      {
+        "id": 2,
+        "status": "active",
+        "threadContext": {
+          "filePath": "/src/paging.rs"
+        },
+        "comments": [
+          {
+            "id": 2,
+            "author": {
+              "id": "other-id",
+              "displayName": "Olle Other"
+            },
+            "content": "Second look at paging",
+            "publishedDate": "2026-10-20T11:00:00.5000000Z",
+            "commentType": "text"
+          }
+        ]
       }
     ]
   }

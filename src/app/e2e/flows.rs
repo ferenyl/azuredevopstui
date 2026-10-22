@@ -120,6 +120,26 @@ async fn opening_a_pull_request_loads_its_details() {
 }
 
 #[tokio::test]
+async fn comment_threads_are_newest_first_even_with_fractional_seconds() {
+    let mut harness = connected().await;
+    select(&mut harness, Panel::MyPrs, 101);
+    harness.press(KeyCode::Enter);
+    harness
+        .wait_for(|app| matches!(app.detail_info, Some(DetailInfo::PullRequest(_))))
+        .await;
+    harness.press(KeyCode::Tab);
+    harness.wait_for_text("Second look at paging").await;
+
+    // Thread 2 was published 0.5 s after thread 1, so it is listed first.
+    let screen = harness.screen();
+    let newer = screen.find("Second look at paging").expect("newer thread");
+    let older = screen
+        .find("Please add a test for the empty filter")
+        .expect("older thread");
+    assert!(newer < older, "{screen}");
+}
+
+#[tokio::test]
 async fn tagging_a_work_item_patches_its_tags() {
     let mut harness = connected().await;
     harness

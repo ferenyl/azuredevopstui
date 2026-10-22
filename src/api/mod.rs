@@ -430,14 +430,16 @@ fn sorted_names(names: impl Iterator<Item = String>) -> Vec<String> {
 }
 
 /// Orders ISO 8601 timestamps by the instant they name, so `10:00:00.5Z` is after `10:00:00Z`.
-/// Falls back to text when either one does not parse.
+/// Values that do not parse sort after all that do, by text. A total order, safe for `sort_by`.
 pub fn compare_timestamps(a: &str, b: &str) -> Ordering {
     match (
         DateTime::parse_from_rfc3339(a),
         DateTime::parse_from_rfc3339(b),
     ) {
         (Ok(a), Ok(b)) => a.cmp(&b),
-        _ => a.cmp(b),
+        (Ok(_), Err(_)) => Ordering::Less,
+        (Err(_), Ok(_)) => Ordering::Greater,
+        (Err(_), Err(_)) => a.cmp(b),
     }
 }
 
@@ -552,12 +554,42 @@ mod tests {
     }
 
     #[test]
-    fn unparsable_timestamps_compare_as_text() {
+    fn unparsable_timestamps_sort_last_by_text() {
         assert_eq!(
             compare_timestamps("", "2026-10-01T10:00:00Z"),
-            Ordering::Less
+            Ordering::Greater
         );
         assert_eq!(compare_timestamps("b", "a"), Ordering::Greater);
+    }
+
+    #[test]
+    fn mixed_timestamps_sort_without_panicking_and_stably() {
+        // Parsed values first by instant, then unparsed ones by text.
+        let mut values = vec![
+            "2026-10-01T10:00:00.7",
+            "2026-10-01T10:00:00.5Z",
+            "",
+            "2026-10-01T12:00:00+02:00",
+            "not a date",
+            "2026-10-01T10:00:00Z",
+            "2026-10-01T10:00:00.7",
+        ];
+
+        values.sort_by(|a, b| compare_timestamps(a, b));
+
+        assert_eq!(
+            values,
+            [
+                // Equal instants keep their input order.
+                "2026-10-01T12:00:00+02:00",
+                "2026-10-01T10:00:00Z",
+                "2026-10-01T10:00:00.5Z",
+                "",
+                "2026-10-01T10:00:00.7",
+                "2026-10-01T10:00:00.7",
+                "not a date",
+            ]
+        );
     }
 
     #[tokio::test]
