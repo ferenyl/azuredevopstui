@@ -11,6 +11,8 @@ use super::models::{
 use crate::rich_text::RichText;
 
 const MAX_WORK_ITEMS: &str = "200";
+/// Most ids `workitemsbatch` accepts per request.
+const BATCH_SIZE: usize = 200;
 const FIELDS: [&str; 10] = [
     "System.Title",
     "System.WorkItemType",
@@ -294,27 +296,30 @@ impl ProjectApi {
         self.work_items_batch(&ids).await
     }
 
-    /// Fetches the given work items, keeping the order of `ids`.
+    /// Fetches the given work items, keeping the order of `ids`; deleted or unreadable ones are skipped.
     pub(super) async fn work_items_batch(&self, ids: &[u32]) -> Result<Vec<WorkItem>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let batch: ListResponse<WorkItem> = self
-            .client
-            .post(
-                &self.client.urls.dev_azure,
-                &[
-                    &self.organization,
-                    &self.project,
-                    "_apis",
-                    "wit",
-                    "workitemsbatch",
-                ],
-                &[],
-                &json!({ "ids": ids, "fields": FIELDS }),
-            )
-            .await?;
-        let mut work_items = batch.value;
+        let mut work_items = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(BATCH_SIZE) {
+            let batch: ListResponse<Option<WorkItem>> = self
+                .client
+                .post(
+                    &self.client.urls.dev_azure,
+                    &[
+                        &self.organization,
+                        &self.project,
+                        "_apis",
+                        "wit",
+                        "workitemsbatch",
+                    ],
+                    &[],
+                    &json!({ "ids": chunk, "fields": FIELDS, "errorPolicy": "omit" }),
+                )
+                .await?;
+            work_items.extend(batch.value.into_iter().flatten());
+        }
         work_items.sort_by_key(|item| ids.iter().position(|id| *id == item.id));
         Ok(work_items)
     }
@@ -688,6 +693,57 @@ mod tests {
         assert_eq!(details.comment_count, 3);
         assert_eq!(details.comments[0].author, "Bo");
         assert_eq!(details.comments[0].text.plain(), "Looks good");
+    }
+
+    #[tokio::test]
+    async fn work_items_batch_omits_errors_and_skips_missing_items() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .and(body_partial_json(json!({ "errorPolicy": "omit" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(2, "Two", "Task", "New"),
+                null,
+                work_item_json(1, "One", "Task", "New")
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let items = client.work_items_batch(&[1, 9, 2]).await.unwrap();
+
+        assert_eq!(ids_of_items(&items), [1, 2]);
+    }
+
+    #[tokio::test]
+    async fn work_items_batch_chunks_ids_and_keeps_order() {
+        let server = MockServer::start().await;
+        let ids: Vec<u32> = (1..=201).collect();
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .and(body_partial_json(json!({ "ids": &ids[..200] })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(200, "Last of first", "Task", "New"),
+                work_item_json(1, "First", "Task", "New")
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .and(body_partial_json(json!({ "ids": [201] })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(201, "Second chunk", "Task", "New")
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let items = client.work_items_batch(&ids).await.unwrap();
+
+        assert_eq!(ids_of_items(&items), [1, 200, 201]);
     }
 
     #[tokio::test]
