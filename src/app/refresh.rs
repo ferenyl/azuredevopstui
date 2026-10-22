@@ -4,11 +4,22 @@ use crate::api::PullRequest;
 use crate::images::image_urls;
 use crate::rich_text::RichText;
 
+use super::loads::Load;
 use super::message::Message;
 use super::{App, Detail, DetailInfo, DetailTab, Panel, Screen};
 
 impl App {
+    /// Reloads the shown data, leaving requests already in flight to finish.
     pub(super) fn refresh(&mut self) {
+        self.load_all(false);
+    }
+
+    /// Like [`App::refresh`], but restarts requests in flight, whose data may predate a change.
+    pub(super) fn reload(&mut self) {
+        self.load_all(true);
+    }
+
+    fn load_all(&mut self, restart: bool) {
         let (Some(api), Some(config), Some(user)) =
             (self.api(), self.config.clone(), self.user.clone())
         else {
@@ -19,28 +30,47 @@ impl App {
         self.track_inbox();
         self.data.show_approved = config.other_prs_filter.show_approved;
         self.data.show_drafts = config.other_prs_filter.show_drafts;
+        let wanted = |app: &Self, load| restart || !app.loads.is_loading(load);
 
-        let (a, user_id) = (api.clone(), user.id.clone());
-        self.spawn(async move { Message::MyPullRequests(a.my_pull_requests(&user_id).await) });
-
-        let (a, user_id) = (api.clone(), user.id.clone());
-        self.spawn(async move { Message::Builds(a.my_builds(&user_id).await) });
-
-        let (a, user_id) = (api.clone(), user.id.clone());
-        self.spawn(async move { Message::Mentions(a.mentioned_work_items(&user_id).await) });
-
-        self.spawn(async move {
-            Message::OtherPullRequests(
-                api.other_pull_requests(&user.id, &config.other_prs_filter)
-                    .await,
-            )
-        });
-
-        if let Some(detail) = &self.detail {
-            self.load_detail(detail);
+        if wanted(self, Load::MyPullRequests) {
+            let (a, user_id) = (api.clone(), user.id.clone());
+            self.spawn_load(Load::MyPullRequests, async move {
+                Message::MyPullRequests(a.my_pull_requests(&user_id).await)
+            });
         }
 
-        self.load_sprint();
+        if wanted(self, Load::Builds) {
+            let (a, user_id) = (api.clone(), user.id.clone());
+            self.spawn_load(Load::Builds, async move {
+                Message::Builds(a.my_builds(&user_id).await)
+            });
+        }
+
+        if wanted(self, Load::Mentions) {
+            let (a, user_id) = (api.clone(), user.id.clone());
+            self.spawn_load(Load::Mentions, async move {
+                Message::Mentions(a.mentioned_work_items(&user_id).await)
+            });
+        }
+
+        if wanted(self, Load::OtherPullRequests) {
+            self.spawn_load(Load::OtherPullRequests, async move {
+                Message::OtherPullRequests(
+                    api.other_pull_requests(&user.id, &config.other_prs_filter)
+                        .await,
+                )
+            });
+        }
+
+        if let Some(detail) = self.detail.clone()
+            && wanted(self, Load::Detail)
+        {
+            self.load_detail(&detail);
+        }
+
+        if wanted(self, Load::Sprint) {
+            self.load_sprint();
+        }
     }
 
     /// Refreshes on the configured interval while the main view is idle. 0 disables it.
@@ -57,7 +87,7 @@ impl App {
         }
     }
 
-    pub(super) fn load_sprint(&self) {
+    pub(super) fn load_sprint(&mut self) {
         let (Some(api), Some(config)) = (self.api(), &self.config) else {
             return;
         };
@@ -66,7 +96,7 @@ impl App {
         };
         let types = config.work_item_types.clone();
         let sprint = self.sprint.clone();
-        self.spawn(async move {
+        self.spawn_load(Load::Sprint, async move {
             Message::SprintWorkItems(
                 api.sprint_work_items(sprint.as_deref(), &ready_column, &types)
                     .await,
@@ -96,26 +126,26 @@ impl App {
         self.spawn(async move { Message::WorkItemTypes(api.work_item_types().await) });
     }
 
-    pub(super) fn load_detail(&self, detail: &Detail) {
+    pub(super) fn load_detail(&mut self, detail: &Detail) {
         let Some(api) = self.api() else {
             return;
         };
         match detail {
             Detail::PullRequest(pr) => {
                 let (id, pr) = (pr.pull_request_id, pr.clone());
-                self.spawn(async move {
+                self.spawn_load(Load::Detail, async move {
                     let result = api.pull_request_details(&pr).await;
                     Message::PullRequestDetails { id, result }
                 });
             }
             Detail::WorkItem(item) => {
                 let id = item.id;
-                self.spawn(async move {
+                self.spawn_load(Load::Detail, async move {
                     let result = api.work_item_details(id).await;
                     Message::WorkItemDetails { id, result }
                 });
             }
-            Detail::Build(_) => {}
+            Detail::Build(_) => self.loads.cancel(Load::Detail),
         }
     }
 
@@ -175,13 +205,13 @@ impl App {
         }
     }
 
-    pub(super) fn load_signals(&self, prs: &[PullRequest]) {
+    pub(super) fn load_signals(&mut self, prs: &[PullRequest]) {
         let Some(api) = self.api() else {
             return;
         };
         for pr in prs {
             let (api, pr) = (api.clone(), pr.clone());
-            self.spawn(async move {
+            self.spawn_load(Load::Signals(pr.pull_request_id), async move {
                 let result = api.pull_request_details(&pr).await;
                 Message::PullRequestSignals {
                     id: pr.pull_request_id,
@@ -211,6 +241,7 @@ impl App {
 
     /// Back to the sprint overview.
     pub(super) fn close_detail(&mut self) {
+        self.loads.cancel(Load::Detail);
         self.detail = None;
         self.detail_info = None;
         if self.focus == Panel::Detail {
@@ -229,8 +260,11 @@ impl App {
 mod tests {
     use crossterm::event::KeyCode;
 
+    use crate::api::AdoClient;
     use crate::app::DetailTab;
-    use crate::app::test_helpers::{app, press};
+    use crate::app::loads::Load;
+    use crate::app::test_helpers::{app, me, press};
+    use crate::auth::Auth;
 
     #[test]
     fn enter_opens_selected_item_on_overview() {
@@ -245,5 +279,32 @@ mod tests {
         assert_eq!(app.detail_tab, DetailTab::Overview);
         assert_eq!(app.detail_scroll, 0);
         assert!(app.detail_info.is_none());
+    }
+
+    #[tokio::test]
+    async fn repeated_refresh_leaves_requests_in_flight_alone() {
+        let mut app = app();
+        // Nothing listens there; the requests stay pending or fail, and are never handled.
+        app.client = Some(AdoClient::with_base_url(
+            Auth::from_pat("pat"),
+            "http://127.0.0.1:9",
+        ));
+        app.sync_api();
+        app.user = Some(me());
+
+        let loads = [
+            Load::MyPullRequests,
+            Load::OtherPullRequests,
+            Load::Builds,
+            Load::Mentions,
+            Load::Sprint,
+        ];
+        press(&mut app, KeyCode::Char('r'));
+        let started = loads.map(|load| app.loads.generation(load));
+        press(&mut app, KeyCode::Char('r'));
+        press(&mut app, KeyCode::Char('r'));
+
+        assert!(started.iter().all(Option::is_some));
+        assert_eq!(loads.map(|load| app.loads.generation(load)), started);
     }
 }

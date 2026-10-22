@@ -34,7 +34,7 @@ impl App {
         }
         self.data.my_work_items = None;
         self.data.ready_work_items = None;
-        self.refresh();
+        self.reload();
     }
 }
 

@@ -7,6 +7,8 @@ use crate::api::{
 use crate::auth::Auth;
 use crate::config::MergeStrategy;
 
+use super::loads::Load;
+
 pub enum Message {
     Authenticated(Result<Option<Auth>>),
     Organizations(Result<Vec<String>>),
@@ -68,4 +70,10 @@ pub enum Message {
     },
     /// A notification closed; holds the item URL when its open action was clicked.
     Notified(Option<String>),
+    /// The response to a request started with `App::spawn_load`.
+    Loaded {
+        load: Load,
+        generation: u64,
+        message: Box<Message>,
+    },
 }
