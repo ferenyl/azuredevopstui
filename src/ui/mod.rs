@@ -886,20 +886,24 @@ mod tests {
     }
 
     fn pr_details() -> PullRequestDetails {
+        let mut threads: Vec<crate::api::Thread> = vec![
+            serde_json::from_value(json!({
+                "status": "active",
+                "threadContext": { "filePath": "/src/main.rs" },
+                "comments": [{
+                    "author": { "id": "u", "displayName": "Anna" },
+                    "content": "Please rename this",
+                    "publishedDate": "2026-10-01T10:00:00Z"
+                }]
+            }))
+            .unwrap(),
+        ];
+        for comment in threads.iter_mut().flat_map(|thread| &mut thread.comments) {
+            comment.text = RichText::from_markdown(comment.content.as_deref().unwrap_or_default());
+        }
         PullRequestDetails {
             description: None,
-            threads: vec![
-                serde_json::from_value(json!({
-                    "status": "active",
-                    "threadContext": { "filePath": "/src/main.rs" },
-                    "comments": [{
-                        "author": { "id": "u", "displayName": "Anna" },
-                        "content": "Please rename this",
-                        "publishedDate": "2026-10-01T10:00:00Z"
-                    }]
-                }))
-                .unwrap(),
-            ],
+            threads,
             statuses: vec![
                 serde_json::from_value(json!({
                     "id": 1,
@@ -1331,12 +1335,12 @@ mod tests {
     fn image_without_graphics_shows_file_name() {
         let mut app = main_app();
         let mut pr = pull_request(1, "PR", "me", "2026-10-01T10:00:00Z");
-        pr.description = Some(format!(
+        pr.description_text = Some(RichText::from_markdown(&format!(
             "Look:\n{}",
             crate::images::marker(
                 "https://dev.azure.com/o/p/_apis/wit/attachments/1?fileName=shot.png"
             )
-        ));
+        )));
         app.detail = Some(Detail::PullRequest(Box::new(pr)));
 
         let screen = screen(&app);

@@ -146,6 +146,9 @@ pub struct PullRequest {
     pub creation_date: String,
     pub merge_status: Option<String>,
     pub description: Option<String>,
+    /// `description` rendered once; filled when the PRs are loaded.
+    #[serde(skip)]
+    pub description_text: Option<RichText>,
     #[serde(default)]
     pub reviewers: Vec<Reviewer>,
     pub last_merge_source_commit: Option<CommitRef>,
@@ -190,7 +193,7 @@ pub struct Reviewer {
 
 pub struct PullRequestDetails {
     /// Full text; the list API cuts it off at 400 characters.
-    pub description: Option<String>,
+    pub description: Option<RichText>,
     pub threads: Vec<Thread>,
     pub statuses: Vec<PullRequestStatus>,
     pub policies: Vec<PolicyEvaluation>,
@@ -230,6 +233,9 @@ pub struct ThreadContext {
 pub struct Comment {
     pub author: IdentityRef,
     pub content: Option<String>,
+    /// `content` rendered once; filled when the threads are loaded.
+    #[serde(skip)]
+    pub text: RichText,
     pub comment_type: Option<String>,
     pub published_date: Option<String>,
     #[serde(default)]

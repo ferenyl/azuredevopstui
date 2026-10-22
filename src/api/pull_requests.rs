@@ -11,6 +11,7 @@ use super::models::{
 use super::{ProjectApi, is_unauthorized};
 use crate::config::{MergeStrategy, OtherPrsFilter};
 use crate::images::markdown_images;
+use crate::rich_text::RichText;
 
 const POLICY_API_VERSION: &str = "7.1-preview";
 const REVIEWER_POLICIES: [&str; 2] = ["Minimum number of reviewers", "Required reviewers"];
@@ -106,7 +107,10 @@ impl ProjectApi {
             .collect();
 
         Ok(PullRequestDetails {
-            description: full.description.as_deref().map(markdown_images),
+            description: full
+                .description
+                .as_deref()
+                .map(|description| RichText::from_markdown(&markdown_images(description))),
             threads: visible_threads(threads),
             statuses: latest_statuses(statuses.value),
             policies,
@@ -224,6 +228,7 @@ impl ProjectApi {
         let mut pull_requests = response.value;
         for pr in &mut pull_requests {
             pr.description = pr.description.as_deref().map(markdown_images);
+            pr.description_text = pr.description.as_deref().map(RichText::from_markdown);
         }
         Ok(pull_requests)
     }
@@ -381,6 +386,8 @@ fn visible_threads(threads: Vec<Thread>) -> Vec<Thread> {
             });
             for comment in &mut thread.comments {
                 comment.content = comment.content.as_deref().map(markdown_images);
+                comment.text =
+                    RichText::from_markdown(comment.content.as_deref().unwrap_or_default());
             }
             thread
         })
@@ -491,6 +498,7 @@ mod tests {
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].comments.len(), 1);
         assert_eq!(threads[0].comments[0].content.as_deref(), Some("Real"));
+        assert_eq!(threads[0].comments[0].text.plain(), "Real");
     }
 
     #[test]
@@ -714,7 +722,7 @@ mod tests {
 
         let details = client.pull_request_details(&pr).await.unwrap();
 
-        assert_eq!(details.description.map(|d| d.len()), Some(500));
+        assert_eq!(details.description.map(|d| d.plain().len()), Some(500));
         assert_eq!(details.threads.len(), 1);
         assert_eq!(details.statuses.len(), 1);
         assert_eq!(

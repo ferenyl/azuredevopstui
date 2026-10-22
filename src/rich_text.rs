@@ -6,6 +6,12 @@ use crate::images::{extract_html_images, image_urls};
 /// Wide enough that html2text never wraps; the UI wraps to the panel width.
 const RENDER_WIDTH: usize = 10_000;
 
+#[cfg(test)]
+thread_local! {
+    /// Calls to `RichText::from_markdown` on this thread, to prove rendering does not parse.
+    pub static MARKDOWN_RENDERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Formatting of a piece of text, independent of theme colours.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Marks {
@@ -32,6 +38,8 @@ pub struct RichText {
 
 impl RichText {
     pub fn from_markdown(markdown: &str) -> Self {
+        #[cfg(test)]
+        MARKDOWN_RENDERS.with(|count| count.set(count.get() + 1));
         let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
         let events = Parser::new_ext(markdown, options).map(|event| match event {
             Event::SoftBreak => Event::HardBreak,

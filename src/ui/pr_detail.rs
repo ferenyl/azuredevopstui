@@ -6,7 +6,6 @@ use super::{
 };
 use crate::api::{PullRequest, PullRequestDetails, Thread};
 use crate::app::{App, DetailTab};
-use crate::rich_text::RichText;
 
 pub fn lines(
     app: &App,
@@ -124,17 +123,12 @@ fn overview(
     }
 
     let description = details
-        .and_then(|details| details.description.as_deref())
-        .or(pr.description.as_deref());
-    if let Some(description) = description.filter(|d| !d.trim().is_empty()) {
+        .and_then(|details| details.description.as_ref())
+        .or(pr.description_text.as_ref());
+    if let Some(description) = description.filter(|d| !d.is_empty()) {
         lines.push(Line::default());
         lines.push(heading(app, "Description", width));
-        lines.extend(rich_lines(
-            app,
-            &RichText::from_markdown(description),
-            width,
-            Span::raw("  "),
-        ));
+        lines.extend(rich_lines(app, description, width, Span::raw("  ")));
     }
     lines
 }
@@ -205,12 +199,7 @@ fn comments(app: &App, details: &PullRequestDetails, width: u16) -> Vec<Line<'st
                         muted,
                     ),
                 ]));
-                lines.extend(rich_lines(
-                    app,
-                    &RichText::from_markdown(comment.content.as_deref().unwrap_or_default()),
-                    width,
-                    bar.clone(),
-                ));
+                lines.extend(rich_lines(app, &comment.text, width, bar.clone()));
             }
             lines.push(Line::default());
         }
