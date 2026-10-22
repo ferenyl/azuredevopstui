@@ -17,12 +17,13 @@ impl App {
         };
         self.data
             .inbox()
-            .into_iter()
-            .map(|entry| entry.detail)
+            .iter()
+            .map(|entry| &entry.detail)
             .filter(|detail| {
                 let status = self.data.status(detail);
                 notified.insert(detail.key(), status.clone()).as_ref() != Some(&status)
             })
+            .cloned()
             .collect()
     }
 

@@ -1,28 +1,26 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::api::{Board, CurrentUser};
-use crate::app::{App, Data, Panel, Screen};
+use crate::app::{App, Panel, Screen};
 use crate::test_support::{config, pull_request, work_item};
 
 pub(super) fn app() -> App {
     let mut app = App::new(Some(config()), None);
     app.screen = Screen::Main;
     app.focus = Panel::MyPrs;
-    app.data = Data {
-        my_prs: Some(vec![
-            pull_request(1, "First", "me", "2026-10-03T10:00:00Z"),
-            pull_request(2, "Second", "me", "2026-10-02T10:00:00Z"),
-            pull_request(3, "Third", "me", "2026-10-01T10:00:00Z"),
-        ]),
-        other_prs: Some(vec![pull_request(4, "Theirs", "u", "2026-10-01T10:00:00Z")]),
-        my_work_items: Some(vec![
-            work_item(10, "Story", "User Story", "Active"),
-            work_item(11, "Bug", "Bug", "New"),
-        ]),
-        ready_work_items: Some(vec![work_item(12, "Ready", "User Story", "Ready")]),
-        sprint_name: Some("Sprint 1".into()),
-        ..Default::default()
-    };
+    app.data.set_my_prs(vec![
+        pull_request(1, "First", "me", "2026-10-03T10:00:00Z"),
+        pull_request(2, "Second", "me", "2026-10-02T10:00:00Z"),
+        pull_request(3, "Third", "me", "2026-10-01T10:00:00Z"),
+    ]);
+    app.data
+        .set_other_prs(vec![pull_request(4, "Theirs", "u", "2026-10-01T10:00:00Z")]);
+    app.data.my_work_items = Some(vec![
+        work_item(10, "Story", "User Story", "Active"),
+        work_item(11, "Bug", "Bug", "New"),
+    ]);
+    app.data.ready_work_items = Some(vec![work_item(12, "Ready", "User Story", "Ready")]);
+    app.data.sprint_name = Some("Sprint 1".into());
     app
 }
 
