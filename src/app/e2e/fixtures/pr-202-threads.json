@@ -1,6 +1,6 @@
 {
   "method": "GET",
-  "path": "/contoso/Fabrikam/_apis/git/repositories/repo-api/pullRequests/202/threads",
+  "path": "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/202/threads",
   "body": {
     "value": []
   }

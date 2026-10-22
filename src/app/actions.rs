@@ -19,7 +19,11 @@ impl App {
         let url = match item {
             Detail::PullRequest(pr) => api::pull_request_url(
                 &config.organization,
-                &config.project,
+                pr.repository
+                    .project
+                    .name
+                    .as_deref()
+                    .unwrap_or(&config.project),
                 &pr.repository.name,
                 pr.pull_request_id,
             ),
