@@ -324,6 +324,12 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
   "work_item_types": [],
   "show_images": true,
   "notifications": false,
+  "notify": {
+    "builds": true,
+    "mentions": true,
+    "pull_requests": true,
+    "quiet_hours": { "start": "22:00", "end": "07:00" }
+  },
   "sort": {
     "pull_requests": "newest",
     "work_items": "priority"
@@ -350,6 +356,10 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `work_item_types` | `[]` | Work item types shown in *My work items* and *Ready*, for example `["User Story", "Bug"]`. An empty array shows all types. |
 | `show_images` | `true` | Draw images in the detail panel when the terminal supports graphics. Set it to `false` to skip the terminal graphics query at startup. |
 | `notifications` | `false` | Send a desktop notification when something new lands in the inbox (not on the first load). Works on Linux (D-Bus), Windows (toast) and macOS. Also sent when an entry's status changes, like new comments or failed checks. Several changes in one refresh become a single notification. A notification about one item has an *Open* action that opens it like `o`. Run `azuredevopstui --test-notification` to check that notifications work. |
+| `notify.builds` | `true` | Notify about failed builds. Only used when `notifications` is `true`. |
+| `notify.mentions` | `true` | Notify about work items that mention you. |
+| `notify.pull_requests` | `true` | Notify about pull requests waiting on you and changes to your own. |
+| `notify.quiet_hours` | not set | Local time range, `{ "start": "22:00", "end": "07:00" }` (`HH:MM`, may span midnight). Nothing is notified during it, and entries that arrive then are not notified afterwards. |
 | `sort.pull_requests` | `"newest"` | Sort order for both PR lists. |
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
 | `colors` | Catppuccin Mocha | Theme colors. See [Colors](#colors). |
