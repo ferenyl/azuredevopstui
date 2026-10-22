@@ -4,7 +4,7 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, List, ListState, Paragraph, Wrap};
 
-use crate::app::{App, SetupStep};
+use crate::app::{App, SetupStep, TextInput};
 
 pub fn render(frame: &mut Frame, app: &App, step: &SetupStep, area: Rect) {
     let theme = &app.theme;
@@ -32,12 +32,12 @@ pub fn render(frame: &mut Frame, app: &App, step: &SetupStep, area: Rect) {
         SetupStep::EnterPat { input, error, .. } => {
             let [input_area, error_area] =
                 Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(inner);
-            render_input(frame, app, input_area, &"*".repeat(input.chars().count()));
+            render_input(frame, app, input_area, input, true);
             if let Some(error) = error {
                 render_error(frame, app, error_area, error);
             }
         }
-        SetupStep::EnterOrganization(input) => render_input(frame, app, inner, input),
+        SetupStep::EnterOrganization(input) => render_input(frame, app, inner, input, false),
         SetupStep::Failed { error, .. } => render_error(frame, app, inner, error),
         _ => {
             if let Some(selection) = step.selection() {
@@ -60,9 +60,18 @@ fn render_error(frame: &mut Frame, app: &App, area: Rect, error: &str) {
     );
 }
 
-fn render_input(frame: &mut Frame, app: &App, area: Rect, text: &str) {
+fn render_input(frame: &mut Frame, app: &App, area: Rect, input: &TextInput, mask: bool) {
+    let (before, after) = input.split();
+    let show = |text: &str| {
+        if mask {
+            "*".repeat(text.chars().count())
+        } else {
+            text.to_string()
+        }
+    };
+    let (before, after) = (show(before), show(after));
     frame.render_widget(
-        Line::from(format!("{text}▏")).style(Style::new().fg(app.theme.foreground)),
+        Line::from(format!("{before}▏{after}")).style(Style::new().fg(app.theme.foreground)),
         area,
     );
 }
