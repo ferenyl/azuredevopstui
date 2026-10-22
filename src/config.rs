@@ -213,9 +213,17 @@ impl Config {
         }
     }
 
+    #[cfg(not(test))]
     pub fn path() -> Result<PathBuf> {
         let dir = dirs::config_dir().context("could not resolve config directory")?;
         Ok(dir.join(APP_NAME).join(CONFIG_FILE))
+    }
+
+    /// Tests never touch the user's config.
+    #[cfg(test)]
+    pub fn path() -> Result<PathBuf> {
+        let dir = std::env::temp_dir().join(format!("{APP_NAME}-test-{}", std::process::id()));
+        Ok(dir.join(CONFIG_FILE))
     }
 
     pub fn load() -> Result<Option<Self>> {
