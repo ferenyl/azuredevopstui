@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use futures::{StreamExt, TryStreamExt, future, stream};
+use futures::{StreamExt, future, stream};
 use serde_json::json;
 
 use super::ProjectApi;
 use super::models::{
-    CommentList, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention, PullRequest,
-    Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails,
+    CommentList, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention, Partial,
+    PullRequest, Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails,
     WorkItemResponse, WorkItemTypeCategory,
 };
 use crate::rich_text::RichText;
@@ -166,22 +166,28 @@ impl ProjectApi {
     }
 
     /// Open work items recently mentioning the user in a comment they have not answered.
-    pub async fn mentioned_work_items(&self, user_id: &str) -> Result<Vec<Mention>> {
+    pub async fn mentioned_work_items(&self, user_id: &str) -> Result<Partial<Mention>> {
         let wiql = "SELECT [System.Id] FROM WorkItems \
                     WHERE [System.Id] IN (@RecentMentions) \
                     AND [System.State] NOT IN ('Closed', 'Removed') \
                     ORDER BY [System.ChangedDate] DESC";
         let items = self.query_work_items(wiql).await?;
-        let mentions: Vec<Option<Mention>> = stream::iter(items)
+        let results: Vec<Result<Option<Mention>>> = stream::iter(items)
             .map(|item| async move {
-                let comments = self.comments(item.id).await?;
+                let comments = self.comments(item.id).await.inspect_err(|err| {
+                    tracing::warn!(id = item.id, "skipped work item without comments: {err:#}");
+                })?;
                 let date = unanswered_mention(&comments.comments, user_id);
-                Ok::<_, anyhow::Error>(date.map(|date| Mention { item, date }))
+                Ok(date.map(|date| Mention { item, date }))
             })
             .buffered(8)
-            .try_collect()
-            .await?;
-        Ok(mentions.into_iter().flatten().collect())
+            .collect()
+            .await;
+        let failed = results.iter().filter(|result| result.is_err()).count();
+        Ok(Partial {
+            items: results.into_iter().flatten().flatten().collect(),
+            failed,
+        })
     }
 
     pub async fn add_work_item_comment(&self, id: u32, text: &str) -> Result<()> {
@@ -919,9 +925,54 @@ mod tests {
 
         let mentions = client.mentioned_work_items("me-id").await.unwrap();
 
-        assert_eq!(mentions.len(), 1);
-        assert_eq!(mentions[0].item.id, 10);
-        assert_eq!(mentions[0].date, "2026-10-01T10:00:00Z");
+        assert_eq!(mentions.failed, 0);
+        assert_eq!(mentions.items.len(), 1);
+        assert_eq!(mentions.items[0].item.id, 10);
+        assert_eq!(mentions.items[0].date, "2026-10-01T10:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn mentioned_work_items_skip_items_whose_comments_fail() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/Team/_apis/wit/wiql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "workItems": [{ "id": 10 }, { "id": 11 }]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(10, "Mentioned", "Task", "Active"),
+                work_item_json(11, "Forbidden", "Task", "Active")
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalCount": 1,
+                "comments": [{
+                    "createdBy": { "id": "other", "displayName": "Bo" },
+                    "createdDate": "2026-10-01T10:00:00Z",
+                    "text": "ping @<me-id>"
+                }]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/11/comments"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let mentions = client.mentioned_work_items("me-id").await.unwrap();
+
+        assert_eq!(mentions.failed, 1);
+        assert_eq!(mentions.items.len(), 1);
+        assert_eq!(mentions.items[0].item.id, 10);
     }
 
     #[tokio::test]

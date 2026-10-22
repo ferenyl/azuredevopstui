@@ -87,7 +87,7 @@ impl App {
 mod tests {
     use std::time::Instant;
 
-    use crate::api::Mention;
+    use crate::api::{Mention, Partial};
     use crate::app::message::Message;
     use crate::app::{App, Detail, Screen};
     use crate::test_support::{config, work_item};
@@ -116,16 +116,29 @@ mod tests {
         app.handle_message(Message::Mentions(Ok(ids
             .iter()
             .map(|id| mention(*id))
-            .collect())));
+            .collect::<Vec<_>>()
+            .into())));
         app.last_updated = Some(Instant::now());
         app.track_inbox();
+    }
+
+    #[test]
+    fn partial_load_shows_a_notice() {
+        let mut app = notifying_app(true);
+
+        app.handle_message(Message::Mentions(Ok(Partial {
+            items: vec![mention(20)],
+            failed: 2,
+        })));
+
+        assert_eq!(app.notice(), Some("2 work items skipped without comments"));
     }
 
     #[test]
     fn first_load_is_not_notified() {
         let mut app = notifying_app(true);
 
-        app.handle_message(Message::Mentions(Ok(vec![mention(20)])));
+        app.handle_message(Message::Mentions(Ok(vec![mention(20)].into())));
         let first = app.new_inbox_entries();
         app.last_updated = Some(Instant::now());
         app.track_inbox();
@@ -140,7 +153,7 @@ mod tests {
         let mut app = notifying_app(true);
         loaded(&mut app, &[20]);
 
-        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)].into())));
         let first = app.new_inbox_entries();
         let second = app.new_inbox_entries();
 
@@ -152,11 +165,11 @@ mod tests {
     fn notified_entry_is_not_notified_after_refresh() {
         let mut app = notifying_app(true);
         loaded(&mut app, &[20]);
-        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)].into())));
         app.new_inbox_entries();
 
         app.track_inbox();
-        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)].into())));
         let entries = app.new_inbox_entries();
 
         assert!(entries.is_empty());
@@ -166,12 +179,12 @@ mod tests {
     fn returning_entry_is_not_notified_again() {
         let mut app = notifying_app(true);
         loaded(&mut app, &[20]);
-        app.handle_message(Message::Mentions(Ok(vec![mention(21)])));
+        app.handle_message(Message::Mentions(Ok(vec![mention(21)].into())));
         app.new_inbox_entries();
-        app.handle_message(Message::Mentions(Ok(Vec::new())));
+        app.handle_message(Message::Mentions(Ok(Vec::new().into())));
         app.new_inbox_entries();
 
-        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)].into())));
         let entries = app.new_inbox_entries();
 
         assert!(entries.is_empty());
@@ -182,7 +195,7 @@ mod tests {
         let mut app = notifying_app(false);
         loaded(&mut app, &[20]);
 
-        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)])));
+        app.handle_message(Message::Mentions(Ok(vec![mention(20), mention(21)].into())));
         let entries = app.new_inbox_entries();
 
         assert!(entries.is_empty());

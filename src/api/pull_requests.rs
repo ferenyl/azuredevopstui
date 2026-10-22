@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::{StreamExt, stream};
 use serde_json::{Value, json};
 
 use super::ProjectApi;
 use super::models::{
-    Comment, Identity, ListResponse, PolicyEvaluation, PullRequest, PullRequestDetails,
+    Comment, Identity, ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestDetails,
     PullRequestStatus, ResourceRef, ReviewSignals, Thread,
 };
 use crate::config::{MergeStrategy, OtherPrsFilter};
@@ -27,7 +27,7 @@ impl ProjectApi {
         &self,
         user_id: &str,
         filter: &OtherPrsFilter,
-    ) -> Result<Vec<PullRequest>> {
+    ) -> Result<Partial<PullRequest>> {
         let mut pull_requests = Vec::new();
         if filter.reviewers.is_empty() && filter.creators.is_empty() {
             pull_requests = self.active_pull_requests(&[]).await?;
@@ -47,17 +47,33 @@ impl ProjectApi {
                 pull_requests.extend(self.active_pull_requests(&[(key, &id)]).await?);
             }
         }
-        stream::iter(without_own(pull_requests, user_id))
+        let results: Vec<(PullRequest, bool)> = stream::iter(without_own(pull_requests, user_id))
             .map(|mut pr| async move {
-                let (policies, threads) =
-                    tokio::try_join!(self.policy_evaluations(&pr), self.threads(&pr),)?;
-                pr.approved = is_approved(&pr, &policies);
-                pr.review = review_signals(&pr, &threads, user_id);
-                Ok::<_, anyhow::Error>(pr)
+                let signals = tokio::try_join!(self.policy_evaluations(&pr), self.threads(&pr));
+                let complete = match signals {
+                    Ok((policies, threads)) => {
+                        pr.approved = is_approved(&pr, &policies);
+                        pr.review = review_signals(&pr, &threads, user_id);
+                        true
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            id = pr.pull_request_id,
+                            "PR loaded without review signals: {err:#}"
+                        );
+                        false
+                    }
+                };
+                (pr, complete)
             })
             .buffered(8)
-            .try_collect()
-            .await
+            .collect()
+            .await;
+        let failed = results.iter().filter(|(_, complete)| !complete).count();
+        Ok(Partial {
+            items: results.into_iter().map(|(pr, _)| pr).collect(),
+            failed,
+        })
     }
 
     pub async fn pull_request_details(&self, pr: &PullRequest) -> Result<PullRequestDetails> {
@@ -491,7 +507,41 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(ids_of_prs(&prs), [1]);
+        assert_eq!(ids_of_prs(&prs.items), [1]);
+        assert_eq!(prs.failed, 0);
+    }
+
+    #[tokio::test]
+    async fn other_pull_requests_keep_pull_requests_whose_threads_fail() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/git/pullrequests"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                pull_request_json(1, "Fine", "other", "2026-10-01T10:00:00Z"),
+                pull_request_json(2, "Forbidden", "other", "2026-10-01T10:00:00Z")
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/pullRequests/2/threads$"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+        mount_empty_threads(&server).await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let prs = client
+            .other_pull_requests("me", &OtherPrsFilter::default())
+            .await
+            .unwrap();
+
+        assert_eq!(ids_of_prs(&prs.items), [1, 2]);
+        assert_eq!(prs.failed, 1);
     }
 
     #[tokio::test]
@@ -531,7 +581,7 @@ mod tests {
 
         let prs = client.other_pull_requests("me", &filter).await.unwrap();
 
-        assert_eq!(ids_of_prs(&prs), [5]);
+        assert_eq!(ids_of_prs(&prs.items), [5]);
     }
 
     #[tokio::test]

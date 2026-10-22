@@ -365,6 +365,19 @@ pub struct WorkItemFields {
     pub tags: Option<String>,
 }
 
+/// A list where `failed` entries could not be fully loaded.
+#[derive(Debug)]
+pub struct Partial<T> {
+    pub items: Vec<T>,
+    pub failed: usize,
+}
+
+impl<T> From<Vec<T>> for Partial<T> {
+    fn from(items: Vec<T>) -> Self {
+        Self { items, failed: 0 }
+    }
+}
+
 /// A work item with a comment mentioning the user that they have not answered.
 pub struct Mention {
     pub item: WorkItem,

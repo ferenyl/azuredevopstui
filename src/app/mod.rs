@@ -171,6 +171,12 @@ impl App {
         };
     }
 
+    fn note_failures(&mut self, failed: usize, what: &str) {
+        if failed > 0 {
+            self.notice = Some((format!("{failed} {what}"), Instant::now()));
+        }
+    }
+
     pub fn notice(&self) -> Option<&str> {
         self.notice
             .as_ref()
