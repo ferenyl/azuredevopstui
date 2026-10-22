@@ -282,6 +282,7 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
     );
 
     let width = content.width;
+    app.detail_links.borrow_mut().clear();
     let lines = match (detail, &app.detail_info) {
         (Detail::PullRequest(pr), Some(DetailInfo::PullRequest(info))) => {
             pr_detail::lines(app, pr, Some(info), app.detail_tab, width)
@@ -459,11 +460,25 @@ fn wrap(text: &str, width: u16, prefix: Span<'static>) -> Vec<Line<'static>> {
 
 /// Formatted text styled with the theme and wrapped to `width`.
 fn rich_lines(app: &App, text: &RichText, width: u16, prefix: Span<'static>) -> Vec<Line<'static>> {
+    let base = {
+        let mut links = app.detail_links.borrow_mut();
+        links.extend(text.links.iter().cloned());
+        links.len() - text.links.len()
+    };
     let lines = text.lines.iter().map(|segments| {
         Line::from(
             segments
                 .iter()
-                .map(|segment| Span::styled(segment.text.clone(), rich_style(app, segment.marks)))
+                .map(|segment| {
+                    let mut style = rich_style(app, segment.marks);
+                    if segment
+                        .link
+                        .is_some_and(|link| Some(base + link) == app.link_index)
+                    {
+                        style = style.add_modifier(Modifier::REVERSED);
+                    }
+                    Span::styled(segment.text.clone(), style)
+                })
                 .collect::<Vec<_>>(),
         )
     });
@@ -1099,7 +1114,7 @@ mod tests {
     fn work_item_overview_shows_fields() {
         let mut app = main_app();
         app.detail = app.data.detail(Panel::MyWorkItems, 0);
-        app.detail_info = Some(DetailInfo::WorkItem(work_item_details()));
+        app.detail_info = Some(DetailInfo::WorkItem(Box::new(work_item_details())));
 
         let screen = screen(&app);
 
@@ -1115,7 +1130,7 @@ mod tests {
     fn children_tab_groups_by_type() {
         let mut app = main_app();
         app.detail = app.data.detail(Panel::MyWorkItems, 0);
-        app.detail_info = Some(DetailInfo::WorkItem(work_item_details()));
+        app.detail_info = Some(DetailInfo::WorkItem(Box::new(work_item_details())));
         app.detail_tab = DetailTab::Children;
 
         let screen = screen(&app);

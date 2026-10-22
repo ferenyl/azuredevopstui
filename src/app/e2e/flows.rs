@@ -23,7 +23,7 @@ async fn connected() -> Harness {
 }
 
 /// Focuses `panel` and selects the row of work item or pull request `id`.
-fn select(harness: &mut Harness, panel: Panel, id: u32) {
+pub(super) fn select(harness: &mut Harness, panel: Panel, id: u32) {
     let index = panel.index().expect("left panel");
     let data = &harness.app.data;
     let row = match panel {
@@ -826,7 +826,8 @@ async fn commenting_reloads_only_the_mentions() {
 }
 
 const WORK_ITEM_303: &str = "/contoso/Fabrikam/_apis/wit/workitems/303";
-const PR_101: &str = "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/101";
+pub(super) const PR_101: &str =
+    "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/101";
 
 /// Answers a `PATCH` of `target` containing `body_part` and asserts it is sent once.
 async fn expect_patch(harness: &Harness, target: &str, body_part: &str) {

@@ -217,7 +217,7 @@ impl App {
                 if self.detail.as_ref().is_some_and(|d| d.is_work_item(id)) {
                     match result {
                         Ok(info) => {
-                            self.detail_info = Some(DetailInfo::WorkItem(info));
+                            self.detail_info = Some(DetailInfo::WorkItem(Box::new(info)));
                             self.load_images();
                         }
                         Err(err) => self.report_error(err),

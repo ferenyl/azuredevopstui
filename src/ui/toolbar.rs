@@ -16,7 +16,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                     format!(" [{}] ", action.key_label()),
                     Style::new().fg(theme.toolbar_key),
                 ),
-                Span::raw(action.label()),
+                Span::raw(app.action_label(*action)),
             ]
         })
         .collect();

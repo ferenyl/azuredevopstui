@@ -78,6 +78,8 @@ impl App {
             Action::OpenInBrowser
             | Action::Copy
             | Action::CopyLink
+            | Action::NextLink
+            | Action::PrevLink
             | Action::AssignToMe
             | Action::Unassign
             | Action::Tag
@@ -94,6 +96,7 @@ impl App {
             Action::OpenInBrowser => self.open_in_browser(),
             Action::Copy => self.copy_number(),
             Action::CopyLink => self.copy_link(),
+            Action::NextLink | Action::PrevLink => self.select_link(action == Action::NextLink),
             Action::Sort => self.open_sort_picker(),
             Action::Filter => match self.current_item() {
                 _ if self.focus == Panel::Builds => self.open_build_filter(),
@@ -181,6 +184,7 @@ impl App {
         };
         self.detail_tab = tabs[index];
         self.detail_scroll = 0;
+        self.link_index = None;
     }
 
     pub(super) fn clamp_selections(&mut self) {
