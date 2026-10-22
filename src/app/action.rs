@@ -29,6 +29,7 @@ pub enum Action {
     NextTab,
     PrevTab,
     Help,
+    Vote,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -62,7 +63,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::Comment,
         ],
     ),
-    ("Pull requests", &[Action::Complete]),
+    ("Pull requests", &[Action::Complete, Action::Vote]),
 ];
 
 impl Action {
@@ -96,6 +97,7 @@ impl Action {
             (KeyCode::BackTab, _) => Some(Self::PrevTab),
             (KeyCode::Char('T'), _) => Some(Self::ChangeToken),
             (KeyCode::Char('?'), _) => Some(Self::Help),
+            (KeyCode::Char('v'), _) => Some(Self::Vote),
             _ => None,
         }
     }
@@ -129,6 +131,7 @@ impl Action {
             Self::NextTab => "tab",
             Self::PrevTab => "shift+tab",
             Self::Help => "?",
+            Self::Vote => "v",
         }
     }
 
@@ -161,6 +164,7 @@ impl Action {
             Self::NextTab => "next tab",
             Self::PrevTab => "previous tab",
             Self::Help => "help",
+            Self::Vote => "vote",
         }
     }
 }
