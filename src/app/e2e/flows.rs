@@ -25,6 +25,9 @@ fn select(harness: &mut Harness, panel: Panel, id: u32) {
         Panel::MyPrs => data
             .my_prs()
             .and_then(|prs| prs.iter().position(|pr| pr.pull_request_id == id)),
+        Panel::OtherPrs => data
+            .other_prs()
+            .and_then(|prs| prs.iter().position(|pr| pr.pull_request_id == id)),
         Panel::MyWorkItems => data
             .my_work_items
             .as_ref()
@@ -84,6 +87,23 @@ async fn opening_a_pull_request_loads_its_details() {
     assert!(
         screen.contains("Adds a status filter to the order list."),
         "{screen}"
+    );
+}
+
+#[tokio::test]
+async fn pull_request_from_another_project_loads_details_and_links_to_its_project() {
+    let mut harness = connected().await;
+    harness.wait_for(|app| app.data.other_prs().is_some()).await;
+    select(&mut harness, Panel::OtherPrs, 303);
+
+    harness.press(KeyCode::Enter);
+    harness
+        .wait_for(|app| matches!(app.detail_info, Some(DetailInfo::PullRequest(_))))
+        .await;
+
+    assert_eq!(
+        harness.app.current_url().as_deref(),
+        Some("https://dev.azure.com/contoso/Other/_git/orders-api/pullrequest/303")
     );
 }
 

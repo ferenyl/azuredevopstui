@@ -192,7 +192,7 @@ impl ProjectApi {
                 &self.client.urls.dev_azure,
                 &[
                     &self.organization,
-                    &self.project,
+                    &pr.repository.project.id,
                     "_apis",
                     "policy",
                     "evaluations",
@@ -231,7 +231,7 @@ impl ProjectApi {
     fn pr_path<'a>(&'a self, pr: &'a PullRequest, id: &'a str) -> [&'a str; 8] {
         [
             &self.organization,
-            &self.project,
+            &pr.repository.project.id,
             "_apis",
             "git",
             "repositories",
@@ -524,7 +524,7 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .and(path("/contoso/project-id/_apis/policy/evaluations"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
@@ -552,7 +552,7 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .and(path("/contoso/project-id/_apis/policy/evaluations"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
@@ -584,7 +584,7 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .and(path("/contoso/project-id/_apis/policy/evaluations"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
@@ -626,7 +626,7 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .and(path("/contoso/project-id/_apis/policy/evaluations"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(&server)
             .await;
@@ -666,7 +666,7 @@ mod tests {
     #[tokio::test]
     async fn pull_request_details_combine_threads_statuses_and_policies() {
         let server = MockServer::start().await;
-        let pr_path = "/contoso/MyProject/_apis/git/repositories/repo-id/pullRequests/7";
+        let pr_path = "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/7";
         let mut full = pull_request_json(7, "PR", "other", "2026-10-01T10:00:00Z");
         full["description"] = json!("x".repeat(500));
         Mock::given(method("GET"))
@@ -694,7 +694,7 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .and(path("/contoso/project-id/_apis/policy/evaluations"))
             .and(query_param(
                 "artifactId",
                 "vstfs:///CodeReview/CodeReviewId/project-id/7",
@@ -751,7 +751,7 @@ mod tests {
     async fn merge_strategies_follow_blocking_policy() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .and(path("/contoso/project-id/_apis/policy/evaluations"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [{
                 "status": "approved",
                 "configuration": {
@@ -776,7 +776,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("PATCH"))
             .and(path(
-                "/contoso/MyProject/_apis/git/repositories/repo-id/pullRequests/7",
+                "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests/7",
             ))
             .and(body_json(json!({
                 "status": "completed",
