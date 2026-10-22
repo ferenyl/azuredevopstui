@@ -219,7 +219,7 @@ mod tests {
             }),
             ("pull request", |_| {}),
             ("ready pull request", |a| {
-                a.data.pr_signals.insert(
+                a.data.set_pr_signals(
                     1,
                     Signals {
                         ready: true,
@@ -246,7 +246,7 @@ mod tests {
             }),
             ("builds focus", |a| a.focus = Panel::Builds),
             ("empty list", |a| {
-                a.data.my_prs = Some(Vec::new());
+                a.data.set_my_prs(Vec::new());
             }),
         ]
     }

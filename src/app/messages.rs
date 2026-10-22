@@ -71,17 +71,14 @@ impl App {
             Message::MyPullRequests(result) => match result {
                 Ok(prs) => {
                     self.load_signals(&prs);
-                    self.data
-                        .pr_signals
-                        .retain(|id, _| prs.iter().any(|pr| pr.pull_request_id == *id));
-                    self.data.my_prs = Some(prs);
+                    self.data.set_my_prs(prs);
                     self.last_updated = Some(Instant::now());
                 }
                 Err(err) => self.report_error(err),
             },
             Message::OtherPullRequests(result) => match result {
                 Ok(prs) => {
-                    self.data.other_prs = Some(prs);
+                    self.data.set_other_prs(prs);
                     self.last_updated = Some(Instant::now());
                 }
                 Err(err) => self.report_error(err),
@@ -105,7 +102,7 @@ impl App {
                 Err(err) => self.report_error(err),
             },
             Message::Builds(result) => match result {
-                Ok(builds) => self.data.builds = Some(builds),
+                Ok(builds) => self.data.set_builds(builds),
                 Err(err) => self.report_error(err),
             },
             Message::TeamBoard(result) => match result {
@@ -113,7 +110,7 @@ impl App {
                 Err(err) => tracing::warn!("failed to load board: {err:#}"),
             },
             Message::Mentions(result) => match result {
-                Ok(mentions) => self.data.mentions = Some(mentions),
+                Ok(mentions) => self.data.set_mentions(mentions),
                 Err(err) => self.report_error(err),
             },
             Message::MergeStrategies { pr, result } => match result {
@@ -153,14 +150,14 @@ impl App {
             Message::PullRequestSignals { id, result } => {
                 let pr = self
                     .data
-                    .my_prs
-                    .iter()
+                    .my_prs()
+                    .into_iter()
                     .flatten()
                     .find(|pr| pr.pull_request_id == id);
                 match (pr, result) {
                     (Some(pr), Ok(details)) => {
                         let signals = Signals::new(pr, &details);
-                        self.data.pr_signals.insert(id, signals);
+                        self.data.set_pr_signals(id, signals);
                     }
                     (_, Err(err)) => tracing::warn!(id, "failed to load PR signals: {err:#}"),
                     (None, _) => {}
@@ -252,7 +249,7 @@ mod tests {
             pull_request(2, "New", "me", "2026-10-05T10:00:00Z"),
         ])));
 
-        assert_eq!(ids_of_prs(app.data.my_prs.as_ref().unwrap()), [2, 1]);
+        assert_eq!(ids_of_prs(app.data.my_prs().unwrap()), [2, 1]);
         assert!(app.last_updated.is_some());
     }
 
@@ -314,13 +311,13 @@ mod tests {
             result: Ok(details),
         });
 
-        assert_eq!(app.data.pr_signals[&2].unresolved, 1);
+        assert_eq!(app.data.pr_signals()[&2].unresolved, 1);
     }
 
     #[test]
     fn signals_for_removed_pull_requests_are_dropped() {
         let mut app = app();
-        app.data.pr_signals.insert(3, Signals::default());
+        app.data.set_pr_signals(3, Signals::default());
 
         app.handle_message(Message::MyPullRequests(Ok(vec![pull_request(
             1,
@@ -329,6 +326,6 @@ mod tests {
             "2026-10-01T10:00:00Z",
         )])));
 
-        assert!(!app.data.pr_signals.contains_key(&3));
+        assert!(!app.data.pr_signals().contains_key(&3));
     }
 }

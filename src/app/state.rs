@@ -242,8 +242,8 @@ pub enum DetailInfo {
 /// `None` means not loaded yet.
 #[derive(Default)]
 pub struct Data {
-    pub my_prs: Option<Vec<PullRequest>>,
-    pub other_prs: Option<Vec<PullRequest>>,
+    my_prs: Option<Vec<PullRequest>>,
+    other_prs: Option<Vec<PullRequest>>,
     /// Also list others' PRs that are already approved.
     pub show_approved: bool,
     /// Also list others' draft PRs.
@@ -254,15 +254,17 @@ pub struct Data {
     pub sprint_start: Option<String>,
     pub sprint_finish: Option<String>,
     /// Latest run per pipeline and branch that the user triggered.
-    pub builds: Option<Vec<Build>>,
+    builds: Option<Vec<Build>>,
     /// Only list builds whose pipeline, branch or number contains this, ignoring case.
     pub build_filter: String,
     /// Things to act on in my PRs, by PR id.
-    pub pr_signals: HashMap<u32, Signals>,
+    pr_signals: HashMap<u32, Signals>,
     /// Work items with unanswered mentions of the user.
-    pub mentions: Option<Vec<Mention>>,
+    mentions: Option<Vec<Mention>>,
     /// Inbox entries already seen; `None` until the first refresh after loading.
     pub inbox_seen: Option<HashSet<String>>,
+    /// Everything waiting on the user; rebuilt by the setters of its inputs.
+    inbox: Vec<InboxEntry>,
 }
 
 /// Something that waits on the user.
@@ -345,9 +347,49 @@ pub const LEFT_PANELS: [Panel; 6] = [
 ];
 
 impl Data {
+    pub fn my_prs(&self) -> Option<&[PullRequest]> {
+        self.my_prs.as_deref()
+    }
+
+    pub fn other_prs(&self) -> Option<&[PullRequest]> {
+        self.other_prs.as_deref()
+    }
+
+    pub fn pr_signals(&self) -> &HashMap<u32, Signals> {
+        &self.pr_signals
+    }
+
+    /// Also drops the signals of PRs that are gone.
+    pub fn set_my_prs(&mut self, prs: Vec<PullRequest>) {
+        self.pr_signals
+            .retain(|id, _| prs.iter().any(|pr| pr.pull_request_id == *id));
+        self.my_prs = Some(prs);
+        self.rebuild_inbox();
+    }
+
+    pub fn set_other_prs(&mut self, prs: Vec<PullRequest>) {
+        self.other_prs = Some(prs);
+        self.rebuild_inbox();
+    }
+
+    pub fn set_builds(&mut self, builds: Vec<Build>) {
+        self.builds = Some(builds);
+        self.rebuild_inbox();
+    }
+
+    pub fn set_mentions(&mut self, mentions: Vec<Mention>) {
+        self.mentions = Some(mentions);
+        self.rebuild_inbox();
+    }
+
+    pub fn set_pr_signals(&mut self, id: u32, signals: Signals) {
+        self.pr_signals.insert(id, signals);
+        self.rebuild_inbox();
+    }
+
     pub fn len(&self, panel: Panel) -> usize {
         match panel {
-            Panel::Inbox => self.inbox().len(),
+            Panel::Inbox => self.inbox.len(),
             Panel::MyPrs => self.my_prs.as_ref().map_or(0, Vec::len),
             Panel::OtherPrs => self.shown_other_prs().map_or(0, |prs| prs.len()),
             Panel::MyWorkItems => self.my_work_items.as_ref().map_or(0, Vec::len),
@@ -388,7 +430,11 @@ impl Data {
     }
 
     /// Everything waiting on the user, oldest first.
-    pub fn inbox(&self) -> Vec<InboxEntry> {
+    pub fn inbox(&self) -> &[InboxEntry] {
+        &self.inbox
+    }
+
+    fn rebuild_inbox(&mut self) {
         let pr_entry = |pr: &PullRequest, since: &str| InboxEntry {
             detail: Detail::PullRequest(Box::new(pr.clone())),
             since: since.to_string(),
@@ -428,7 +474,7 @@ impl Data {
         let mut entries: Vec<InboxEntry> =
             mine.chain(others).chain(mentions).chain(builds).collect();
         entries.sort_by(|a, b| a.since.cmp(&b.since));
-        entries
+        self.inbox = entries;
     }
 
     /// What waits in an inbox entry, like `2 unresolved, checks failed`; empty when nothing to tell.
@@ -516,6 +562,7 @@ impl Data {
         {
             sort_work_items(items, sort.work_items);
         }
+        self.rebuild_inbox();
     }
 
     pub fn detail(&self, panel: Panel, index: usize) -> Option<Detail> {
@@ -533,11 +580,7 @@ impl Data {
                 .map(|item| Detail::WorkItem(Box::new(item)))
         };
         match panel {
-            Panel::Inbox => self
-                .inbox()
-                .into_iter()
-                .nth(index)
-                .map(|entry| entry.detail),
+            Panel::Inbox => self.inbox.get(index).map(|entry| entry.detail.clone()),
             Panel::MyPrs => pr(&self.my_prs),
             Panel::OtherPrs => self
                 .shown_other_prs()?
@@ -925,5 +968,121 @@ mod tests {
         let signals = Signals::new(&pr, &details(json!([]), json!([]), json!([])));
 
         assert!(signals.conflicts);
+    }
+
+    fn failed_build(id: u32) -> Build {
+        serde_json::from_value(json!({
+            "id": id,
+            "buildNumber": "1",
+            "status": "completed",
+            "result": "failed",
+            "definition": { "id": 1, "name": "ci" },
+            "sourceBranch": "refs/heads/main",
+            "finishTime": "2026-10-01T10:00:00Z",
+        }))
+        .unwrap()
+    }
+
+    fn inbox_keys(data: &Data) -> Vec<String> {
+        data.inbox().iter().map(|e| e.detail.key()).collect()
+    }
+
+    #[test]
+    fn inbox_is_empty_before_anything_is_loaded() {
+        assert!(Data::default().inbox().is_empty());
+    }
+
+    #[test]
+    fn setting_my_prs_and_signals_rebuilds_inbox() {
+        let mut data = Data::default();
+        data.set_my_prs(vec![pull_request(1, "Mine", "me", "2026-10-01T10:00:00Z")]);
+        assert!(data.inbox().is_empty());
+
+        data.set_pr_signals(
+            1,
+            Signals {
+                waiting: true,
+                ..Signals::default()
+            },
+        );
+
+        assert_eq!(data.inbox().len(), 1);
+        assert_eq!(data.len(Panel::Inbox), 1);
+        assert!(
+            data.detail(Panel::Inbox, 0)
+                .is_some_and(|d| d.is_pull_request(1))
+        );
+    }
+
+    #[test]
+    fn setting_my_prs_drops_signals_and_entries_of_gone_prs() {
+        let mut data = Data::default();
+        data.set_my_prs(vec![pull_request(1, "Mine", "me", "2026-10-01T10:00:00Z")]);
+        data.set_pr_signals(
+            1,
+            Signals {
+                waiting: true,
+                ..Signals::default()
+            },
+        );
+
+        data.set_my_prs(vec![pull_request(2, "Other", "me", "2026-10-01T10:00:00Z")]);
+
+        assert!(data.pr_signals().is_empty());
+        assert!(data.inbox().is_empty());
+    }
+
+    #[test]
+    fn setting_other_prs_rebuilds_inbox() {
+        let mut data = Data::default();
+        let mut pr = pull_request(2, "Theirs", "u", "2026-10-01T10:00:00Z");
+        pr.review.since = Some("2026-10-02T10:00:00Z".into());
+
+        data.set_other_prs(vec![pr]);
+
+        assert_eq!(data.inbox().len(), 1);
+        assert_eq!(data.inbox()[0].since, "2026-10-02T10:00:00Z");
+    }
+
+    #[test]
+    fn setting_mentions_rebuilds_inbox() {
+        let mut data = Data::default();
+
+        data.set_mentions(vec![Mention {
+            item: work_item(20, "Mentioned", "Bug", "Active"),
+            date: "2026-10-01T10:00:00Z".into(),
+        }]);
+
+        assert_eq!(data.inbox().len(), 1);
+        data.set_mentions(Vec::new());
+        assert!(data.inbox().is_empty());
+    }
+
+    #[test]
+    fn setting_builds_rebuilds_inbox_with_failed_builds_only() {
+        let mut data = Data::default();
+        let mut passed = failed_build(2);
+        passed.result = Some("succeeded".into());
+
+        data.set_builds(vec![failed_build(1), passed]);
+
+        assert_eq!(
+            inbox_keys(&data),
+            [Detail::Build(Box::new(failed_build(1))).key()]
+        );
+    }
+
+    #[test]
+    fn inbox_is_sorted_oldest_first_across_sources() {
+        let mut data = Data::default();
+        data.set_builds(vec![failed_build(1)]);
+        data.set_mentions(vec![Mention {
+            item: work_item(20, "Mentioned", "Bug", "Active"),
+            date: "2026-09-01T10:00:00Z".into(),
+        }]);
+
+        let since: Vec<&str> = data.inbox().iter().map(|e| e.since.as_str()).collect();
+
+        assert_eq!(since, ["2026-09-01T10:00:00Z", "2026-10-01T10:00:00Z"]);
     }
 }

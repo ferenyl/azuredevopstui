@@ -163,7 +163,7 @@ impl App {
     /// My PR with nothing blocking the merge.
     pub(super) fn can_complete(&self, pr: &PullRequest) -> bool {
         self.data
-            .pr_signals
+            .pr_signals()
             .get(&pr.pull_request_id)
             .is_some_and(|signals| signals.ready)
     }

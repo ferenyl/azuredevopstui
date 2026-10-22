@@ -614,16 +614,13 @@ fn short_date(date: &str) -> String {
 fn panel_items(app: &App, panel: Panel) -> Option<Vec<Line<'static>>> {
     let data = &app.data;
     match panel {
-        Panel::Inbox => (data.my_prs.is_some() && data.other_prs.is_some()).then(|| {
+        Panel::Inbox => (data.my_prs().is_some() && data.other_prs().is_some()).then(|| {
             data.inbox()
                 .iter()
                 .map(|entry| inbox_line(app, entry))
                 .collect()
         }),
-        Panel::MyPrs => data
-            .my_prs
-            .as_ref()
-            .map(|prs| pr_lines(app, prs.iter(), false)),
+        Panel::MyPrs => data.my_prs().map(|prs| pr_lines(app, prs.iter(), false)),
         Panel::OtherPrs => data
             .shown_other_prs()
             .map(|prs| pr_lines(app, prs.into_iter(), true)),
@@ -705,7 +702,7 @@ fn pr_line(
 fn pr_markers(app: &App, pr: &PullRequest) -> Vec<Span<'static>> {
     let mut spans = app
         .data
-        .pr_signals
+        .pr_signals()
         .get(&pr.pull_request_id)
         .map(|signals| signal_spans(app, signals))
         .unwrap_or_default();
@@ -866,19 +863,15 @@ mod tests {
     fn main_app() -> App {
         let mut app = App::new(Some(config()), None);
         app.screen = Screen::Main;
-        app.data = crate::app::Data {
-            my_prs: Some(vec![pull_request(
-                1,
-                "Add order filter",
-                "me",
-                "2026-10-01T10:00:00Z",
-            )]),
-            other_prs: Some(Vec::new()),
-            my_work_items: Some(vec![work_item(10, "Order list", "User Story", "Active")]),
-            ready_work_items: None,
-            sprint_name: Some("Sprint 41".into()),
-            ..Default::default()
-        };
+        app.data.set_my_prs(vec![pull_request(
+            1,
+            "Add order filter",
+            "me",
+            "2026-10-01T10:00:00Z",
+        )]);
+        app.data.set_other_prs(Vec::new());
+        app.data.my_work_items = Some(vec![work_item(10, "Order list", "User Story", "Active")]);
+        app.data.sprint_name = Some("Sprint 41".into());
         app
     }
 
@@ -1186,7 +1179,7 @@ mod tests {
     #[test]
     fn my_pull_requests_show_signals() {
         let mut app = main_app();
-        app.data.pr_signals.insert(
+        app.data.set_pr_signals(
             1,
             Signals {
                 unresolved: 2,
@@ -1207,7 +1200,7 @@ mod tests {
     #[test]
     fn ready_pull_request_shows_check() {
         let mut app = main_app();
-        app.data.pr_signals.insert(
+        app.data.set_pr_signals(
             1,
             Signals {
                 ready: true,
