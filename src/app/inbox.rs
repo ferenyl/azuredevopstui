@@ -135,6 +135,18 @@ mod tests {
     }
 
     #[test]
+    fn partial_load_notice_is_singular_for_one() {
+        let mut app = notifying_app(true);
+
+        app.handle_message(Message::Mentions(Ok(Partial {
+            items: Vec::new(),
+            failed: 1,
+        })));
+
+        assert_eq!(app.notice(), Some("1 work item skipped without comments"));
+    }
+
+    #[test]
     fn first_load_is_not_notified() {
         let mut app = notifying_app(true);
 

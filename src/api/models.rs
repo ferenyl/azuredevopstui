@@ -379,6 +379,7 @@ impl<T> From<Vec<T>> for Partial<T> {
 }
 
 /// A work item with a comment mentioning the user that they have not answered.
+#[derive(Debug)]
 pub struct Mention {
     pub item: WorkItem,
     pub date: String,

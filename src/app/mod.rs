@@ -171,8 +171,9 @@ impl App {
         };
     }
 
-    fn note_failures(&mut self, failed: usize, what: &str) {
+    fn note_failures(&mut self, failed: usize, one: &str, many: &str) {
         if failed > 0 {
+            let what = if failed == 1 { one } else { many };
             self.notice = Some((format!("{failed} {what}"), Instant::now()));
         }
     }

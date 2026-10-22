@@ -79,7 +79,11 @@ impl App {
             Message::OtherPullRequests(result) => match result {
                 Ok(prs) => {
                     self.data.set_other_prs(prs.items);
-                    self.note_failures(prs.failed, "PRs without review signals");
+                    self.note_failures(
+                        prs.failed,
+                        "PR without review signals",
+                        "PRs without review signals",
+                    );
                     self.last_updated = Some(Instant::now());
                 }
                 Err(err) => self.report_error(err),
@@ -113,7 +117,11 @@ impl App {
             Message::Mentions(result) => match result {
                 Ok(mentions) => {
                     self.data.set_mentions(mentions.items);
-                    self.note_failures(mentions.failed, "work items skipped without comments");
+                    self.note_failures(
+                        mentions.failed,
+                        "work item skipped without comments",
+                        "work items skipped without comments",
+                    );
                 }
                 Err(err) => self.report_error(err),
             },

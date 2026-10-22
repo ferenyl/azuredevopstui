@@ -4,11 +4,11 @@ use anyhow::{Context, Result};
 use futures::{StreamExt, stream};
 use serde_json::{Value, json};
 
-use super::ProjectApi;
 use super::models::{
     Comment, Identity, ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestDetails,
     PullRequestStatus, ResourceRef, ReviewSignals, Thread,
 };
+use super::{ProjectApi, is_unauthorized};
 use crate::config::{MergeStrategy, OtherPrsFilter};
 use crate::images::markdown_images;
 
@@ -47,28 +47,31 @@ impl ProjectApi {
                 pull_requests.extend(self.active_pull_requests(&[(key, &id)]).await?);
             }
         }
-        let results: Vec<(PullRequest, bool)> = stream::iter(without_own(pull_requests, user_id))
-            .map(|mut pr| async move {
-                let signals = tokio::try_join!(self.policy_evaluations(&pr), self.threads(&pr));
-                let complete = match signals {
-                    Ok((policies, threads)) => {
-                        pr.approved = is_approved(&pr, &policies);
-                        pr.review = review_signals(&pr, &threads, user_id);
-                        true
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            id = pr.pull_request_id,
-                            "PR loaded without review signals: {err:#}"
-                        );
-                        false
-                    }
-                };
-                (pr, complete)
-            })
-            .buffered(8)
-            .collect()
-            .await;
+        let results: Vec<Result<(PullRequest, bool)>> =
+            stream::iter(without_own(pull_requests, user_id))
+                .map(|mut pr| async move {
+                    let signals = tokio::try_join!(self.policy_evaluations(&pr), self.threads(&pr));
+                    let complete = match signals {
+                        Ok((policies, threads)) => {
+                            pr.approved = is_approved(&pr, &policies);
+                            pr.review = review_signals(&pr, &threads, user_id);
+                            true
+                        }
+                        Err(err) if is_unauthorized(&err) => return Err(err),
+                        Err(err) => {
+                            tracing::warn!(
+                                id = pr.pull_request_id,
+                                "PR loaded without review signals: {err:#}"
+                            );
+                            false
+                        }
+                    };
+                    Ok((pr, complete))
+                })
+                .buffered(8)
+                .collect()
+                .await;
+        let results = results.into_iter().collect::<Result<Vec<_>>>()?;
         let failed = results.iter().filter(|(_, complete)| !complete).count();
         Ok(Partial {
             items: results.into_iter().map(|(pr, _)| pr).collect(),
@@ -542,6 +545,36 @@ mod tests {
 
         assert_eq!(ids_of_prs(&prs.items), [1, 2]);
         assert_eq!(prs.failed, 1);
+    }
+
+    #[tokio::test]
+    async fn other_pull_requests_propagate_unauthorized_from_threads() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/git/pullrequests"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                pull_request_json(1, "Theirs", "other", "2026-10-01T10:00:00Z")
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/policy/evaluations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/pullRequests/1/threads$"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let err = client
+            .other_pull_requests("me", &OtherPrsFilter::default())
+            .await
+            .unwrap_err();
+
+        assert!(is_unauthorized(&err));
     }
 
     #[tokio::test]

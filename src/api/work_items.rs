@@ -2,12 +2,12 @@ use anyhow::{Context, Result};
 use futures::{StreamExt, future, stream};
 use serde_json::json;
 
-use super::ProjectApi;
 use super::models::{
     CommentList, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention, Partial,
     PullRequest, Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails,
     WorkItemResponse, WorkItemTypeCategory,
 };
+use super::{ProjectApi, is_unauthorized};
 use crate::rich_text::RichText;
 
 const MAX_WORK_ITEMS: &str = "200";
@@ -183,9 +183,17 @@ impl ProjectApi {
             .buffered(8)
             .collect()
             .await;
-        let failed = results.iter().filter(|result| result.is_err()).count();
+        let mut mentions = Vec::new();
+        let mut failed = 0;
+        for result in results {
+            match result {
+                Ok(mention) => mentions.extend(mention),
+                Err(err) if is_unauthorized(&err) => return Err(err),
+                Err(_) => failed += 1,
+            }
+        }
         Ok(Partial {
-            items: results.into_iter().flatten().flatten().collect(),
+            items: mentions,
             failed,
         })
     }
@@ -973,6 +981,35 @@ mod tests {
         assert_eq!(mentions.failed, 1);
         assert_eq!(mentions.items.len(), 1);
         assert_eq!(mentions.items[0].item.id, 10);
+    }
+
+    #[tokio::test]
+    async fn mentioned_work_items_propagate_unauthorized_from_comments() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/Team/_apis/wit/wiql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "workItems": [{ "id": 10 }]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(10, "Mentioned", "Task", "Active")
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let err = client.mentioned_work_items("me-id").await.unwrap_err();
+
+        assert!(is_unauthorized(&err));
     }
 
     #[tokio::test]
