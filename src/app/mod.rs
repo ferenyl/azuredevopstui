@@ -73,6 +73,7 @@ pub struct App {
     notice: Option<(String, Instant)>,
     /// Status of inbox entries last notified about, by key; `None` until the first refresh after loading.
     notified: Option<HashMap<String, String>>,
+    notifier: crate::notify::Notifier,
     pub images: Images,
     client: Option<AdoClient>,
     /// Built once both the client and the config exist.
@@ -110,6 +111,7 @@ impl App {
             error: None,
             notice: None,
             notified: None,
+            notifier: Default::default(),
             images: Images::new(picker),
             client: None,
             api: None,
