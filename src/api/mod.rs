@@ -12,7 +12,7 @@ pub use models::{
     ReviewSignals, SprintWorkItems, THREAD_STATUSES, Thread, WorkItem, WorkItemDetails,
     thread_status_label,
 };
-pub use pull_requests::{is_approved, is_reviewer_policy};
+pub use pull_requests::{CompletionOptions, is_approved, is_reviewer_policy};
 
 use std::cmp::Ordering;
 use std::collections::HashMap;

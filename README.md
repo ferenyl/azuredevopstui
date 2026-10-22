@@ -34,7 +34,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - Move a work item to another board column. The columns come from your team's board, and split columns (for example *Active → Doing / Done*) are supported.
   - Assign a work item to yourself.
   - Unassign yourself from a work item and pick its new board column in the same step.
-  - Complete one of your PRs once it shows `✔`. You pick a merge strategy among the ones the branch policies allow, and the last one you used is preselected. `esc` cancels without completing.
+  - Complete one of your PRs once it shows `✔`, or set auto-complete on one that is not ready yet (and cancel it again). You pick a merge strategy among the ones the branch policies allow, and choose whether to delete the source branch, transition linked work items, bypass branch policies (asks for confirmation) and the merge commit message. The last strategy and the first two toggles are remembered in the config. The overview shows who set auto-complete. `esc` cancels without completing.
   - Vote on any PR with `v`: approve, approve with suggestions, wait for author, reject or reset your vote. Your current vote is preselected and `esc` cancels. The inbox entry "needs your vote" goes away once you voted.
 - **Sorting** per list type. The choice is saved to the config.
 - **Work item type filter**: pick which types (User Story, Bug, Feature, …) the work item lists show. The list of types comes from the project, and the choice is saved to the config.
@@ -358,6 +358,9 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `work_item_types` | `[]` | Work item types shown in *My work items* and *Ready*, for example `["User Story", "Bug"]`. An empty array shows all types. |
 | `show_images` | `true` | Draw images in the detail panel when the terminal supports graphics. Set it to `false` to skip the terminal graphics query at startup. |
 | `notifications` | `false` | Send a desktop notification when something new lands in the inbox (not on the first load). Works on Linux (D-Bus), Windows (toast) and macOS. Also sent when an entry's status changes, like new comments or failed checks. Several changes in one refresh become a single notification. A notification about one item has an *Open* action that opens it like `o`. Run `azuredevopstui --test-notification` to check that notifications work. |
+| `merge_strategy` | not set | The merge strategy last used to complete a PR; preselected next time. Written by the app. |
+| `completion.delete_source_branch` | `false` | Preselect *Delete source branch* in the completion popup. Written by the app when you complete or set auto-complete. |
+| `completion.transition_work_items` | `false` | Preselect *Transition linked work items* in the completion popup. Written by the app like the above. Bypassing policies and the merge message are never remembered. |
 | `notify.builds` | `true` | Notify about failed builds. Only used when `notifications` is `true`. |
 | `notify.mentions` | `true` | Notify about work items that mention you. |
 | `notify.pull_requests` | `true` | Notify about pull requests waiting on you and changes to your own. |
@@ -449,7 +452,7 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels |
 | `]` / `[` | Select the next or previous comment thread on a PR's Comments tab |
 | `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
-| `c` | Complete your ready PR: pick the merge strategy, then `enter`. `esc` cancels and nothing is completed |
+| `c` | Complete your PR or set auto-complete: pick the merge strategy, `space` ticks *Delete source branch*, *Transition linked work items*, *Set auto-complete* and *Bypass branch policies*, edit the merge commit message, then `enter`. A PR that is not ready starts with auto-complete ticked; if auto-complete is set, *Cancel auto-complete* is the last row. Bypassing asks `y` / `n` first. `esc` cancels and nothing is sent |
 | `v` | Vote on the PR: pick approve, approve with suggestions, wait for author, reject or reset vote, then `enter`. `esc` cancels and nothing is sent |
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `y` | Copy the PR (`!1234`) or work item (`#5678`) number |

@@ -62,8 +62,13 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
         Some(Popup::Complete(picker)) => {
             let title = format!(" Complete !{} ", picker.pr.pull_request_id);
-            popup::render_picker(frame, app, &title, &picker.selection, main);
+            let selection = Selection {
+                items: picker.items(),
+                selected: picker.selection.selected,
+            };
+            popup::render_picker(frame, app, &title, &selection, main);
         }
+        Some(Popup::Confirm { prompt, .. }) => popup::render_confirm(frame, app, prompt, main),
         Some(Popup::Tags(picker)) => {
             let items = picker
                 .selection

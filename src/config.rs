@@ -38,6 +38,9 @@ pub struct Config {
     /// Last merge strategy used to complete a pull request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_strategy: Option<MergeStrategy>,
+    /// Completion options preselected when completing a pull request.
+    #[serde(default)]
+    pub completion: CompletionDefaults,
     /// Detect terminal graphics and draw images. Off skips the terminal query entirely.
     #[serde(default = "default_true")]
     pub show_images: bool,
@@ -211,6 +214,14 @@ impl WorkItemSort {
     }
 }
 
+/// Last completion toggles; bypassing policies and the merge message are never remembered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompletionDefaults {
+    pub delete_source_branch: bool,
+    pub transition_work_items: bool,
+}
+
 /// Serialized names match the Azure DevOps API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -254,6 +265,7 @@ impl Config {
             work_item_types: Vec::new(),
             sort: SortConfig::default(),
             merge_strategy: None,
+            completion: CompletionDefaults::default(),
             show_images: true,
             notifications: false,
             notify: NotifyConfig::default(),

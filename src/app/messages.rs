@@ -145,17 +145,6 @@ impl App {
                 Ok(strategies) => self.open_complete_picker(pr, strategies),
                 Err(err) => self.report_error(err),
             },
-            Message::PullRequestCompleted { id, result } => match result {
-                Ok(()) => {
-                    tracing::info!(id, "pull request completed");
-                    self.reload_only(&[
-                        Load::MyPullRequests,
-                        Load::OtherPullRequests,
-                        Load::Detail,
-                    ]);
-                }
-                Err(err) => self.report_error(err),
-            },
             Message::PullRequestUpdated { id, reload, result } => match result {
                 Ok(()) => {
                     tracing::info!(id, "pull request updated");

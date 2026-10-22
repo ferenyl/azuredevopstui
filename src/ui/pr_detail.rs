@@ -74,9 +74,19 @@ fn overview(
             "Created",
             vec![Span::raw(short_date(&pr.creation_date))],
         ),
-        Line::default(),
-        heading(app, "Reviewers", width),
     ];
+    if let Some(who) = &pr.auto_complete_set_by {
+        lines.push(field(
+            app,
+            "Auto-complete",
+            vec![Span::styled(
+                format!("set by {}", who.display_name),
+                Style::new().fg(theme.pr_approved),
+            )],
+        ));
+    }
+    lines.push(Line::default());
+    lines.push(heading(app, "Reviewers", width));
 
     if pr.reviewers.is_empty() {
         lines.push(Line::styled("  none", muted));

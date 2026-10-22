@@ -2,6 +2,7 @@ mod build_filter;
 mod column;
 mod comment;
 mod complete;
+mod confirm;
 mod pr_filter;
 mod sort;
 mod sprint;
@@ -12,7 +13,7 @@ mod vote;
 
 use crossterm::event::KeyEvent;
 
-use super::{Action, App, Popup};
+use super::{Action, App, CompleteRow, Popup};
 
 impl App {
     pub(super) fn confirm_popup(&mut self) {
@@ -27,6 +28,7 @@ impl App {
             Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
             Some(Popup::BuildFilter { text }) => self.confirm_build_filter(text.as_str()),
             Some(Popup::Vote { pr, selection }) => self.confirm_vote(pr, selection.selected),
+            Some(Popup::Confirm { action, .. }) => self.confirm_action(action),
             Some(Popup::ThreadStatus {
                 pr,
                 thread_id,
@@ -38,7 +40,13 @@ impl App {
 
     /// Lets the open popup's text input take the key; true when consumed.
     pub(super) fn handle_popup_key(&mut self, key: KeyEvent) -> bool {
+        if self.is_confirm_open() {
+            return self.handle_confirm_key(key);
+        }
         match &mut self.popup {
+            Some(Popup::Complete(picker)) if picker.row() == CompleteRow::Message => {
+                picker.message.handle_key(key, false)
+            }
             Some(Popup::Tags(picker)) => picker.handle_key(key),
             Some(Popup::Sprint(picker)) => picker.handle_key(key),
             Some(Popup::Text { text, .. }) => text.handle_key(key, true),
@@ -51,7 +59,7 @@ impl App {
     pub(super) fn apply_popup(&mut self, action: Action) -> bool {
         if matches!(
             self.popup,
-            Some(Popup::Text { .. } | Popup::BuildFilter { .. })
+            Some(Popup::Text { .. } | Popup::BuildFilter { .. } | Popup::Confirm { .. })
         ) {
             match action {
                 Action::Confirm => self.confirm_popup(),
@@ -69,7 +77,9 @@ impl App {
             Popup::Complete(picker) => &mut picker.selection,
             Popup::Tags(picker) => &mut picker.selection,
             Popup::Sprint(picker) => &mut picker.selection,
-            Popup::Text { .. } | Popup::BuildFilter { .. } => return true,
+            Popup::Text { .. } | Popup::BuildFilter { .. } | Popup::Confirm { .. } => {
+                return true;
+            }
             Popup::Sort { selection, .. }
             | Popup::Vote { selection, .. }
             | Popup::ThreadStatus { selection, .. }
@@ -78,6 +88,10 @@ impl App {
         };
         match action {
             Action::Toggle => {
+                if let Popup::Complete(picker) = popup {
+                    picker.toggle();
+                    picker.selection.items = picker.items();
+                }
                 if let Popup::Types { selection, checked } | Popup::PrFilter { selection, checked } =
                     popup
                     && let Some(checked) = checked.get_mut(selection.selected)
