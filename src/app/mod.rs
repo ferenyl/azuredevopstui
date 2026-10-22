@@ -27,6 +27,7 @@ pub use state::{
 };
 pub use text_input::TextInput;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -68,6 +69,13 @@ pub struct App {
     pub detail_tab: DetailTab,
     /// Changed files of the shown PR, once its Files tab was shown.
     pub files: Option<Files>,
+    /// Targets of the links drawn in the detail pane last frame, in reading order.
+    pub detail_links: RefCell<Vec<String>>,
+    /// Selected entry of `detail_links`.
+    pub link_index: Option<usize>,
+    /// Every URL `open_url` was asked to open, so tests need no browser.
+    #[cfg(test)]
+    opened: Vec<String>,
     pub popup: Option<Popup>,
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
     sprint: Option<String>,
@@ -112,6 +120,10 @@ impl App {
             detail_scroll: 0,
             detail_tab: DetailTab::default(),
             files: None,
+            detail_links: RefCell::default(),
+            link_index: None,
+            #[cfg(test)]
+            opened: Vec::new(),
             popup: None,
             show_help: false,
             last_updated: None,

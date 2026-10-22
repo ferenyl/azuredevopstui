@@ -122,6 +122,10 @@ pub enum Popup {
     BuildFilter {
         text: TextInput,
     },
+    Vote {
+        pr: Box<PullRequest>,
+        selection: Selection,
+    },
 }
 
 pub struct ColumnPicker {
@@ -243,7 +247,7 @@ impl SprintPicker {
 
 pub enum DetailInfo {
     PullRequest(PullRequestDetails),
-    WorkItem(WorkItemDetails),
+    WorkItem(Box<WorkItemDetails>),
 }
 
 /// `None` means not loaded yet.

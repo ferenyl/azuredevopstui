@@ -38,13 +38,33 @@ impl App {
         Some(url.to_string())
     }
 
+    /// The selected link of the detail pane, if it is still shown.
+    pub(super) fn selected_link(&self) -> Option<String> {
+        self.detail_links.borrow().get(self.link_index?).cloned()
+    }
+
+    pub(super) fn select_link(&mut self, next: bool) {
+        let count = self.detail_links.borrow().len();
+        if count == 0 {
+            return;
+        }
+        self.link_index = Some(match self.link_index {
+            None if next => 0,
+            None => count - 1,
+            Some(index) if next => (index + 1) % count,
+            Some(index) => (index + count - 1) % count,
+        });
+    }
+
     pub(super) fn open_in_browser(&mut self) {
-        if let Some(url) = self.current_url() {
+        if let Some(url) = self.selected_link().or_else(|| self.current_url()) {
             self.open_url(&url);
         }
     }
 
     pub(super) fn open_url(&mut self, url: &str) {
+        #[cfg(test)]
+        self.opened.push(url.to_string());
         let Some(config) = &self.config else {
             return;
         };
@@ -81,7 +101,7 @@ impl App {
     }
 
     pub(super) fn copy_link(&mut self) {
-        if let Some(url) = self.current_url() {
+        if let Some(url) = self.selected_link().or_else(|| self.current_url()) {
             self.copy(url);
         }
     }
@@ -211,6 +231,46 @@ mod tests {
 
     use crate::app::Popup;
     use crate::app::test_helpers::{app, assign_first_item_to, board, ctrl, me, press};
+
+    fn with_links(count: usize) -> crate::app::App {
+        let app = app();
+        *app.detail_links.borrow_mut() = (0..count).map(|i| format!("https://{i}.test")).collect();
+        app
+    }
+
+    #[test]
+    fn link_selection_cycles_and_wraps() {
+        let mut app = with_links(2);
+
+        press(&mut app, KeyCode::Char('l'));
+        assert_eq!(app.link_index, Some(0));
+        press(&mut app, KeyCode::Char('l'));
+        press(&mut app, KeyCode::Char('l'));
+        assert_eq!(app.link_index, Some(0));
+        press(&mut app, KeyCode::Char('L'));
+        assert_eq!(app.link_index, Some(1));
+    }
+
+    #[test]
+    fn previous_link_starts_at_the_last_and_no_links_selects_nothing() {
+        let mut app = with_links(3);
+        press(&mut app, KeyCode::Char('L'));
+        assert_eq!(app.link_index, Some(2));
+
+        let mut none = with_links(0);
+        press(&mut none, KeyCode::Char('l'));
+        assert_eq!(none.link_index, None);
+    }
+
+    #[test]
+    fn selected_link_is_the_one_acted_on() {
+        let mut app = with_links(2);
+        assert_eq!(app.selected_link(), None);
+
+        app.link_index = Some(1);
+
+        assert_eq!(app.selected_link().as_deref(), Some("https://1.test"));
+    }
 
     #[test]
     fn unassign_asks_for_new_status_first() {

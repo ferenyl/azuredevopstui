@@ -87,6 +87,8 @@ impl App {
             Action::OpenInBrowser
             | Action::Copy
             | Action::CopyLink
+            | Action::NextLink
+            | Action::PrevLink
             | Action::AssignToMe
             | Action::Unassign
             | Action::Tag
@@ -99,10 +101,12 @@ impl App {
             | Action::Toggle
             | Action::NextTab
             | Action::PrevTab
+            | Action::Vote
                 if !matches!(self.screen, Screen::Main) => {}
             Action::OpenInBrowser => self.open_in_browser(),
             Action::Copy => self.copy_number(),
             Action::CopyLink => self.copy_link(),
+            Action::NextLink | Action::PrevLink => self.select_link(action == Action::NextLink),
             Action::Sort => self.open_sort_picker(),
             Action::Filter => match self.current_item() {
                 _ if self.focus == Panel::Builds => self.open_build_filter(),
@@ -119,6 +123,7 @@ impl App {
             Action::Unassign => self.unassign(),
             Action::Tag => self.tag(),
             Action::Comment => self.open_comment(),
+            Action::Vote => self.open_vote_picker(),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);
@@ -190,6 +195,7 @@ impl App {
         };
         self.detail_tab = tabs[index];
         self.detail_scroll = 0;
+        self.link_index = None;
         if self.detail_tab == DetailTab::Files {
             self.load_files();
         }

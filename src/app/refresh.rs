@@ -255,6 +255,7 @@ impl App {
         self.detail_info = None;
         self.clear_files();
         self.detail_scroll = 0;
+        self.link_index = None;
         self.detail_tab = DetailTab::Overview;
     }
 
@@ -264,6 +265,8 @@ impl App {
         self.detail = None;
         self.detail_info = None;
         self.clear_files();
+        self.detail_links.borrow_mut().clear();
+        self.link_index = None;
         if self.focus == Panel::Detail {
             self.focus = self.last_left;
         }

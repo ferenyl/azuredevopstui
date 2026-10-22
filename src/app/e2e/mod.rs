@@ -5,6 +5,9 @@
 
 mod changes;
 mod flows;
+mod links;
+mod notifications;
+mod vote;
 
 use std::fs;
 use std::path::Path;

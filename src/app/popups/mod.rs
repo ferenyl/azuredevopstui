@@ -7,6 +7,7 @@ mod sort;
 mod sprint;
 mod tags;
 mod types;
+mod vote;
 
 use crossterm::event::KeyEvent;
 
@@ -26,6 +27,7 @@ impl App {
             Some(Popup::Types { selection, checked }) => self.confirm_types(selection, checked),
             Some(Popup::PrFilter { checked, .. }) => self.confirm_pr_filter(&checked),
             Some(Popup::BuildFilter { text }) => self.confirm_build_filter(text.as_str()),
+            Some(Popup::Vote { pr, selection }) => self.confirm_vote(pr, selection.selected),
             None => {}
         }
     }
@@ -65,6 +67,7 @@ impl App {
             Popup::Sprint(picker) => &mut picker.selection,
             Popup::Comment { .. } | Popup::BuildFilter { .. } => return true,
             Popup::Sort { selection, .. }
+            | Popup::Vote { selection, .. }
             | Popup::Types { selection, .. }
             | Popup::PrFilter { selection, .. } => selection,
         };

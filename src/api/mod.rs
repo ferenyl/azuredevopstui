@@ -219,6 +219,16 @@ impl AdoClient {
         self.request(Method::PATCH, url, Some(body), false).await
     }
 
+    async fn put<T: DeserializeOwned>(
+        &self,
+        base: &str,
+        segments: &[&str],
+        body: &Value,
+    ) -> Result<T> {
+        let url = build_url(base, segments, &[], API_VERSION)?;
+        self.request(Method::PUT, url, Some(body), false).await
+    }
+
     async fn request<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -827,7 +837,7 @@ mod tests {
     async fn mutations_are_not_retried() {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
-        for verb in ["POST", "PATCH"] {
+        for verb in ["POST", "PATCH", "PUT"] {
             let server = MockServer::start().await;
             Mock::given(method(verb))
                 .and(path("/_apis/test"))
@@ -841,6 +851,10 @@ mod tests {
             let result = if verb == "POST" {
                 client
                     .post_versioned::<Value>(&server.uri(), &["_apis", "test"], &[], &body, "7.1")
+                    .await
+            } else if verb == "PUT" {
+                client
+                    .put::<Value>(&server.uri(), &["_apis", "test"], &body)
                     .await
             } else {
                 client

@@ -10,7 +10,7 @@ use super::{FIXTURES, Harness, MockAdo};
 use crate::api::WorkItem;
 use crate::app::{Detail, DetailInfo, Panel, Popup, Screen, SetupStep};
 
-const MY_PRS: &str = "/contoso/Fabrikam/_apis/git/pullrequests";
+pub(super) const MY_PRS: &str = "/contoso/Fabrikam/_apis/git/pullrequests";
 const BUILDS: &str = "/contoso/Fabrikam/_apis/build/builds";
 const CONNECTION_DATA: &str = "/contoso/_apis/connectionData";
 const WORK_ITEM_301: &str = "/contoso/Fabrikam/_apis/wit/workitems/301";
@@ -522,7 +522,7 @@ async fn repeated_refresh_does_not_stack_requests() {
 }
 
 /// Answers the mentions query with work item 601 whose last comment mentions the user, `loads` times.
-async fn mention_601(harness: &Harness, loads: u64) {
+pub(super) async fn mention_601(harness: &Harness, loads: u64) {
     harness
         .ado
         .expect(
@@ -556,7 +556,7 @@ async fn mention_601(harness: &Harness, loads: u64) {
 }
 
 /// The pull requests of a fixture file.
-fn fixture_pull_requests(file: &str) -> Vec<serde_json::Value> {
+pub(super) fn fixture_pull_requests(file: &str) -> Vec<serde_json::Value> {
     let content = std::fs::read_to_string(format!("{FIXTURES}/{file}")).expect("fixture");
     let fixture: serde_json::Value = serde_json::from_str(&content).expect("fixture json");
     fixture["body"]["value"]
@@ -748,7 +748,7 @@ async fn pipelines_load_the_latest_runs_in_one_query() {
 }
 
 /// Presses Enter on the open popup and returns the requests the mutation and its reloads sent.
-async fn requests_after_confirming(harness: &mut Harness) -> Vec<String> {
+pub(super) async fn requests_after_confirming(harness: &mut Harness) -> Vec<String> {
     harness.settle().await;
     let before = harness.ado.requests().await.len();
     harness.press(KeyCode::Enter);
@@ -826,7 +826,8 @@ async fn commenting_reloads_only_the_mentions() {
 }
 
 const WORK_ITEM_303: &str = "/contoso/Fabrikam/_apis/wit/workitems/303";
-const PR_101: &str = "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/101";
+pub(super) const PR_101: &str =
+    "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/101";
 
 /// Answers a `PATCH` of `target` containing `body_part` and asserts it is sent once.
 async fn expect_patch(harness: &Harness, target: &str, body_part: &str) {
@@ -849,13 +850,13 @@ fn mark_ready(harness: &mut Harness, id: u32) {
     harness.app.data.set_pr_signals(id, signals);
 }
 
-async fn wait_for_popup(harness: &mut Harness, popup: fn(&Popup) -> bool) {
+pub(super) async fn wait_for_popup(harness: &mut Harness, popup: fn(&Popup) -> bool) {
     harness
         .wait_for(move |app| app.popup.as_ref().is_some_and(popup))
         .await;
 }
 
-fn assert_only_requests_to(requests: &[String], touched: &[&str], untouched: &[&str]) {
+pub(super) fn assert_only_requests_to(requests: &[String], touched: &[&str], untouched: &[&str]) {
     for suffix in touched {
         assert!(
             requests.iter().any(|r| r.contains(suffix)),
@@ -1030,7 +1031,7 @@ async fn mention_601_once(harness: &Harness, state: &str, assigned: bool) {
         .await;
 }
 
-async fn mention_601_comment(harness: &Harness) {
+pub(super) async fn mention_601_comment(harness: &Harness) {
     harness
         .ado
         .expect(

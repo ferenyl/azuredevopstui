@@ -81,6 +81,12 @@ pub enum Message {
         file: usize,
         result: Result<FileDiff>,
     },
+    PullRequestUpdated {
+        id: u32,
+        /// The panels showing what the change touched.
+        reload: Vec<Load>,
+        result: Result<()>,
+    },
     /// A notification closed; holds the item URL when its open action was clicked.
     Notified(Option<String>),
     /// The response to a request started with `App::spawn_load`.

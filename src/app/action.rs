@@ -29,6 +29,9 @@ pub enum Action {
     NextTab,
     PrevTab,
     Help,
+    NextLink,
+    PrevLink,
+    Vote,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -43,6 +46,8 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::OpenInBrowser,
             Action::Copy,
             Action::CopyLink,
+            Action::NextLink,
+            Action::PrevLink,
             Action::Sprint,
             Action::Reload,
             Action::ChangeToken,
@@ -62,7 +67,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::Comment,
         ],
     ),
-    ("Pull requests", &[Action::Complete]),
+    ("Pull requests", &[Action::Complete, Action::Vote]),
 ];
 
 impl Action {
@@ -95,7 +100,10 @@ impl Action {
             (KeyCode::Tab, _) => Some(Self::NextTab),
             (KeyCode::BackTab, _) => Some(Self::PrevTab),
             (KeyCode::Char('T'), _) => Some(Self::ChangeToken),
+            (KeyCode::Char('l'), _) => Some(Self::NextLink),
+            (KeyCode::Char('L'), _) => Some(Self::PrevLink),
             (KeyCode::Char('?'), _) => Some(Self::Help),
+            (KeyCode::Char('v'), _) => Some(Self::Vote),
             _ => None,
         }
     }
@@ -129,6 +137,9 @@ impl Action {
             Self::NextTab => "tab",
             Self::PrevTab => "shift+tab",
             Self::Help => "?",
+            Self::NextLink => "l",
+            Self::PrevLink => "L",
+            Self::Vote => "v",
         }
     }
 
@@ -161,6 +172,9 @@ impl Action {
             Self::NextTab => "next tab",
             Self::PrevTab => "previous tab",
             Self::Help => "help",
+            Self::NextLink => "select link",
+            Self::PrevLink => "previous link",
+            Self::Vote => "vote",
         }
     }
 }

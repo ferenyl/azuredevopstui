@@ -156,12 +156,25 @@ impl App {
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::PullRequestUpdated { id, reload, result } => match result {
+                Ok(()) => {
+                    tracing::info!(id, "pull request updated");
+                    let shown = self.detail.as_ref().is_some_and(|d| d.is_pull_request(id));
+                    let loads: Vec<Load> = reload
+                        .into_iter()
+                        .filter(|load| *load != Load::Detail || shown)
+                        .collect();
+                    self.reload_only(&loads);
+                }
+                Err(err) => self.report_error(err),
+            },
             Message::Connected(Err(err)) => self.fail(err, Retry::Continue),
             Message::PullRequestDetails { id, result } => {
                 if self.detail.as_ref().is_some_and(|d| d.is_pull_request(id)) {
                     match result {
                         Ok(info) => {
                             self.detail_info = Some(DetailInfo::PullRequest(info));
+                            self.link_index = None;
                             self.load_images();
                         }
                         Err(err) => self.report_error(err),
@@ -217,7 +230,8 @@ impl App {
                 if self.detail.as_ref().is_some_and(|d| d.is_work_item(id)) {
                     match result {
                         Ok(info) => {
-                            self.detail_info = Some(DetailInfo::WorkItem(info));
+                            self.detail_info = Some(DetailInfo::WorkItem(Box::new(info)));
+                            self.link_index = None;
                             self.load_images();
                         }
                         Err(err) => self.report_error(err),
@@ -331,6 +345,27 @@ mod tests {
             result: Ok(details()),
         });
         assert!(matches!(app.detail_info, Some(DetailInfo::PullRequest(_))));
+    }
+
+    #[test]
+    fn reloaded_details_clear_the_selected_link() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        *app.detail_links.borrow_mut() = vec!["https://a.test".into()];
+        app.link_index = Some(0);
+
+        app.handle_message(Message::PullRequestDetails {
+            id: 1,
+            result: Ok(PullRequestDetails {
+                description: None,
+                threads: Vec::new(),
+                statuses: Vec::new(),
+                policies: Vec::new(),
+                work_items: Vec::new(),
+            }),
+        });
+
+        assert_eq!(app.link_index, None);
     }
 
     #[test]
