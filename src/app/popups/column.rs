@@ -1,4 +1,5 @@
 use crate::api::{Board, WorkItem};
+use crate::app::loads::Load;
 use crate::app::message::Message;
 use crate::app::{App, ColumnPicker, Popup, Selection};
 
@@ -51,7 +52,11 @@ impl App {
             } else {
                 api.move_work_item(id, &board, &target).await
             };
-            Message::WorkItemUpdated { id, result }
+            Message::WorkItemUpdated {
+                id,
+                reload: &[Load::Sprint, Load::Detail],
+                result,
+            }
         });
     }
 }

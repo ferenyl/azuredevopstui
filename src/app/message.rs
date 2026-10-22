@@ -54,6 +54,8 @@ pub enum Message {
     },
     WorkItemUpdated {
         id: u32,
+        /// The panels showing what the change touched.
+        reload: &'static [Load],
         result: Result<()>,
     },
     Tags {

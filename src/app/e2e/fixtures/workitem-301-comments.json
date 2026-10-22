@@ -1,0 +1,5 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/wit/workItems/301/comments",
+  "body": { "totalCount": 0, "comments": [] }
+}

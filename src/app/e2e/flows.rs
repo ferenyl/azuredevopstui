@@ -204,10 +204,8 @@ async fn tagging_a_work_item_patches_its_tags() {
         .wait_for(|app| matches!(app.popup, Some(Popup::Tags(_))))
         .await;
     harness.type_text("frontend");
-    let before = harness.app.last_refresh;
     harness.press(KeyCode::Enter);
-    // A successful update refreshes the lists.
-    harness.wait_for(|app| app.last_refresh > before).await;
+    harness.settle().await;
 
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
     assert_eq!(harness.config().recent_tags, ["frontend"]);
@@ -230,10 +228,8 @@ async fn commenting_on_a_work_item_posts_the_comment() {
 
     harness.press(KeyCode::Char('m'));
     harness.type_text("Looks good");
-    let before = harness.app.last_refresh;
     harness.press(KeyCode::Enter);
-    // A successful update refreshes the lists.
-    harness.wait_for(|app| app.last_refresh > before).await;
+    harness.settle().await;
 
     assert!(harness.app.popup.is_none());
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
@@ -744,4 +740,85 @@ async fn pipelines_load_the_latest_runs_in_one_query() {
     assert_eq!(ids, [4, 3]);
     assert_eq!(harness.ado.received("GET", BUILDS).await, 2);
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+/// Presses Enter on the open popup and returns the requests the mutation and its reloads sent.
+async fn requests_after_confirming(harness: &mut Harness) -> Vec<String> {
+    harness.settle().await;
+    let before = harness.ado.requests().await.len();
+    harness.press(KeyCode::Enter);
+    harness.settle().await;
+    let mut requests = harness.ado.requests().await.split_off(before);
+    requests.sort();
+    requests
+}
+
+#[tokio::test]
+async fn tagging_without_an_open_detail_sends_only_the_patch() {
+    let mut harness = connected().await;
+    select(&mut harness, Panel::MyWorkItems, 301);
+    harness.press(KeyCode::Char('t'));
+    harness
+        .wait_for(|app| matches!(app.popup, Some(Popup::Tags(_))))
+        .await;
+    harness.type_text("frontend");
+
+    let requests = requests_after_confirming(&mut harness).await;
+
+    assert_eq!(
+        requests,
+        ["PATCH /contoso/Fabrikam/_apis/wit/workitems/301"]
+    );
+}
+
+#[tokio::test]
+async fn tagging_with_the_item_open_reloads_only_its_detail() {
+    let mut harness = connected().await;
+    select(&mut harness, Panel::MyWorkItems, 301);
+    harness.press(KeyCode::Enter);
+    harness.press(KeyCode::Char('t'));
+    harness
+        .wait_for(|app| matches!(app.popup, Some(Popup::Tags(_))))
+        .await;
+    harness.type_text("frontend");
+
+    let requests = requests_after_confirming(&mut harness).await;
+
+    assert!(requests.contains(&"PATCH /contoso/Fabrikam/_apis/wit/workitems/301".to_string()));
+    assert!(
+        requests
+            .iter()
+            .any(|r| r.starts_with("GET /contoso/Fabrikam/_apis/wit/workItems/301/comments"))
+    );
+    for other in [
+        "pullrequests",
+        "builds",
+        "wiql",
+        "iterations",
+        "workitemsbatch",
+    ] {
+        assert!(
+            requests.iter().all(|r| !r.contains(other)),
+            "{other}: {requests:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn commenting_reloads_only_the_mentions() {
+    let mut harness = connected().await;
+    select(&mut harness, Panel::MyWorkItems, 301);
+    harness.press(KeyCode::Char('m'));
+    harness.type_text("Looks good");
+
+    let requests = requests_after_confirming(&mut harness).await;
+
+    assert_eq!(count(&requests, "/301/comments"), 1);
+    assert!(count(&requests, "/wiql") >= 1, "{requests:?}");
+    for other in ["pullrequests", "builds", "iterations", "policy"] {
+        assert!(
+            requests.iter().all(|r| !r.contains(other)),
+            "{other}: {requests:?}"
+        );
+    }
 }

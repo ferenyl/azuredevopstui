@@ -4,6 +4,7 @@ use crate::api;
 use crate::api::AdoClient;
 use crate::auth::Auth;
 
+use super::loads::Load;
 use super::message::Message;
 use super::{
     App, DetailInfo, Popup, Retry, Screen, Selection, SetupStep, Signals, SprintPicker, TextInput,
@@ -147,7 +148,11 @@ impl App {
             Message::PullRequestCompleted { id, result } => match result {
                 Ok(()) => {
                     tracing::info!(id, "pull request completed");
-                    self.reload();
+                    self.reload_only(&[
+                        Load::MyPullRequests,
+                        Load::OtherPullRequests,
+                        Load::Detail,
+                    ]);
                 }
                 Err(err) => self.report_error(err),
             },
@@ -191,10 +196,16 @@ impl App {
                 }
             }
             Message::Image { url, result } => self.images.insert(url, result),
-            Message::WorkItemUpdated { id, result } => match result {
+            Message::WorkItemUpdated { id, reload, result } => match result {
                 Ok(()) => {
                     tracing::info!(id, "work item updated");
-                    self.reload();
+                    let shown = self.detail.as_ref().is_some_and(|d| d.is_work_item(id));
+                    let loads: Vec<Load> = reload
+                        .iter()
+                        .copied()
+                        .filter(|load| *load != Load::Detail || shown)
+                        .collect();
+                    self.reload_only(&loads);
                 }
                 Err(err) => self.report_error(err),
             },
