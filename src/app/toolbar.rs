@@ -1,7 +1,7 @@
 use super::{Action, App, Detail, Panel, Popup, Retry, Screen, SetupStep};
 
 /// Every action the toolbar can show, in display order.
-const TOOLBAR: [Action; 22] = [
+const TOOLBAR: [Action; 23] = [
     Action::Down,
     Action::Up,
     Action::Toggle,
@@ -10,6 +10,7 @@ const TOOLBAR: [Action; 22] = [
     Action::Confirm,
     Action::Cancel,
     Action::Complete,
+    Action::Vote,
     Action::ChangeColumn,
     Action::Unassign,
     Action::Tag,
@@ -89,6 +90,7 @@ impl App {
             Action::Complete => {
                 matches!(&item, Some(Detail::PullRequest(pr)) if self.can_complete(pr))
             }
+            Action::Vote => matches!(item, Some(Detail::PullRequest(_))),
             Action::ChangeColumn | Action::Comment => matches!(item, Some(Detail::WorkItem(_))),
             Action::Unassign | Action::Tag => work_item_assigned_to_me(true),
             Action::AssignToMe => work_item_assigned_to_me(false),
@@ -320,6 +322,7 @@ mod tests {
                     FocusRight,
                     NextTab,
                     Confirm,
+                    Vote,
                     OpenInBrowser,
                     Copy,
                     CopyLink,
@@ -338,6 +341,7 @@ mod tests {
                     NextTab,
                     Confirm,
                     Complete,
+                    Vote,
                     OpenInBrowser,
                     Copy,
                     CopyLink,

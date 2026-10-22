@@ -4,6 +4,7 @@
 //! the test, so tests stay offline and deterministic. See `docs/e2e.md`.
 
 mod flows;
+mod vote;
 
 use std::fs;
 use std::path::Path;
