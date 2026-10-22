@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt, stream};
 use serde_json::json;
@@ -176,12 +178,26 @@ impl ProjectApi {
              ORDER BY [System.ChangedDate] DESC"
         );
         let items = self.query_work_items(&wiql).await?;
+        let ids: HashSet<u32> = items.iter().map(|item| item.id).collect();
+        self.answered_mentions
+            .lock()
+            .expect("mention cache")
+            .retain(|id, _| ids.contains(id));
         let results: Vec<Result<Option<Mention>>> = stream::iter(items)
             .map(|item| async move {
+                if self.is_answered(&item) {
+                    return Ok(None);
+                }
                 let comments = self.comments(item.id).await.inspect_err(|err| {
                     tracing::warn!(id = item.id, "skipped work item without comments: {err:#}");
                 })?;
                 let date = unanswered_mention(&comments.comments, user_id);
+                if date.is_none() {
+                    self.answered_mentions
+                        .lock()
+                        .expect("mention cache")
+                        .insert(item.id, item.fields.changed_date.clone());
+                }
                 Ok(date.map(|date| Mention { item, date }))
             })
             .buffered(MAX_CONCURRENT_REQUESTS)
@@ -222,6 +238,19 @@ impl ProjectApi {
             )
             .await?;
         Ok(())
+    }
+
+    /// No unanswered mention when last checked, and the item has not changed since. Unanswered
+    /// mentions are checked every time: a reaction answers them without changing the item.
+    fn is_answered(&self, item: &WorkItem) -> bool {
+        let changed = &item.fields.changed_date;
+        !changed.is_empty()
+            && self
+                .answered_mentions
+                .lock()
+                .expect("mention cache")
+                .get(&item.id)
+                .is_some_and(|cached| cached == changed)
     }
 
     /// The newest comments first.
@@ -553,7 +582,7 @@ fn quote(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
     use wiremock::matchers::{body_partial_json, body_string_contains, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -1055,6 +1084,91 @@ mod tests {
         assert_eq!(mentions.items.len(), 1);
         assert_eq!(mentions.items[0].item.id, 10);
         assert_eq!(mentions.items[0].date, "2026-10-01T10:00:00Z");
+    }
+
+    async fn mount_mention_query(server: &MockServer, items: &[Value]) {
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/Team/_apis/wit/wiql"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "workItems": [{ "id": 10 }] })),
+            )
+            .mount(server)
+            .await;
+        let (last, first) = items.split_last().expect("items");
+        for item in first {
+            Mock::given(method("POST"))
+                .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [item] })))
+                .up_to_n_times(1)
+                .mount(server)
+                .await;
+        }
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [last] })))
+            .mount(server)
+            .await;
+    }
+
+    fn comments_json(author: &str, reacted: bool) -> Value {
+        json!({
+            "totalCount": 1,
+            "comments": [{
+                "createdBy": { "id": author, "displayName": author },
+                "createdDate": "2026-10-01T10:00:00Z",
+                "text": "ping @<me-id>",
+                "reactions": [{ "type": "like", "count": 1, "isCurrentUserEngaged": reacted }]
+            }]
+        })
+    }
+
+    #[tokio::test]
+    async fn answered_mentions_load_again_only_after_the_item_changed() {
+        let server = MockServer::start().await;
+        let item = work_item_json(10, "Mentioned", "Task", "Active");
+        let mut changed = item.clone();
+        changed["fields"]["System.ChangedDate"] = json!("2026-10-02T10:00:00Z");
+        mount_mention_query(&server, &[item.clone(), item, changed]).await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(comments_json("other", true)))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        for _ in 0..3 {
+            let mentions = client.mentioned_work_items("me-id").await.unwrap();
+            assert!(mentions.items.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn reaction_to_a_cached_mention_answers_it_without_an_item_change() {
+        let server = MockServer::start().await;
+        mount_mention_query(
+            &server,
+            &[work_item_json(10, "Mentioned", "Task", "Active")],
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(comments_json("other", false)))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(comments_json("other", true)))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let before = client.mentioned_work_items("me-id").await.unwrap();
+        let after = client.mentioned_work_items("me-id").await.unwrap();
+
+        assert_eq!(before.items.len(), 1);
+        assert!(after.items.is_empty());
     }
 
     #[tokio::test]

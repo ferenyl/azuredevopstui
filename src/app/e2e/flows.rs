@@ -1,10 +1,12 @@
 use std::time::{Duration, Instant};
 
 use crossterm::event::KeyCode;
-use wiremock::matchers::{body_string_contains, method, path, path_regex, query_param_is_missing};
+use wiremock::matchers::{
+    body_string_contains, method, path, path_regex, query_param, query_param_is_missing,
+};
 use wiremock::{Mock, ResponseTemplate};
 
-use super::Harness;
+use super::{FIXTURES, Harness};
 use crate::app::{DetailInfo, Panel, Popup, Screen, SetupStep};
 
 const MY_PRS: &str = "/contoso/Fabrikam/_apis/git/pullrequests";
@@ -449,5 +451,231 @@ async fn many_sub_requests_run_in_bounded_waves() {
         "40 delayed requests were not bounded: {:?}",
         started.elapsed()
     );
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+/// Answers the mentions query with work item 601 whose last comment mentions the user, `loads` times.
+async fn mention_601(harness: &Harness, loads: u64) {
+    harness
+        .ado
+        .expect(
+            Mock::given(method("POST"))
+                .and(path("/contoso/Fabrikam/Web/_apis/wit/wiql"))
+                .and(body_string_contains("@RecentMentions")),
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "workItems": [{ "id": 601 }] })),
+            loads,
+        )
+        .await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("POST"))
+                .and(path("/contoso/Fabrikam/_apis/wit/workitemsbatch"))
+                .and(body_string_contains("\"ids\":[601]")),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "value": [{
+                "id": 601,
+                "fields": {
+                    "System.Title": "Mentioned in checkout",
+                    "System.WorkItemType": "Task",
+                    "System.State": "Active",
+                    "System.ChangedDate": "2026-10-21T10:00:00Z",
+                    "System.CreatedDate": "2026-10-01T10:00:00Z"
+                }
+            }]})),
+            loads,
+        )
+        .await;
+}
+
+/// The pull requests of a fixture file.
+fn fixture_pull_requests(file: &str) -> Vec<serde_json::Value> {
+    let content = std::fs::read_to_string(format!("{FIXTURES}/{file}")).expect("fixture");
+    let fixture: serde_json::Value = serde_json::from_str(&content).expect("fixture json");
+    fixture["body"]["value"]
+        .as_array()
+        .expect("pull requests")
+        .clone()
+}
+
+/// Answers the others' PRs list with `prs` instead of its fixture.
+async fn other_pull_requests(harness: &Harness, prs: Vec<serde_json::Value>, times: u64) {
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET"))
+                .and(path(MY_PRS))
+                .and(query_param_is_missing("searchCriteria.creatorId")),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "value": prs })),
+            times,
+        )
+        .await;
+}
+
+/// Requests made by one more refresh after loading settled, sorted.
+async fn refresh_requests(harness: &mut Harness) -> Vec<String> {
+    let before = harness.ado.requests().await.len();
+    harness.app.refresh();
+    harness.settle().await;
+    let mut requests = harness.ado.requests().await.split_off(before);
+    requests.sort();
+    requests
+}
+
+fn count(requests: &[String], suffix: &str) -> usize {
+    requests.iter().filter(|r| r.ends_with(suffix)).count()
+}
+
+#[tokio::test]
+async fn refresh_of_unchanged_data_skips_cached_requests() {
+    let mut harness = Harness::new().await;
+    mention_601(&harness, 2).await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET"))
+                .and(path("/contoso/Fabrikam/_apis/wit/workItems/601/comments")),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "totalCount": 1,
+                "comments": [{
+                    "createdBy": { "id": "other-id", "displayName": "Olle Other" },
+                    "createdDate": "2026-10-21T10:00:00Z",
+                    "text": "ping @<me-id>"
+                }]
+            })),
+            2,
+        )
+        .await;
+    harness.connect().await;
+
+    let requests = refresh_requests(&mut harness).await;
+
+    // Only my PR's checks and the unanswered mention load again; others' PRs and identities are cached.
+    assert_eq!(count(&requests, "/threads"), 1, "{requests:#?}");
+    assert_eq!(count(&requests, "/pullRequests/101/threads"), 1);
+    assert_eq!(count(&requests, "/policy/evaluations"), 1);
+    assert_eq!(count(&requests, "/pullRequests/101"), 0);
+    assert_eq!(count(&requests, "/build/builds"), 2);
+    assert_eq!(count(&requests, "/workItems/601/comments"), 1);
+    assert_eq!(requests.len(), 16, "{requests:#?}");
+    harness.wait_for_text("Mentioned in checkout").await;
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn refresh_loads_signals_of_changed_pull_requests_again() {
+    let mut harness = connected().await;
+    let mut prs = fixture_pull_requests("pull-requests-all.json");
+    for pr in &mut prs {
+        if pr["pullRequestId"] == 202 {
+            pr["lastMergeSourceCommit"]["commitId"] = "c202-pushed".into();
+        }
+    }
+    other_pull_requests(&harness, prs, 1).await;
+
+    let requests = refresh_requests(&mut harness).await;
+
+    assert_eq!(
+        count(&requests, "/pullRequests/202/threads"),
+        1,
+        "{requests:#?}"
+    );
+    assert_eq!(count(&requests, "/pullRequests/404/threads"), 0);
+    assert_eq!(
+        count(&requests, "/project-fabrikam/_apis/policy/evaluations"),
+        2
+    );
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn steady_refresh_stays_small_with_many_pull_requests() {
+    const PRS: u32 = 40;
+    let mut harness = Harness::new().await;
+    let template = fixture_pull_requests("pull-requests-all.json")
+        .into_iter()
+        .find(|pr| pr["pullRequestId"] == 202)
+        .expect("PR 202");
+    let prs = (1000..1000 + PRS)
+        .map(|id| {
+            let mut pr = template.clone();
+            pr["pullRequestId"] = id.into();
+            pr
+        })
+        .collect();
+    other_pull_requests(&harness, prs, 2).await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET")).and(path_regex(r"/pullRequests/1\d{3}/threads$")),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "value": [] })),
+            u64::from(PRS),
+        )
+        .await;
+    harness.connect().await;
+
+    let requests = refresh_requests(&mut harness).await;
+
+    assert_eq!(count(&requests, "/policy/evaluations"), 1, "{requests:#?}");
+    assert_eq!(requests.len(), 14, "{requests:#?}");
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn pipelines_load_the_latest_runs_in_one_query() {
+    let mut harness = Harness::new().await;
+    let build = |id: u32, definition: u32, name: &str, branch: &str, queued: &str| {
+        serde_json::json!({
+            "id": id,
+            "buildNumber": format!("2026102{id}"),
+            "status": "completed",
+            "result": "succeeded",
+            "definition": { "id": definition, "name": name },
+            "sourceBranch": branch,
+            "repository": { "id": "gh-orders", "type": "GitHub" },
+            "queueTime": queued
+        })
+    };
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET"))
+                .and(path(BUILDS))
+                .and(query_param("requestedFor", "me-id")),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "value": [
+                build(1, 7, "orders-ci", "refs/heads/feature/101", "2026-10-20T09:30:00Z"),
+                build(2, 9, "billing-ci", "refs/heads/main", "2026-10-19T09:30:00Z")
+            ]})),
+            1,
+        )
+        .await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET"))
+                .and(path(BUILDS))
+                .and(query_param("definitions", "7,9")),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "value": [
+                build(4, 7, "orders-ci", "refs/heads/feature/101", "2026-10-22T09:30:00.5Z"),
+                build(3, 9, "billing-ci", "refs/heads/main", "2026-10-22T09:30:00Z"),
+                build(2, 9, "billing-ci", "refs/heads/main", "2026-10-19T09:30:00Z")
+            ]})),
+            1,
+        )
+        .await;
+
+    harness.connect().await;
+
+    harness.wait_for_text("billing-ci").await;
+    let ids: Vec<u32> = harness
+        .app
+        .data
+        .shown_builds()
+        .unwrap_or_default()
+        .iter()
+        .map(|build| build.id)
+        .collect();
+    assert_eq!(ids, [4, 3]);
+    assert_eq!(harness.ado.received("GET", BUILDS).await, 2);
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }

@@ -167,8 +167,8 @@ impl App {
                     .flatten()
                     .find(|pr| pr.pull_request_id == id);
                 match (pr, result) {
-                    (Some(pr), Ok(details)) => {
-                        let signals = Signals::new(pr, &details);
+                    (Some(pr), Ok(checks)) => {
+                        let signals = Signals::new(pr, &checks);
                         self.data.set_pr_signals(id, signals);
                     }
                     (_, Err(err)) => tracing::warn!(id, "failed to load PR signals: {err:#}"),
@@ -246,7 +246,7 @@ impl App {
 mod tests {
     use super::*;
 
-    use crate::api::PullRequestDetails;
+    use crate::api::{PullRequestChecks, PullRequestDetails};
     use crate::app::Detail;
     use crate::app::message::Message;
     use crate::app::test_helpers::{app, open_pull_request};
@@ -307,20 +307,19 @@ mod tests {
     #[test]
     fn signals_are_stored_for_my_pull_requests() {
         let mut app = app();
-        let details = PullRequestDetails {
-            description: None,
+        let checks = PullRequestChecks {
             threads: serde_json::from_value(serde_json::json!([
                 { "status": "active", "comments": [] }
             ]))
             .unwrap(),
             statuses: Vec::new(),
             policies: Vec::new(),
-            work_items: Vec::new(),
+            has_work_items: false,
         };
 
         app.handle_message(Message::PullRequestSignals {
             id: 2,
-            result: Ok(details),
+            result: Ok(checks),
         });
 
         assert_eq!(app.data.pr_signals()[&2].unresolved, 1);

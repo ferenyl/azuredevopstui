@@ -1,11 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use futures::{StreamExt, stream};
 
 use super::models::{Build, ListResponse, Named};
-use super::{MAX_CONCURRENT_REQUESTS, ProjectApi};
+use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps};
 
 const MAX_BUILDS: &str = "1000";
 const BUILD_DAYS: i64 = 14;
@@ -41,23 +41,30 @@ impl ProjectApi {
             .await?;
         let builds = latest_branch_builds(builds.value);
         let live = self.live_refs(&builds).await;
-        let builds = builds.into_iter().filter(|build| is_live(build, &live));
-        let mut builds: Vec<Build> = stream::iter(builds)
-            .map(|build| async {
-                self.latest_build(&build, &min_time)
-                    .await
-                    .inspect_err(|err| tracing::warn!("failed to load latest build: {err:#}"))
-                    .ok()
-                    .flatten()
+        let builds: Vec<Build> = builds
+            .into_iter()
+            .filter(|build| is_live(build, &live))
+            .collect();
+        let mut latest = self
+            .latest_builds(&builds, &min_time)
+            .await
+            .inspect_err(|err| tracing::warn!("failed to load latest builds: {err:#}"))
+            .unwrap_or_default();
+        let mut builds: Vec<Build> = builds
+            .into_iter()
+            .map(|build| {
+                latest
+                    .remove(&(build.definition.id, build.source_branch.clone()))
                     .unwrap_or(build)
             })
-            .buffered(MAX_CONCURRENT_REQUESTS)
-            .collect()
-            .await;
+            .collect();
         builds.sort_by(|a, b| {
             b.failed()
                 .cmp(&a.failed())
-                .then_with(|| b.queue_time.cmp(&a.queue_time))
+                .then_with(|| match (&b.queue_time, &a.queue_time) {
+                    (Some(b), Some(a)) => compare_timestamps(b, a),
+                    (b, a) => b.is_some().cmp(&a.is_some()),
+                })
         });
         Ok(builds)
     }
@@ -107,9 +114,18 @@ impl ProjectApi {
         Ok(heads.value.into_iter().map(|head| head.name).collect())
     }
 
-    /// The newest run of the build's pipeline and branch, by anyone.
-    async fn latest_build(&self, build: &Build, min_time: &str) -> Result<Option<Build>> {
-        let definition = build.definition.id.to_string();
+    /// The newest run per pipeline and branch of the builds' pipelines, by anyone, in one query.
+    async fn latest_builds(
+        &self,
+        builds: &[Build],
+        min_time: &str,
+    ) -> Result<HashMap<(u32, String), Build>> {
+        let definitions: BTreeSet<u32> = builds.iter().map(|build| build.definition.id).collect();
+        if definitions.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let definitions: Vec<String> = definitions.iter().map(u32::to_string).collect();
+        let definitions = definitions.join(",");
         let builds: ListResponse<Build> = self
             .client
             .get(
@@ -122,15 +138,17 @@ impl ProjectApi {
                     "builds",
                 ],
                 &[
-                    ("definitions", definition.as_str()),
-                    ("branchName", build.source_branch.as_str()),
+                    ("definitions", definitions.as_str()),
                     ("minTime", min_time),
                     ("queryOrder", "queueTimeDescending"),
-                    ("$top", "1"),
+                    ("$top", MAX_BUILDS),
                 ],
             )
             .await?;
-        Ok(builds.value.into_iter().next())
+        Ok(latest_branch_builds(builds.value)
+            .into_iter()
+            .map(|build| ((build.definition.id, build.source_branch.clone()), build))
+            .collect())
     }
 }
 
@@ -189,7 +207,8 @@ mod tests {
             .and(query_param("minTime", MIN_TIME))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
                 build_json(1, 1, "refs/heads/feature", "completed", "failed"),
-                build_json(2, 2, "refs/heads/gone", "completed", "succeeded")
+                build_json(2, 2, "refs/heads/gone", "completed", "succeeded"),
+                build_json(3, 2, "refs/heads/feature", "completed", "failed")
             ]})))
             .expect(1)
             .mount(&server)
@@ -204,11 +223,12 @@ mod tests {
             .await;
         Mock::given(method("GET"))
             .and(path("/contoso/MyProject/_apis/build/builds"))
-            .and(query_param("definitions", "1"))
-            .and(query_param("branchName", "refs/heads/feature"))
+            .and(query_param("definitions", "1,2"))
             .and(query_param("minTime", MIN_TIME))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
-                build_json(9, 1, "refs/heads/feature", "completed", "succeeded")
+                build_json(9, 1, "refs/heads/feature", "completed", "succeeded"),
+                build_json(8, 1, "refs/heads/other", "completed", "succeeded"),
+                build_json(7, 2, "refs/heads/feature", "completed", "succeeded")
             ]})))
             .expect(1)
             .mount(&server)
@@ -218,7 +238,7 @@ mod tests {
         let builds = client.my_builds_since("me", min_time()).await.unwrap();
 
         let ids: Vec<_> = builds.iter().map(|build| build.id).collect();
-        assert_eq!(ids, [9]);
+        assert_eq!(ids, [9, 7]);
     }
 
     #[test]

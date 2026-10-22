@@ -33,6 +33,7 @@ async fn server_error_shows_error_and_keeps_other_panels() {
 - `ado.fail_once(method, path, response)`: answer only the first request with `response` (e.g. a 429 with `Retry-After: 0`), then serve the fixture.
 - `ado.expect(mock, response, times)`: answer and assert how often a request arrives, e.g. a `PATCH` with a given body.
 - `ado.received(method, path_suffix)`: how many requests have reached a path ending in the suffix.
+- `ado.requests()`: every request so far as `METHOD /path`, e.g. to count what one refresh sends.
 
 ## Fixtures
 

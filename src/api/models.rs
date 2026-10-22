@@ -201,6 +201,14 @@ pub struct Reviewer {
     pub is_required: Option<bool>,
 }
 
+/// What the markers of the user's own PRs are computed from.
+pub struct PullRequestChecks {
+    pub threads: Vec<Thread>,
+    pub statuses: Vec<PullRequestStatus>,
+    pub policies: Vec<PolicyEvaluation>,
+    pub has_work_items: bool,
+}
+
 pub struct PullRequestDetails {
     /// Full text; the list API cuts it off at 400 characters.
     pub description: Option<RichText>,
