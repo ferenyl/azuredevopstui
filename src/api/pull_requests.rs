@@ -8,7 +8,7 @@ use super::models::{
     Comment, Identity, ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestDetails,
     PullRequestStatus, ResourceRef, ReviewSignals, Thread,
 };
-use super::{ProjectApi, compare_timestamps, is_unauthorized};
+use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps, is_unauthorized};
 use crate::config::{MergeStrategy, OtherPrsFilter};
 use crate::images::markdown_images;
 
@@ -68,7 +68,7 @@ impl ProjectApi {
                     };
                     Ok((pr, complete))
                 })
-                .buffered(8)
+                .buffered(MAX_CONCURRENT_REQUESTS)
                 .collect()
                 .await;
         let results = results.into_iter().collect::<Result<Vec<_>>>()?;
