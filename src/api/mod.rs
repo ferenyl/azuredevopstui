@@ -12,11 +12,13 @@ pub use models::{
 };
 pub use pull_requests::{is_approved, is_reviewer_policy};
 
+use std::cmp::Ordering;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use chrono::DateTime;
 use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
 use reqwest::{Method, StatusCode, Url};
 use serde::de::DeserializeOwned;
@@ -427,6 +429,18 @@ fn sorted_names(names: impl Iterator<Item = String>) -> Vec<String> {
     names
 }
 
+/// Orders ISO 8601 timestamps by the instant they name, so `10:00:00.5Z` is after `10:00:00Z`.
+/// Falls back to text when either one does not parse.
+pub fn compare_timestamps(a: &str, b: &str) -> Ordering {
+    match (
+        DateTime::parse_from_rfc3339(a),
+        DateTime::parse_from_rfc3339(b),
+    ) {
+        (Ok(a), Ok(b)) => a.cmp(&b),
+        _ => a.cmp(b),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,6 +528,36 @@ mod tests {
         let names = sorted_names(["beta", "Alpha", "gamma"].into_iter().map(String::from));
 
         assert_eq!(names, ["Alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn timestamps_compare_by_instant_across_precision_and_offsets() {
+        // As text, "00.5Z" sorts before "00Z" because '.' is before 'Z'.
+        assert_eq!(
+            compare_timestamps("2026-10-01T10:00:00.5Z", "2026-10-01T10:00:00Z"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_timestamps("2026-10-01T10:00:00.1Z", "2026-10-01T10:00:00.09Z"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_timestamps("2026-10-01T12:00:00+02:00", "2026-10-01T10:00:00Z"),
+            Ordering::Equal
+        );
+        assert_eq!(
+            compare_timestamps("2026-10-01T10:00:00+01:00", "2026-10-01T10:00:00Z"),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn unparsable_timestamps_compare_as_text() {
+        assert_eq!(
+            compare_timestamps("", "2026-10-01T10:00:00Z"),
+            Ordering::Less
+        );
+        assert_eq!(compare_timestamps("b", "a"), Ordering::Greater);
     }
 
     #[tokio::test]

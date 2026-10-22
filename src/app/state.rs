@@ -4,7 +4,7 @@ use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
     Build, ColumnTarget, Iteration, Mention, PullRequest, PullRequestDetails, WorkItem,
-    WorkItemDetails, is_approved, is_reviewer_policy,
+    WorkItemDetails, compare_timestamps, is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 
@@ -473,7 +473,7 @@ impl Data {
             });
         let mut entries: Vec<InboxEntry> =
             mine.chain(others).chain(mentions).chain(builds).collect();
-        entries.sort_by(|a, b| a.since.cmp(&b.since));
+        entries.sort_by(|a, b| compare_timestamps(&a.since, &b.since));
         self.inbox = entries;
     }
 
@@ -1084,5 +1084,32 @@ mod tests {
         let since: Vec<&str> = data.inbox().iter().map(|e| e.since.as_str()).collect();
 
         assert_eq!(since, ["2026-09-01T10:00:00Z", "2026-10-01T10:00:00Z"]);
+    }
+
+    #[test]
+    fn inbox_sorts_mixed_precision_and_offsets_by_instant() {
+        let mut data = Data::default();
+        let mention = |id, date: &str| Mention {
+            item: work_item(id, "Mentioned", "Bug", "Active"),
+            date: date.into(),
+        };
+        data.set_mentions(vec![
+            mention(20, "2026-10-01T10:00:00Z"),
+            mention(21, "2026-10-01T10:00:00.5Z"),
+            mention(22, "2026-10-01T12:00:00.1+02:00"),
+            mention(23, "2026-10-01T10:00:00.25Z"),
+        ]);
+
+        let since: Vec<&str> = data.inbox().iter().map(|e| e.since.as_str()).collect();
+
+        assert_eq!(
+            since,
+            [
+                "2026-10-01T10:00:00Z",
+                "2026-10-01T12:00:00.1+02:00",
+                "2026-10-01T10:00:00.25Z",
+                "2026-10-01T10:00:00.5Z",
+            ]
+        );
     }
 }
