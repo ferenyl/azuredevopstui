@@ -1,7 +1,7 @@
 use super::{Action, App, Detail, Panel, Popup, Retry, Screen, SetupStep};
 
 /// Every action the toolbar can show, in display order.
-const TOOLBAR: [Action; 28] = [
+const TOOLBAR: [Action; 29] = [
     Action::Down,
     Action::Up,
     Action::Toggle,
@@ -26,6 +26,7 @@ const TOOLBAR: [Action; 28] = [
     Action::Sort,
     Action::Filter,
     Action::PrActions,
+    Action::Zoom,
     Action::Reload,
     Action::ChangeToken,
     Action::Help,
@@ -44,6 +45,7 @@ impl App {
     pub fn action_label(&self, action: Action) -> &'static str {
         match action {
             Action::OpenInBrowser if self.selected_link().is_some() => "open link",
+            Action::Zoom if self.zoomed => "unzoom",
             _ => action.label(),
         }
     }
@@ -97,9 +99,12 @@ impl App {
         let is_build = matches!(item, Some(Detail::Build(_)));
         let work_item_assigned_to_me = |assigned: bool| matches!(&item, Some(Detail::WorkItem(w)) if self.is_assigned_to_me(w) == assigned);
         match action {
-            Action::Down | Action::FocusRight | Action::Reload | Action::Help | Action::Quit => {
-                true
-            }
+            Action::Down
+            | Action::FocusRight
+            | Action::Zoom
+            | Action::Reload
+            | Action::Help
+            | Action::Quit => true,
             Action::NextTab | Action::Copy => {
                 matches!(item, Some(Detail::PullRequest(_) | Detail::WorkItem(_)))
             }
@@ -363,6 +368,7 @@ mod tests {
                     Sort,
                     Filter,
                     PrActions,
+                    Zoom,
                     Reload,
                     Help,
                     Quit,
@@ -384,6 +390,7 @@ mod tests {
                     Sort,
                     Filter,
                     PrActions,
+                    Zoom,
                     Reload,
                     Help,
                     Quit,
@@ -405,6 +412,7 @@ mod tests {
                     Sort,
                     Filter,
                     PrActions,
+                    Zoom,
                     Reload,
                     Help,
                     Quit,
@@ -426,6 +434,7 @@ mod tests {
                     CopyLink,
                     Sort,
                     Filter,
+                    Zoom,
                     Reload,
                     Help,
                     Quit,
@@ -446,6 +455,7 @@ mod tests {
                     CopyLink,
                     Sort,
                     Filter,
+                    Zoom,
                     Reload,
                     Help,
                     Quit,
@@ -466,6 +476,7 @@ mod tests {
                     CopyLink,
                     Sort,
                     Filter,
+                    Zoom,
                     Reload,
                     Help,
                     Quit,
@@ -480,6 +491,7 @@ mod tests {
                     OpenInBrowser,
                     CopyLink,
                     Filter,
+                    Zoom,
                     Reload,
                     Help,
                     Quit,
@@ -487,11 +499,11 @@ mod tests {
             ),
             (
                 "builds focus",
-                vec![Down, FocusRight, Filter, Reload, Help, Quit],
+                vec![Down, FocusRight, Filter, Zoom, Reload, Help, Quit],
             ),
             (
                 "empty list",
-                vec![Down, FocusRight, Sort, Reload, Help, Quit],
+                vec![Down, FocusRight, Sort, Zoom, Reload, Help, Quit],
             ),
         ];
         let actual: Vec<_> = fixtures()

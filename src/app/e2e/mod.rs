@@ -8,8 +8,10 @@ mod completion;
 mod editor;
 mod flows;
 mod inbox;
+mod layout;
 mod lifecycle;
 mod links;
+mod navigation;
 mod notifications;
 mod scroll;
 mod theme;
@@ -286,6 +288,14 @@ impl Harness {
         self.app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
     }
 
+    pub fn key(&mut self, key: KeyEvent) {
+        self.app.handle_key(key);
+    }
+
+    pub fn ctrl(&mut self, c: char) {
+        self.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+    }
+
     pub fn type_text(&mut self, text: &str) {
         for c in text.chars() {
             self.press(KeyCode::Char(c));
@@ -298,8 +308,12 @@ impl Harness {
 
     /// The rendered screen as text, one line per row.
     pub fn screen(&self) -> String {
-        let mut terminal =
-            Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
+        self.screen_at(SCREEN_WIDTH, SCREEN_HEIGHT)
+    }
+
+    /// The screen rendered at the given terminal size.
+    pub fn screen_at(&self, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
         terminal
             .draw(|frame| crate::ui::render(frame, &self.app))
             .expect("render");

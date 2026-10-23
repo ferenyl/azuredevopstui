@@ -4,6 +4,34 @@ use super::{
     Action, App, Detail, DetailTab, LEFT_PANELS, Panel, Popup, Retry, Screen, SetupStep, TextInput,
 };
 
+/// A cursor move in a list of rows, which stops at both ends.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Move {
+    Line { down: bool },
+    Top,
+    Bottom,
+    Page { down: bool, half: bool },
+}
+
+impl Move {
+    /// The row reached from `current` in `len` rows, with `page` rows visible.
+    pub(super) fn target(self, current: usize, len: usize, page: usize) -> usize {
+        let last = len.saturating_sub(1);
+        let (down, rows) = match self {
+            Self::Top => return 0,
+            Self::Bottom => return last,
+            Self::Line { down } => (down, 1),
+            Self::Page { down, half: false } => (down, page.max(1)),
+            Self::Page { down, half: true } => (down, (page / 2).max(1)),
+        };
+        if down {
+            current.saturating_add(rows).min(last)
+        } else {
+            current.min(last).saturating_sub(rows)
+        }
+    }
+}
+
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) {
         if let Screen::Setup(step) = &mut self.screen
@@ -40,7 +68,9 @@ impl App {
                 }) => self.screen = Screen::Main,
                 Screen::Setup(_) => self.should_quit = true,
                 Screen::Main => {
-                    if !self.close_file_diff() {
+                    if self.zoomed && self.detail.is_none() {
+                        self.zoomed = false;
+                    } else if !self.close_file_diff() {
                         self.close_detail();
                     }
                 }
@@ -64,7 +94,10 @@ impl App {
             },
             Action::Up | Action::Down => match &mut self.screen {
                 Screen::Main if self.focus == Panel::Detail => {
-                    if !self.move_file_selection(action == Action::Down) {
+                    let step = Move::Line {
+                        down: action == Action::Down,
+                    };
+                    if !self.jump_file_selection(step, 1) {
                         self.scroll_detail(action == Action::Down);
                     }
                 }
@@ -106,7 +139,39 @@ impl App {
             | Action::PrevThread
             | Action::ThreadStatus
             | Action::PrActions
+            | Action::Zoom
+            | Action::Top
+            | Action::Bottom
+            | Action::PageDown
+            | Action::PageUp
+            | Action::HalfPageDown
+            | Action::HalfPageUp
+            | Action::JumpToPanel(_)
                 if !matches!(self.screen, Screen::Main) => {}
+            Action::Top => self.move_by(Move::Top),
+            Action::Bottom => self.move_by(Move::Bottom),
+            Action::PageDown => self.move_by(Move::Page {
+                down: true,
+                half: false,
+            }),
+            Action::PageUp => self.move_by(Move::Page {
+                down: false,
+                half: false,
+            }),
+            Action::HalfPageDown => self.move_by(Move::Page {
+                down: true,
+                half: true,
+            }),
+            Action::HalfPageUp => self.move_by(Move::Page {
+                down: false,
+                half: true,
+            }),
+            Action::JumpToPanel(number) => {
+                if let Some(panel) = LEFT_PANELS.get(usize::from(number).wrapping_sub(1)) {
+                    self.last_left = *panel;
+                    self.focus = *panel;
+                }
+            }
             Action::OpenInBrowser => self.open_in_browser(),
             Action::Copy => self.copy_number(),
             Action::CopyLink => self.copy_link(),
@@ -133,6 +198,7 @@ impl App {
             }
             Action::ThreadStatus => self.open_thread_status(),
             Action::PrActions => self.open_pr_actions(),
+            Action::Zoom => self.zoomed = !self.zoomed,
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);
@@ -172,25 +238,44 @@ impl App {
             return;
         };
         let len = self.data.len(self.focus);
+        if len == 0 {
+            return;
+        }
         let selected = &mut self.selections[index];
         *selected = if down {
-            (*selected + 1).min(len.saturating_sub(1))
+            (*selected + 1) % len
         } else {
-            selected.saturating_sub(1)
+            (*selected + len - 1) % len
         };
     }
 
+    /// Jumps within the focused list, or the detail when it has focus; stops at the ends.
+    fn move_by(&mut self, step: Move) {
+        if self.focus == Panel::Detail {
+            let page = usize::from(self.detail_height.get());
+            if !self.jump_file_selection(step, page) {
+                self.scroll_detail_by(step, page);
+            }
+        } else if let Some(index) = self.focus.index() {
+            let len = self.data.len(self.focus);
+            let selected = self.selections[index];
+            self.selections[index] =
+                step.target(selected, len, usize::from(self.list_height.get()));
+        }
+    }
+
     pub(super) fn scroll_detail(&mut self, down: bool) {
+        self.scroll_detail_by(Move::Line { down }, 1);
+    }
+
+    fn scroll_detail_by(&mut self, step: Move, page: usize) {
         if self.scroll_to_thread {
             self.scroll_to_thread = false;
             self.detail_scroll = self.thread_row.get().unwrap_or(self.detail_scroll);
         }
         let max = self.detail_max_scroll.get();
-        self.detail_scroll = if down {
-            self.detail_scroll.saturating_add(1).min(max)
-        } else {
-            self.detail_scroll.min(max).saturating_sub(1)
-        };
+        let current = usize::from(self.detail_scroll.min(max));
+        self.detail_scroll = step.target(current, usize::from(max) + 1, page) as u16;
     }
 
     pub(super) fn switch_tab(&mut self, next: bool) {
@@ -289,15 +374,88 @@ mod tests {
     }
 
     #[test]
-    fn selection_stays_within_list() {
+    fn selection_wraps_around_the_list() {
         let mut app = app();
 
         press(&mut app, KeyCode::Char('k'));
-        assert_eq!(app.selections[1], 0);
-        for _ in 0..5 {
-            press(&mut app, KeyCode::Char('j'));
-        }
         assert_eq!(app.selections[1], 2);
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.selections[1], 0);
+    }
+
+    #[test]
+    fn g_and_shift_g_jump_to_the_ends_of_a_list() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('G'));
+        assert_eq!(app.selections[1], 2);
+        press(&mut app, KeyCode::Char('g'));
+        assert_eq!(app.selections[1], 0);
+    }
+
+    #[test]
+    fn page_keys_move_a_page_and_stop_at_the_ends() {
+        let mut app = app();
+        app.list_height.set(2);
+
+        press(&mut app, KeyCode::PageDown);
+        assert_eq!(app.selections[1], 2);
+        press(&mut app, KeyCode::PageDown);
+        assert_eq!(app.selections[1], 2);
+        press(&mut app, KeyCode::PageUp);
+        assert_eq!(app.selections[1], 0);
+        press(&mut app, KeyCode::PageUp);
+        assert_eq!(app.selections[1], 0);
+    }
+
+    #[test]
+    fn ctrl_d_and_u_move_half_a_page_and_do_not_unassign() {
+        let mut app = app();
+        app.list_height.set(4);
+
+        ctrl(&mut app, 'd');
+        assert_eq!(app.selections[1], 2);
+        ctrl(&mut app, 'u');
+        assert_eq!(app.selections[1], 0);
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn number_keys_focus_the_numbered_box() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('1'));
+        assert_eq!(app.focus, Panel::Inbox);
+        press(&mut app, KeyCode::Char('6'));
+        assert_eq!(app.focus, Panel::Builds);
+        press(&mut app, KeyCode::Char('4'));
+        assert_eq!(app.focus, Panel::OtherPrs);
+        ctrl(&mut app, 'l');
+        ctrl(&mut app, 'h');
+        assert_eq!(app.focus, Panel::OtherPrs);
+    }
+
+    #[test]
+    fn detail_jump_keys_scroll_within_the_content() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        ctrl(&mut app, 'l');
+        app.detail_max_scroll.set(30);
+        app.detail_height.set(10);
+
+        press(&mut app, KeyCode::Char('G'));
+        assert_eq!(app.detail_scroll, 30);
+        press(&mut app, KeyCode::PageUp);
+        assert_eq!(app.detail_scroll, 20);
+        ctrl(&mut app, 'u');
+        assert_eq!(app.detail_scroll, 15);
+        ctrl(&mut app, 'd');
+        assert_eq!(app.detail_scroll, 20);
+        press(&mut app, KeyCode::Char('g'));
+        assert_eq!(app.detail_scroll, 0);
+        press(&mut app, KeyCode::PageDown);
+        assert_eq!(app.detail_scroll, 10);
+        assert_eq!(app.selections[1], 0);
     }
 
     #[test]
@@ -646,6 +804,49 @@ mod tests {
 
         assert!(!app.should_quit);
         assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn z_toggles_zoom_in_main_only() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('z'));
+        assert!(app.zoomed);
+        press(&mut app, KeyCode::Char('z'));
+        assert!(!app.zoomed);
+
+        let mut setup = App::new(None, None);
+        press(&mut setup, KeyCode::Char('z'));
+        assert!(!setup.zoomed);
+    }
+
+    #[test]
+    fn zoom_follows_focus() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('z'));
+
+        ctrl(&mut app, 'j');
+        assert_eq!(app.left_focus(), Panel::MyWorkItems);
+        ctrl(&mut app, 'l');
+
+        assert!(app.zoomed);
+        assert_eq!(app.focus, Panel::Detail);
+        assert_eq!(app.left_focus(), Panel::MyWorkItems);
+    }
+
+    #[test]
+    fn esc_closes_the_detail_before_unzooming() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        press(&mut app, KeyCode::Char('z'));
+
+        press(&mut app, KeyCode::Esc);
+        assert!(app.detail.is_none());
+        assert!(app.zoomed);
+
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.zoomed);
+        assert!(!app.should_quit);
     }
 
     #[test]
