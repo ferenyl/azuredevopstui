@@ -30,6 +30,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - **Work item**:
     - **Overview** shows type, state, board column, priority, assignee, sprint, tags, linked pull requests, description, repro steps and acceptance criteria.
     - **Children** shows child items grouped by type (Task, Release Task, User Story, …), each with state and assignee.
+    - **Links** shows related items grouped by link type (Parent, Child, Related, …), each with number, title, state and assignee, then the linked pull requests, then other links such as hyperlinks and commits, shown as plain text. The entries are display-only: `l` / `L`, `o` and `Y` act on links inside descriptions and comments, not on this tab.
     - **Comments** shows the 10 newest comments. Scroll to the end to load older ones, 50 at a time.
   - **Images** in descriptions and comments are drawn inline when the terminal supports graphics. See [Images](#images).
 - **Actions**:
@@ -44,6 +45,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - Press `e` on a PR for its actions: abandon (asks `y` / `n` first) or reactivate, publish a draft or mark a PR as draft, edit the title or description, add or remove a reviewer, and link a work item.
 - **Sorting** per list type. The choice is saved to the config.
 - **Work item type filter**: pick which types (User Story, Bug, Feature, …) the work item lists show. The list of types comes from the project, and the choice is saved to the config.
+- **Pipelines filter**: press `f` on My pipelines to narrow the runs by pipeline, branch or run number. See [Pipelines filter](#pipelines-filter).
 - **Auto refresh** at a configurable interval. The open detail view refreshes too.
 - **Setup wizard** on first start. Organization, project, team and the ready column are picked from lists fetched from Azure DevOps.
 - **Authentication** uses the Azure CLI first and falls back to a Personal Access Token stored in the OS keyring.
@@ -398,6 +400,10 @@ When both arrays are empty, the list shows every active PR in the project, acros
 
 Entries can be users, given as email or display name, or groups, given as `[Project]\Group` (escape the backslash in JSON: `"[MyProject]\\Developers"`). Each entry is resolved through the identities API. A PR is shown if it matches any entry, and duplicates are removed.
 
+### Pipelines filter
+
+Press `f` with My pipelines focused, or with a pipeline run open, to type a filter text. A run is shown if its pipeline name, branch or run number contains the text (case-insensitive). `enter` applies the filter; an empty text clears it. The panel title shows the active filter as `· "text"`. The filter is kept until you quit and is not saved to the config. It combines with the `/` search.
+
 ### Sorting
 
 Press `S` on a list to choose the order. PR lists and work item lists each have their own setting, which is shared by the two lists of that kind and saved to the config straight away.
@@ -481,7 +487,7 @@ The table lists the Mocha values.
 | `z` | Zoom: the focused box fills the left column, or the detail panel fills the screen. `z` again or `esc` restores. On short terminals only the focused box in the left column is expanded; the others show just their title |
 | `tab` / `shift+tab` | Next or previous detail tab |
 | `S` | Choose the sort order for the focused list |
-| `f` | Choose which work item types are shown, or on a PR, filter others' PRs |
+| `f` | Choose which work item types are shown; on a PR, filter others' PRs; on pipelines, filter runs by pipeline, branch or run number |
 | `/` | Search the focused list (case-insensitive, matches the number, title and more) or a setup list of organizations, projects, teams or columns. Type to filter, `enter` keeps the filter, `esc` clears it |
 | `space` | Tick or untick an item in the type list |
 | `i` | Pick the sprint to show: type to search, `enter` selects |
