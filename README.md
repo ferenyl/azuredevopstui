@@ -368,7 +368,8 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `notify.quiet_hours` | not set | Local time range, `{ "start": "22:00", "end": "07:00" }` (`HH:MM`, may span midnight). Nothing is notified during it, and entries that arrive then are not notified afterwards. |
 | `sort.pull_requests` | `"newest"` | Sort order for both PR lists. |
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
-| `colors` | Catppuccin Mocha | Theme colors. See [Colors](#colors). |
+| `theme` | `mocha` | Color preset: `mocha`, `light` or `terminal`. See [Colors](#colors). |
+| `colors` | none | Overrides for single colors of the preset. See [Colors](#colors). |
 
 ### Others' PRs filter
 
@@ -407,9 +408,19 @@ The work item lists and the sprint overview show the team's current sprint, or `
 
 ### Colors
 
-Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back to its Mocha default.
+`theme` picks the palette:
 
-| Key | Default | Used for |
+| Theme | Look |
+|---|---|
+| `mocha` | Catppuccin Mocha, dark (default) |
+| `light` | Catppuccin Latte, for light terminals |
+| `terminal` | The terminal's own background and text color, with its ANSI colors for the rest |
+
+`colors` overrides single colors of the chosen theme, for example `"theme": "light", "colors": { "title": "#8839EF" }`. Each value is a hex color, such as `"#89B4FA"`; a key that is missing keeps the theme's color. Older configs hold the whole Mocha palette under `colors`: with `light` or `terminal` a color there that equals Mocha's default is ignored, so only the colors you changed apply.
+
+The table lists the Mocha values.
+
+| Key | Mocha | Used for |
 |---|---|---|
 | `background` | `#1E1E2E` | App background |
 | `foreground` | `#CDD6F4` | Text |

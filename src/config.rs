@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use chrono::NaiveTime;
 use serde::{Deserialize, Serialize};
 
-use crate::theme::Theme;
+use crate::theme::{ColorOverrides, ThemeName};
 
 const APP_NAME: &str = "azuredevopstui";
 const CONFIG_FILE: &str = "config.json";
@@ -50,8 +50,12 @@ pub struct Config {
     /// Per-kind switches and quiet hours; `notifications` stays the master switch.
     #[serde(default)]
     pub notify: NotifyConfig,
+    /// Built-in palette: mocha, light or terminal (the terminal's own colors).
     #[serde(default)]
-    pub colors: Theme,
+    pub theme: ThemeName,
+    /// Overrides on top of `theme`.
+    #[serde(default)]
+    pub colors: ColorOverrides,
     /// Tags added by the user, most recent first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_tags: Vec<String>,
@@ -269,7 +273,8 @@ impl Config {
             show_images: true,
             notifications: false,
             notify: NotifyConfig::default(),
-            colors: Theme::default(),
+            theme: ThemeName::default(),
+            colors: ColorOverrides::default(),
             recent_tags: Vec::new(),
         }
     }
@@ -406,7 +411,26 @@ mod tests {
 
         assert_eq!(loaded.ready_column.as_deref(), Some("Ready"));
         assert_eq!(loaded.work_item_types, ["Bug"]);
-        assert_eq!(loaded.colors.background, config.colors.background);
+        assert_eq!(loaded.colors, config.colors);
+    }
+
+    #[test]
+    fn new_config_writes_no_colors() {
+        let config = Config::new("o".into(), "p".into(), "t".into());
+
+        let json = serde_json::to_value(&config).unwrap();
+
+        assert_eq!(json["theme"], "mocha");
+        assert_eq!(json["colors"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn theme_names_are_lowercase() {
+        let json = r#"{"organization":"o","project":"p","team":"t","theme":"terminal"}"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+
+        assert_eq!(config.theme, ThemeName::Terminal);
     }
 
     #[test]

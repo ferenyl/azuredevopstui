@@ -11,6 +11,7 @@ mod lifecycle;
 mod links;
 mod notifications;
 mod scroll;
+mod theme;
 mod threads;
 mod vote;
 mod wide_chars;
