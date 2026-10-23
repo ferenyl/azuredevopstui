@@ -31,6 +31,10 @@ impl App {
             TextTarget::AddReviewer(pr) => self.confirm_add_reviewer(pr, text),
             TextTarget::LinkWorkItem(pr) => self.confirm_link_work_item(pr, text),
             TextTarget::QueueBranch(build) => self.confirm_queue_branch(build, text),
+            TextTarget::WorkItemTitle(item) => self.confirm_work_item_title(item, text),
+            TextTarget::NewWorkItem { kind, parent } => {
+                self.confirm_new_work_item(kind, parent, text)
+            }
         }
     }
 

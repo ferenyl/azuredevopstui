@@ -4,6 +4,7 @@ mod column;
 mod comment;
 mod complete;
 mod confirm;
+mod new_work_item;
 mod pr_actions;
 mod pr_filter;
 mod sort;
@@ -12,6 +13,7 @@ mod tags;
 mod thread_status;
 mod types;
 mod vote;
+mod work_item_actions;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -49,6 +51,18 @@ impl App {
             Some(Popup::RemoveReviewer { pr, selection }) => {
                 self.confirm_remove_reviewer(pr, selection.selected)
             }
+            Some(Popup::WorkItemActions {
+                item,
+                actions,
+                selection,
+            }) => self.confirm_work_item_action(item, &actions, selection.selected),
+            Some(Popup::WorkItemField {
+                item,
+                field,
+                selection,
+            }) => self.confirm_work_item_field(item, field, &selection),
+            Some(Popup::Assignee(picker)) => self.confirm_assignee(picker),
+            Some(Popup::NewWorkItem { selection }) => self.confirm_new_work_item_type(&selection),
             Some(Popup::Errors { .. }) | None => {}
         }
     }
@@ -64,6 +78,7 @@ impl App {
             }
             Some(Popup::Tags(picker)) => picker.handle_key(key),
             Some(Popup::Sprint(picker)) => picker.handle_key(key),
+            Some(Popup::Assignee(picker)) => picker.handle_key(key),
             Some(Popup::Text { text, .. }) => {
                 if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     self.edit_request = Some(text.as_str().to_string());
@@ -109,6 +124,7 @@ impl App {
             Popup::Complete(picker) => &mut picker.selection,
             Popup::Tags(picker) => &mut picker.selection,
             Popup::Sprint(picker) => &mut picker.selection,
+            Popup::Assignee(picker) => &mut picker.selection,
             Popup::Text { .. }
             | Popup::BuildFilter { .. }
             | Popup::Confirm { .. }
@@ -120,6 +136,9 @@ impl App {
             | Popup::ThreadStatus { selection, .. }
             | Popup::PrActions { selection, .. }
             | Popup::BuildActions { selection, .. }
+            | Popup::WorkItemActions { selection, .. }
+            | Popup::WorkItemField { selection, .. }
+            | Popup::NewWorkItem { selection }
             | Popup::RemoveReviewer { selection, .. }
             | Popup::Types { selection, .. }
             | Popup::PrFilter { selection, .. } => selection,

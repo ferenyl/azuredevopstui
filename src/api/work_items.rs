@@ -2,20 +2,21 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt, stream};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::models::{
     CommentList, CommentsPage, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention,
-    Partial, PullRequest, Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment,
-    WorkItemDetails, WorkItemResponse, WorkItemState, WorkItemTypeCategory,
+    Partial, PullRequest, Relation, SprintWorkItems, TeamFieldValues, WiqlResult, WorkItem,
+    WorkItemComment, WorkItemDetails, WorkItemRef, WorkItemResponse, WorkItemState,
+    WorkItemTypeCategory,
 };
-use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, is_unauthorized};
+use super::{API_VERSION, MAX_CONCURRENT_REQUESTS, ProjectApi, build_url, is_unauthorized};
 use crate::rich_text::RichText;
 
 const MAX_WORK_ITEMS: &str = "200";
 /// Most ids `workitemsbatch` accepts per request.
 const BATCH_SIZE: usize = 200;
-const FIELDS: [&str; 10] = [
+const FIELDS: [&str; 12] = [
     "System.Title",
     "System.WorkItemType",
     "System.State",
@@ -26,8 +27,11 @@ const FIELDS: [&str; 10] = [
     "System.CreatedDate",
     "System.AssignedTo",
     "System.Tags",
+    "System.IterationPath",
+    "System.AreaPath",
 ];
 const CHILD_LINK: &str = "System.LinkTypes.Hierarchy-Forward";
+const PARENT_LINK: &str = "System.LinkTypes.Hierarchy-Reverse";
 const ARTIFACT_LINK: &str = "ArtifactLink";
 const HYPERLINK: &str = "Hyperlink";
 const ATTACHED_FILE: &str = "AttachedFile";
@@ -383,6 +387,115 @@ impl ProjectApi {
             })
             .await?;
         Ok(states)
+    }
+
+    /// State names of a work item type, in workflow order.
+    pub async fn work_item_states(&self, kind: &str) -> Result<Vec<String>> {
+        let states = self.type_states(kind).await?;
+        Ok(states.into_iter().map(|state| state.name).collect())
+    }
+
+    /// Creates a `kind` item assigned to `assignee` and returns its id. Without `iteration` it goes
+    /// in the current sprint, without `area` in the team's default area; `parent` makes it a child.
+    pub async fn create_work_item(
+        &self,
+        kind: &str,
+        title: &str,
+        assignee: &str,
+        iteration: Option<&str>,
+        area: Option<&str>,
+        parent: Option<u32>,
+    ) -> Result<u32> {
+        let iteration = match iteration {
+            Some(path) => path.to_string(),
+            None => {
+                self.iterations()
+                    .await?
+                    .into_iter()
+                    .find(Iteration::is_current)
+                    .context("team has no current sprint")?
+                    .path
+            }
+        };
+        let area = match area {
+            Some(path) => path.to_string(),
+            None => self.default_area().await?.to_string(),
+        };
+        let mut operations: Vec<Value> = [
+            ("System.Title", title),
+            ("System.AssignedTo", assignee),
+            ("System.IterationPath", iteration.as_str()),
+            ("System.AreaPath", area.as_str()),
+        ]
+        .iter()
+        .map(|(field, value)| json!({ "op": "add", "path": format!("/fields/{field}"), "value": value }))
+        .collect();
+        if let Some(parent) = parent {
+            let mut url = build_url(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "wit",
+                    "workItems",
+                    &parent.to_string(),
+                ],
+                &[],
+                API_VERSION,
+            )?;
+            url.set_query(None);
+            operations.push(json!({
+                "op": "add",
+                "path": "/relations/-",
+                "value": { "rel": PARENT_LINK, "url": url.as_str() }
+            }));
+        }
+        let created: WorkItemRef = self
+            .client
+            .post_versioned(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "wit",
+                    "workitems",
+                    &format!("${kind}"),
+                ],
+                &[],
+                &Value::Array(operations),
+                API_VERSION,
+            )
+            .await?;
+        Ok(created.id)
+    }
+
+    /// The team's default area path, cached per session.
+    async fn default_area(&self) -> Result<&str> {
+        let area = self
+            .default_area
+            .get_or_try_init(|| async {
+                let values: TeamFieldValues = self
+                    .client
+                    .get(
+                        &self.client.urls.dev_azure,
+                        &[
+                            &self.organization,
+                            &self.project,
+                            &self.team,
+                            "_apis",
+                            "work",
+                            "teamsettings",
+                            "teamfieldvalues",
+                        ],
+                        &[],
+                    )
+                    .await?;
+                Ok::<_, anyhow::Error>(values.default_value)
+            })
+            .await?;
+        Ok(area)
     }
 
     async fn type_states(&self, kind: &str) -> Result<Vec<WorkItemState>> {
@@ -1477,5 +1590,122 @@ mod tests {
         let client = ProjectApi::with_base_url(&server.uri());
 
         client.add_work_item_comment(10, "hello").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn work_item_states_are_names_in_order() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/_apis/wit/workitemtypes/User%20Story/states",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "New", "category": "Proposed" },
+                { "name": "Active", "category": "InProgress" }
+            ]})))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let states = client.work_item_states("User Story").await.unwrap();
+
+        assert_eq!(states, ["New", "Active"]);
+    }
+
+    #[tokio::test]
+    async fn create_work_item_goes_in_the_current_sprint_and_default_area() {
+        use wiremock::matchers::{body_json, header};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/Team/_apis/work/teamsettings/iterations",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "S2", "path": "P\\S2", "attributes": { "timeFrame": "future" } },
+                { "name": "S1", "path": "P\\S1", "attributes": { "timeFrame": "current" } }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/Team/_apis/work/teamsettings/teamfieldvalues",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "defaultValue": "P\\Web" })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/$User%20Story"))
+            .and(header("content-type", "application/json-patch+json"))
+            .and(body_json(json!([
+                { "op": "add", "path": "/fields/System.Title", "value": "New story" },
+                { "op": "add", "path": "/fields/System.AssignedTo", "value": "me@example.com" },
+                { "op": "add", "path": "/fields/System.IterationPath", "value": "P\\S1" },
+                { "op": "add", "path": "/fields/System.AreaPath", "value": "P\\Web" }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 900 })))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        for _ in 0..2 {
+            let id = client
+                .create_work_item(
+                    "User Story",
+                    "New story",
+                    "me@example.com",
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(id, 900);
+        }
+    }
+
+    #[tokio::test]
+    async fn child_task_keeps_the_given_paths_and_links_the_parent() {
+        use wiremock::matchers::body_json;
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/$Task"))
+            .and(body_json(json!([
+                { "op": "add", "path": "/fields/System.Title", "value": "Write tests" },
+                { "op": "add", "path": "/fields/System.AssignedTo", "value": "me@example.com" },
+                { "op": "add", "path": "/fields/System.IterationPath", "value": "P\\S1" },
+                { "op": "add", "path": "/fields/System.AreaPath", "value": "P\\Api" },
+                { "op": "add", "path": "/relations/-", "value": {
+                    "rel": PARENT_LINK,
+                    "url": format!("{}/contoso/MyProject/_apis/wit/workItems/301", server.uri())
+                } }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 901 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let id = client
+            .create_work_item(
+                "Task",
+                "Write tests",
+                "me@example.com",
+                Some("P\\S1"),
+                Some("P\\Api"),
+                Some(301),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(id, 901);
     }
 }

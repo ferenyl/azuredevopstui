@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/Web/_apis/work/teamsettings/teamfieldvalues",
+  "body": {
+    "defaultValue": "Fabrikam\\Web",
+    "field": { "referenceName": "System.AreaPath" },
+    "values": [{ "value": "Fabrikam\\Web", "includeChildren": true }]
+  }
+}

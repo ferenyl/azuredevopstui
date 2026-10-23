@@ -110,7 +110,8 @@ impl ProjectApi {
         self.patch_work_item(id, vec![operation]).await
     }
 
-    async fn update_work_item(&self, id: u32, fields: &[(&str, Value)]) -> Result<()> {
+    /// Sets each field to its value in one update.
+    pub async fn update_work_item(&self, id: u32, fields: &[(&str, Value)]) -> Result<()> {
         let operations: Vec<Value> = fields
             .iter()
             .map(|(field, value)| json!({ "op": "add", "path": format!("/fields/{field}"), "value": value }))
@@ -324,6 +325,33 @@ mod tests {
         let client = ProjectApi::with_base_url(&server.uri());
 
         client.assign_work_item(5, "me@example.com").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn update_work_item_adds_each_field() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
+            .and(body_json(json!([
+                { "op": "add", "path": "/fields/System.State", "value": "Resolved" },
+                { "op": "add", "path": "/fields/Microsoft.VSTS.Common.Priority", "value": 1 }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        client
+            .update_work_item(
+                5,
+                &[
+                    ("System.State", json!("Resolved")),
+                    ("Microsoft.VSTS.Common.Priority", json!(1)),
+                ],
+            )
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

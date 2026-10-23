@@ -8,7 +8,8 @@ use crate::config::Config;
 use super::loads::Load;
 use super::message::Message;
 use super::{
-    App, DetailInfo, Popup, Retry, Screen, Selection, SetupStep, Signals, SprintPicker, TextInput,
+    App, AssigneePicker, DetailInfo, Popup, Retry, Screen, Selection, SetupStep, Signals,
+    SprintPicker, TextInput, WorkItemField,
 };
 
 impl App {
@@ -178,6 +179,50 @@ impl App {
             },
             Message::PrDescription { pr, result } => match result {
                 Ok(description) => self.open_description_editor(pr, description),
+                Err(err) => self.report_error(err),
+            },
+            Message::WorkItemStates { item, result } => match result {
+                Ok(states) => self.open_field_picker(item, WorkItemField::State, states, None),
+                Err(err) => self.report_error(err),
+            },
+            Message::WorkItemSprints { item, result } => match result {
+                Ok(sprints) => {
+                    let current = sprints
+                        .iter()
+                        .find(|s| s.is_current())
+                        .map(|s| s.path.clone());
+                    let paths = sprints.into_iter().map(|sprint| sprint.path).collect();
+                    let field = WorkItemField::Iteration;
+                    self.open_field_picker(item, field, paths, current.as_deref());
+                }
+                Err(err) => self.report_error(err),
+            },
+            Message::Identities {
+                item,
+                query,
+                result,
+            } => match result {
+                Ok(people) if people.is_empty() => self.set_error(format!("no one found: {query}")),
+                Ok(people) => self.popup = Some(Popup::Assignee(AssigneePicker::new(item, people))),
+                Err(err) => self.report_error(err),
+            },
+            Message::NewWorkItemTypes(result) => match result {
+                Ok(types) => self.open_new_work_item_picker(types),
+                Err(err) => self.report_error(err),
+            },
+            Message::WorkItemCreated { parent, result } => match result {
+                Ok(id) => {
+                    tracing::info!(id, "work item created");
+                    self.notice = Some((format!("created #{id}"), Instant::now()));
+                    let shown = parent.is_some_and(|parent| {
+                        self.detail.as_ref().is_some_and(|d| d.is_work_item(parent))
+                    });
+                    if shown {
+                        self.reload_only(&[Load::Sprint, Load::Detail]);
+                    } else {
+                        self.reload_only(&[Load::Sprint]);
+                    }
+                }
                 Err(err) => self.report_error(err),
             },
             Message::PullRequestUpdated { id, reload, result } => match result {

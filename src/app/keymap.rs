@@ -311,6 +311,7 @@ fn defaults(action: Action) -> Vec<KeyBinding> {
         Action::JumpToPanel(n) => &[["1", "2", "3", "4", "5", "6"][usize::from(n - 1)]],
         Action::Search => &["/"],
         Action::Errors => &["E"],
+        Action::NewWorkItem => &["n"],
         Action::SprintBoard => &["b"],
     };
     texts

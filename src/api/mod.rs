@@ -10,10 +10,10 @@ pub use builds::{TimelineRow, timeline_rows};
 #[cfg(test)]
 pub use models::DetailComment;
 pub use models::{
-    Board, Build, ChangeKind, ChangedFile, CommentsPage, CurrentUser, FileContent, Iteration, Link,
-    LinkTarget, Mention, Partial, PullRequest, PullRequestChanges, PullRequestChecks,
-    PullRequestDetails, ReviewSignals, SprintWorkItems, THREAD_STATUSES, Thread, TimelineRecord,
-    WorkItem, WorkItemDetails, thread_status_label,
+    Board, Build, ChangeKind, ChangedFile, CommentsPage, CurrentUser, FileContent, IdentityRef,
+    Iteration, Link, LinkTarget, Mention, Partial, Person, PullRequest, PullRequestChanges,
+    PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems, THREAD_STATUSES, Thread,
+    TimelineRecord, WorkItem, WorkItemDetails, thread_status_label,
 };
 pub use pull_requests::{CompletionOptions, is_approved, is_reviewer_policy};
 
@@ -344,7 +344,8 @@ impl AdoClient {
             .acquire()
             .await
             .expect("semaphore never closed");
-        let is_json_patch = method == Method::PATCH && body.is_some_and(Value::is_array);
+        let is_json_patch =
+            matches!(method, Method::PATCH | Method::POST) && body.is_some_and(Value::is_array);
         let mut request = self.http.request(method, url.clone());
         if is_json_patch {
             request = request.header(CONTENT_TYPE, "application/json-patch+json");
@@ -370,6 +371,8 @@ pub struct ProjectApi {
     team: Arc<str>,
     /// States in the Completed and Removed categories, fetched once per session.
     closed_states: Arc<OnceCell<Vec<models::WorkItemState>>>,
+    /// The team's default area path, fetched once per session.
+    default_area: Arc<OnceCell<String>>,
     /// Identity ids of the names in the PR filter, resolved once per session.
     identities: Arc<Mutex<HashMap<String, String>>>,
     /// Review signals of others' PRs by id, reused while a PR is unchanged.
@@ -402,6 +405,7 @@ impl ProjectApi {
             project: project.into(),
             team: team.into(),
             closed_states: Arc::default(),
+            default_area: Arc::default(),
             identities: Arc::default(),
             reviews: Arc::default(),
             answered_mentions: Arc::default(),

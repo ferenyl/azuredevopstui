@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "path": "/contoso/Fabrikam/_apis/wit/workitems/$Task",
+  "bodyContains": "/_apis/wit/workItems/301\"}",
+  "body": {
+    "id": 902,
+    "fields": {
+      "System.Title": "Write paging tests",
+      "System.WorkItemType": "Task",
+      "System.State": "New"
+    }
+  }
+}

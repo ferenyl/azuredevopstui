@@ -226,6 +226,7 @@ impl App {
             | Action::HalfPageUp
             | Action::JumpToPanel(_)
             | Action::Errors
+            | Action::NewWorkItem
             | Action::SprintBoard
                 if !matches!(self.screen, Screen::Main) => {}
             Action::SprintBoard => self.toggle_sprint_board(),
@@ -282,8 +283,10 @@ impl App {
             Action::ThreadStatus => self.open_thread_status(),
             Action::PrActions => match self.current_item() {
                 Some(Detail::Build(_)) => self.open_build_actions(),
+                Some(Detail::WorkItem(_)) => self.open_work_item_actions(),
                 _ => self.open_pr_actions(),
             },
+            Action::NewWorkItem => self.new_work_item(),
             Action::Zoom => self.zoomed = !self.zoomed,
             Action::Errors => self.popup = Some(Popup::Errors { first: 0 }),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
@@ -417,6 +420,10 @@ impl App {
                 picker.filter();
             }
             Some(Popup::Sprint(picker)) => {
+                picker.query.insert_str(line);
+                picker.filter();
+            }
+            Some(Popup::Assignee(picker)) => {
                 picker.query.insert_str(line);
                 picker.filter();
             }

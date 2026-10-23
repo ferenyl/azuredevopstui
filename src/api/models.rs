@@ -111,8 +111,21 @@ pub struct Backlog {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Identity {
     pub id: String,
+    #[serde(default)]
+    pub provider_display_name: String,
+    #[serde(default)]
+    pub properties: UserProperties,
+}
+
+/// Someone a work item can be assigned to; an empty `unique_name` means unassigned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Person {
+    pub display_name: String,
+    /// Email or UPN, the value of identity fields such as `System.AssignedTo`.
+    pub unique_name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -120,6 +133,13 @@ pub struct Identity {
 pub struct IdentityRef {
     pub id: String,
     pub display_name: String,
+    pub unique_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamFieldValues {
+    pub default_value: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -201,6 +221,7 @@ pub struct Reviewer {
     #[serde(default)]
     pub id: String,
     pub display_name: String,
+    pub unique_name: Option<String>,
     pub vote: i32,
     pub is_required: Option<bool>,
 }
@@ -445,6 +466,10 @@ pub struct WorkItemFields {
     pub assigned_to: Option<IdentityRef>,
     #[serde(rename = "System.Tags")]
     pub tags: Option<String>,
+    #[serde(rename = "System.IterationPath")]
+    pub iteration_path: Option<String>,
+    #[serde(rename = "System.AreaPath")]
+    pub area_path: Option<String>,
 }
 
 /// A list where `failed` entries could not be fully loaded.

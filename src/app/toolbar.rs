@@ -1,7 +1,7 @@
 use super::{Action, App, Detail, Panel, Popup, Retry, Screen, SetupStep};
 
 /// Every action the toolbar can show, in display order.
-const TOOLBAR: [Action; 32] = [
+const TOOLBAR: [Action; 33] = [
     Action::Down,
     Action::Up,
     Action::Toggle,
@@ -27,6 +27,7 @@ const TOOLBAR: [Action; 32] = [
     Action::Filter,
     Action::Search,
     Action::PrActions,
+    Action::NewWorkItem,
     Action::Zoom,
     Action::SprintBoard,
     Action::Reload,
@@ -126,6 +127,7 @@ impl App {
             | Action::SwitchProject
             | Action::SprintBoard
             | Action::Help
+            | Action::NewWorkItem
             | Action::Quit => true,
             Action::NextTab | Action::Copy => {
                 matches!(item, Some(Detail::PullRequest(_) | Detail::WorkItem(_)))
@@ -134,7 +136,7 @@ impl App {
                 matches!(&item, Some(Detail::PullRequest(pr)) if self.can_complete(pr))
             }
             Action::Vote => matches!(item, Some(Detail::PullRequest(_))),
-            Action::PrActions => matches!(item, Some(Detail::PullRequest(_) | Detail::Build(_))),
+            Action::PrActions => item.is_some(),
             Action::ChangeColumn => matches!(item, Some(Detail::WorkItem(_))),
             Action::Comment => matches!(item, Some(Detail::WorkItem(_) | Detail::PullRequest(_))),
             Action::NextThread | Action::PrevThread => {
@@ -394,6 +396,7 @@ mod tests {
                     Filter,
                     Search,
                     PrActions,
+                    NewWorkItem,
                     Zoom,
                     SprintBoard,
                     Reload,
@@ -419,6 +422,7 @@ mod tests {
                     Filter,
                     Search,
                     PrActions,
+                    NewWorkItem,
                     Zoom,
                     SprintBoard,
                     Reload,
@@ -444,6 +448,7 @@ mod tests {
                     Filter,
                     Search,
                     PrActions,
+                    NewWorkItem,
                     Zoom,
                     SprintBoard,
                     Reload,
@@ -469,6 +474,8 @@ mod tests {
                     Sort,
                     Filter,
                     Search,
+                    PrActions,
+                    NewWorkItem,
                     Zoom,
                     SprintBoard,
                     Reload,
@@ -494,6 +501,8 @@ mod tests {
                     Sort,
                     Filter,
                     Search,
+                    PrActions,
+                    NewWorkItem,
                     Zoom,
                     SprintBoard,
                     Reload,
@@ -519,6 +528,8 @@ mod tests {
                     Sort,
                     Filter,
                     Search,
+                    PrActions,
+                    NewWorkItem,
                     Zoom,
                     SprintBoard,
                     Reload,
@@ -537,6 +548,7 @@ mod tests {
                     CopyLink,
                     Filter,
                     PrActions,
+                    NewWorkItem,
                     Zoom,
                     SprintBoard,
                     Reload,
@@ -552,6 +564,7 @@ mod tests {
                     FocusRight,
                     Filter,
                     Search,
+                    NewWorkItem,
                     Zoom,
                     SprintBoard,
                     Reload,
@@ -567,6 +580,7 @@ mod tests {
                     FocusRight,
                     Sort,
                     Search,
+                    NewWorkItem,
                     Zoom,
                     SprintBoard,
                     Reload,
