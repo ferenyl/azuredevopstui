@@ -20,10 +20,18 @@ impl App {
         self.spawn(async move { Message::Authenticated(Auth::resolve(auth).await) });
     }
 
+    /// Starts in `organization` (and `project`) instead of the configured one, saved like a switch.
+    pub fn start_in(&mut self, organization: String, project: Option<String>) {
+        self.start_scope = Some((organization, project));
+    }
+
     pub(super) fn continue_setup(&mut self) {
         let Some(client) = self.client.clone() else {
             return;
         };
+        if self.start_scoped() {
+            return;
+        }
         match &self.config {
             None => self.load_organizations(),
             Some(config) if config.ready_column.is_none() => {
@@ -37,6 +45,30 @@ impl App {
                 );
             }
         }
+    }
+
+    /// Opens the project or team step of `start_scope` unless it is the configured one.
+    fn start_scoped(&mut self) -> bool {
+        let Some((organization, project)) = self.start_scope.take() else {
+            return false;
+        };
+        let configured = self.config.as_ref().is_some_and(|config| {
+            config.organization == organization
+                && project
+                    .as_ref()
+                    .is_none_or(|project| *project == config.project)
+        });
+        if configured {
+            return false;
+        }
+        self.switching = self.config.is_some();
+        self.scoped_start = self.switching;
+        self.setup_back.clear();
+        match project {
+            Some(project) => self.load_teams(organization, project),
+            None => self.load_projects(organization),
+        }
+        true
     }
 
     pub(super) fn load_organizations(&mut self) {
@@ -79,7 +111,12 @@ impl App {
             Some(step) => self.set_step(step),
             None if self.switching => {
                 self.switching = false;
-                self.screen = Screen::Main;
+                if std::mem::take(&mut self.scoped_start) {
+                    // The main view was never loaded; connect to the configured project.
+                    self.continue_setup();
+                } else {
+                    self.screen = Screen::Main;
+                }
             }
             None => self.should_quit = true,
         }
@@ -143,6 +180,7 @@ impl App {
                 self.setup_back.clear();
                 if self.switching {
                     self.switching = false;
+                    self.scoped_start = false;
                     self.reset_project();
                 }
                 self.sync_api();
@@ -273,6 +311,7 @@ mod tests {
     use crossterm::event::KeyCode;
 
     use super::*;
+    use crate::api::AdoClient;
     use crate::app::test_helpers::{app, press};
     use crate::test_support::config;
 
@@ -471,6 +510,75 @@ mod tests {
         assert!(app.data.my_prs().is_none());
         assert_eq!(app.selections, [0; LEFT_PANELS.len()]);
         assert!(app.setup_back.is_empty());
+    }
+
+    /// Signed in to an unreachable server, so only the started step is seen.
+    fn signed_in(config: Option<Config>) -> App {
+        let mut app = App::new(config, None);
+        app.client = Some(AdoClient::with_base_url(
+            Auth::from_pat("pat"),
+            "http://127.0.0.1:9",
+        ));
+        app
+    }
+
+    fn loading(app: &App) -> Option<&'static str> {
+        match app.screen {
+            Screen::Setup(SetupStep::Loading(text)) => Some(text),
+            _ => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn start_in_a_project_loads_its_teams() {
+        let mut app = signed_in(Some(config()));
+        app.start_in("contoso".into(), Some("Other".into()));
+
+        app.continue_setup();
+
+        assert_eq!(loading(&app), Some("Loading teams…"));
+        assert!(app.switching);
+    }
+
+    #[tokio::test]
+    async fn start_in_an_organization_loads_its_projects() {
+        let mut app = signed_in(None);
+        app.start_in("fabrikam".into(), None);
+
+        app.continue_setup();
+
+        assert_eq!(loading(&app), Some("Loading projects…"));
+        assert!(!app.switching);
+    }
+
+    #[tokio::test]
+    async fn start_in_the_configured_project_connects() {
+        let mut app = signed_in(Some(config()));
+        app.start_in("contoso".into(), Some("MyProject".into()));
+
+        app.continue_setup();
+
+        assert_eq!(loading(&app), Some("Connecting…"));
+        assert!(!app.switching);
+    }
+
+    #[tokio::test]
+    async fn esc_on_the_first_started_step_connects_to_the_configured_project() {
+        let mut app = signed_in(Some(config()));
+        app.start_in("contoso".into(), Some("Other".into()));
+        app.continue_setup();
+        app.handle_message(Message::Teams {
+            organization: "contoso".into(),
+            project: "Other".into(),
+            result: Ok(names(&["Ops"])),
+        });
+
+        press(&mut app, KeyCode::Esc);
+
+        assert_eq!(loading(&app), Some("Connecting…"));
+        assert!(!app.switching);
+        assert!(!app.should_quit);
+        assert_eq!(app.config.as_ref().unwrap().project, "MyProject");
     }
 
     #[test]

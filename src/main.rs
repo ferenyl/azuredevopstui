@@ -1,8 +1,10 @@
 mod api;
 mod app;
 mod auth;
+mod cli;
 mod config;
 mod diff;
+mod doctor;
 mod images;
 mod notify;
 mod rich_text;
@@ -14,25 +16,43 @@ mod ui;
 mod test_support;
 
 use std::fs::{self, File};
+use std::process::ExitCode;
 use std::sync::Mutex;
 
 use anyhow::Context;
+use clap::error::ErrorKind;
+use clap::{CommandFactory, Parser};
 use tracing_subscriber::EnvFilter;
 
+use cli::{Cli, Command};
 use config::Config;
 use terminal::TerminalModes;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<ExitCode> {
+    // Before logging, so `--help` and `--version` never truncate the log of a running instance.
+    let cli = Cli::parse();
+    if let Some(path) = &cli.config {
+        Config::set_path(path.clone());
+    }
     let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(run());
+    let result = runtime.block_on(run(cli));
     // Notification threads may still wait for a click; don't block exit on them.
     runtime.shutdown_background();
     result
 }
 
-async fn run() -> anyhow::Result<()> {
+async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
+    if cli.command == Some(Command::Doctor) {
+        let (text, ok) = doctor::render(&doctor::run().await);
+        print!("{text}");
+        return Ok(if ok {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        });
+    }
     init_logging()?;
-    if std::env::args().any(|arg| arg == "--test-notification") {
+    if cli.test_notification {
         let clicked = notify::Notifier::default()
             .send(
                 "azuredevopstui".into(),
@@ -48,9 +68,22 @@ async fn run() -> anyhow::Result<()> {
                 "closed"
             }
         );
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
     let config = Config::load()?;
+    // `--project` alone stays in the configured organization.
+    let organization = cli.organization.or_else(|| {
+        cli.project.as_ref()?;
+        config.as_ref().map(|config| config.organization.clone())
+    });
+    if cli.project.is_some() && organization.is_none() {
+        Cli::command()
+            .error(
+                ErrorKind::MissingRequiredArgument,
+                "--project needs --org when there is no config",
+            )
+            .exit();
+    }
     let mut terminal = ratatui::init();
     // Must run before the event stream starts reading stdin.
     let picker = config
@@ -63,12 +96,14 @@ async fn run() -> anyhow::Result<()> {
                 .ok()
         });
     let mut modes = TerminalModes::enable(config.as_ref().is_none_or(|config| config.mouse));
-    let result = app::App::new(config, picker)
-        .run(&mut terminal, &mut modes)
-        .await;
+    let mut app = app::App::new(config, picker);
+    if let Some(organization) = organization {
+        app.start_in(organization, cli.project);
+    }
+    let result = app.run(&mut terminal, &mut modes).await;
     modes.disable();
     ratatui::restore();
-    result
+    result.map(|()| ExitCode::SUCCESS)
 }
 
 /// Logs to `$XDG_STATE_HOME/azuredevopstui/log` (`%LOCALAPPDATA%` on Windows); level from `RUST_LOG`, default `info`.

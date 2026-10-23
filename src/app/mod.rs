@@ -110,6 +110,10 @@ pub struct App {
     setup_back: Vec<SetupStep>,
     /// The setup was opened from the main view to change organization, project or team.
     switching: bool,
+    /// Organization and optional project from `--org`/`--project`, opened once signed in.
+    start_scope: Option<(String, Option<String>)>,
+    /// The switch to `start_scope` runs before the main view was ever shown.
+    scoped_start: bool,
     /// Text of the popup to edit in the editor; the run loop picks it up between frames.
     edit_request: Option<String>,
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
@@ -184,6 +188,8 @@ impl App {
             popup: None,
             setup_back: Vec::new(),
             switching: false,
+            start_scope: None,
+            scoped_start: false,
             edit_request: None,
             show_help: false,
             board_view: false,

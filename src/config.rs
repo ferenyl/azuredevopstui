@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use chrono::NaiveTime;
@@ -13,6 +14,8 @@ const APP_NAME: &str = "azuredevopstui";
 const CONFIG_FILE: &str = "config.json";
 
 const DEFAULT_REFRESH_INTERVAL_SECS: u64 = 120;
+
+static PATH_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -309,8 +312,20 @@ impl Config {
         }
     }
 
+    /// Makes `path` the config file for the rest of the run (`--config`). Only the first call counts.
+    pub fn set_path(path: PathBuf) {
+        let _ = PATH_OVERRIDE.set(path);
+    }
+
     #[cfg(not(test))]
     pub fn path() -> Result<PathBuf> {
+        Self::path_or(PATH_OVERRIDE.get())
+    }
+
+    fn path_or(override_path: Option<&PathBuf>) -> Result<PathBuf> {
+        if let Some(path) = override_path {
+            return Ok(path.clone());
+        }
         let dir = dirs::config_dir().context("could not resolve config directory")?;
         Ok(dir.join(APP_NAME).join(CONFIG_FILE))
     }
@@ -361,6 +376,18 @@ mod tests {
             method: AuthMethod::Auto,
             azure_config_dir: dir.map(Into::into),
         }
+    }
+
+    #[test]
+    fn path_override_wins() {
+        let custom = PathBuf::from("other").join("config.json");
+
+        assert_eq!(Config::path_or(Some(&custom)).unwrap(), custom);
+        assert!(
+            Config::path_or(None)
+                .unwrap()
+                .ends_with(PathBuf::from(APP_NAME).join(CONFIG_FILE))
+        );
     }
 
     #[test]

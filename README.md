@@ -226,6 +226,41 @@ When there is no config file, the app runs a setup:
 
 The config is then written to disk, with the default colors filled in. If `ready_column` is ever removed from the config, the app asks for it again on the next start.
 
+## Command line
+
+```text
+Usage: azuredevopstui [OPTIONS] [COMMAND]
+
+Commands:
+  doctor  Check the config, the sign-in and the connection to Azure DevOps, then exit
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>      Use this config file instead of the default one
+      --org <NAME>         Switch to this organization (saved to the config like the in-app switch)
+      --project <NAME>     Switch to this project; without --org in the configured organization
+      --test-notification  Send a test desktop notification and print whether it was opened or closed
+  -h, --help               Print help
+  -V, --version            Print version
+```
+
+- `--config <PATH>`: reads and writes this file instead of the [default config](#configuration). If it does not exist, the setup runs and saves to it. Works with `doctor` too.
+- `--org <NAME>` and `--project <NAME>`: start in another organization or project. The setup opens at the project step (`--org` only) or the team step, and what you pick is saved to the config, like switching with `P`; your other settings are kept. `esc` on that first step opens the configured project instead. `--project` alone stays in the configured organization; without a config it needs `--org`. To keep a separate setup, add `--config other.json`.
+- `--test-notification`: sends a desktop notification and prints `opened` or `closed`. See `notifications` under [Configuration](#configuration).
+- `-V`, `--version`: prints `azuredevopstui <version>`.
+- `azuredevopstui doctor`: checks the setup without opening the TUI and never prompts. It prints one line per check and exits with 1 if one fails. Checks, in order: the version, the config file, the credentials (Azure CLI or the saved PAT), signing in to the organization and finding the team in the project.
+
+  ```text
+  $ azuredevopstui doctor
+  ✓ azuredevopstui 0.1.15
+  ✓ config /home/me/.config/azuredevopstui/config.json
+  ✓ credentials: Azure CLI
+  ✓ signed in as Anna Andersson to contoso
+  ✗ team Web not found in Fabrikam
+  ```
+
+A wrong option prints the error and the usage and exits with 2.
+
 ## Authentication
 
 The method is set by `auth.method` in the config.
@@ -315,7 +350,7 @@ The token is stored in the OS keyring under the service `azuredevopstui`. If Azu
 
 ## Configuration
 
-The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usually `~/.config/azuredevopstui/config.json`. On Windows it is `%APPDATA%\azuredevopstui\config.json`.
+The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usually `~/.config/azuredevopstui/config.json`. On Windows it is `%APPDATA%\azuredevopstui\config.json`. Use `--config <PATH>` to use another file.
 
 ```json
 {
@@ -634,6 +669,7 @@ At `debug` level every API request is logged.
 
 | Problem | Fix |
 |---|---|
+| Not sure what is wrong | Run `azuredevopstui doctor`. It checks the config, the credentials and the connection, and shows the first check that fails. |
 | The Azure CLI token fails with *refresh token has expired* | Run `az login` again. Add `--allow-no-subscriptions` if the tenant has no subscriptions. |
 | *unauthorized* (401 or 203) with a PAT | The PAT has expired or lacks a scope. The app asks for a new one; you can also press `t`. |
 | The PAT cannot be saved | No Secret Service keyring is running. Start one (on WSL, `gnome-keyring-daemon`), or use the Azure CLI. On Windows, Credential Manager is always available. |
@@ -648,7 +684,7 @@ At `debug` level every API request is logged.
 | `ctrl+h` / `ctrl+j` do nothing | Your terminal does not support the kitty keyboard protocol. Use `ctrl+←` / `ctrl+↓`. |
 | Images show as `[image: …]` | The terminal has no graphics protocol, or `show_images` is `false`. See [Images](#images). |
 | Startup pauses for about 2 seconds, or the first key is ignored | The terminal does not answer the graphics query. Set `"show_images": false`. |
-| Wrong organization, project or team | Edit the config file, or delete it to run the setup again. |
+| Wrong organization, project or team | Press `P`, start with `--org`/`--project`, edit the config file, or delete it to run the setup again. |
 | A panel stays on *Loading…* or shows a timeout error | Requests time out after 10 seconds to connect and 30 seconds in total, images included. Check your network or proxy and press `r` to retry. Each request sends the User-Agent `azuredevopstui/<version>`. |
 
 ## Project structure
