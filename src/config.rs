@@ -59,6 +59,9 @@ pub struct Config {
     /// Tags added by the user, most recent first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_tags: Vec<String>,
+    /// Editor opened by `ctrl+e` in text popups; falls back to `$VISUAL`, then `$EDITOR`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor: Option<String>,
 }
 
 fn default_refresh_interval_secs() -> u64 {
@@ -276,6 +279,7 @@ impl Config {
             theme: ThemeName::default(),
             colors: ColorOverrides::default(),
             recent_tags: Vec::new(),
+            editor: None,
         }
     }
 

@@ -668,7 +668,7 @@ fn wrap_lines(
 }
 
 /// Display width of `text` in terminal columns.
-pub(super) fn text_width(text: &str) -> usize {
+pub(crate) fn text_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
 

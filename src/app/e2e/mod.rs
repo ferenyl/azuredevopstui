@@ -5,6 +5,7 @@
 
 mod changes;
 mod completion;
+mod editor;
 mod flows;
 mod inbox;
 mod lifecycle;

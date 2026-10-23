@@ -2,6 +2,7 @@ mod action;
 mod actions;
 #[cfg(test)]
 mod e2e;
+mod editor;
 mod files;
 mod inbox;
 mod input;
@@ -44,6 +45,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::api::{AdoClient, Board, CurrentUser, ProjectApi, WorkItem};
 use crate::config::Config;
 use crate::images::Images;
+use crate::terminal::TerminalModes;
 use crate::theme::Theme;
 use loads::{Load, Loads};
 use message::Message;
@@ -88,6 +90,8 @@ pub struct App {
     #[cfg(test)]
     opened: Vec<String>,
     pub popup: Option<Popup>,
+    /// Text of the popup to edit in the editor; the run loop picks it up between frames.
+    edit_request: Option<String>,
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
     sprint: Option<String>,
     pub show_help: bool,
@@ -138,6 +142,7 @@ impl App {
             #[cfg(test)]
             opened: Vec::new(),
             popup: None,
+            edit_request: None,
             show_help: false,
             last_updated: None,
             last_refresh: Instant::now(),
@@ -157,7 +162,11 @@ impl App {
         }
     }
 
-    pub async fn run(mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
+    pub async fn run(
+        mut self,
+        terminal: &mut DefaultTerminal,
+        modes: &mut TerminalModes,
+    ) -> anyhow::Result<()> {
         self.authenticate();
         let mut events = EventStream::new();
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
@@ -182,6 +191,15 @@ impl App {
                     self.notify_new_inbox();
                 }
                 _ = ticker.tick() => self.auto_refresh(),
+            }
+            if let Some(text) = self.edit_request.take() {
+                // The event stream would take the editor's input.
+                drop(events);
+                modes.suspend();
+                self.edit_in_editor(&text);
+                modes.resume();
+                events = EventStream::new();
+                terminal.clear()?;
             }
         }
         Ok(())
