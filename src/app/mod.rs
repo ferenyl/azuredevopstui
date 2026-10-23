@@ -10,6 +10,7 @@ mod input;
 mod loads;
 mod message;
 mod messages;
+mod mouse;
 mod popups;
 mod refresh;
 mod setup;
@@ -23,6 +24,7 @@ mod wizard;
 pub use action::{Action, HELP};
 pub use activity::Activity;
 pub use files::Files;
+pub use mouse::{HitAreas, PanelHit, PickerHit};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
     ColumnPicker, CompletePicker, CompleteRow, ConfirmAction, Data, Detail, DetailInfo, DetailTab,
@@ -123,6 +125,8 @@ pub struct App {
     should_quit: bool,
     /// The focused panel fills the left column, or the whole screen when it is the detail.
     pub zoomed: bool,
+    /// Where panels, tabs and the open list were drawn last frame, for mouse hit testing.
+    pub areas: RefCell<HitAreas>,
     /// Mutations in flight and the history of errors.
     pub activity: Activity,
 }
@@ -175,6 +179,7 @@ impl App {
             rx,
             should_quit: false,
             zoomed: false,
+            areas: RefCell::default(),
             activity: Activity::default(),
         }
     }
@@ -199,6 +204,7 @@ impl App {
                 event = events.next() => match event {
                     Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => self.handle_key(key),
                     Some(Ok(Event::Paste(text))) => self.handle_paste(&text),
+                    Some(Ok(Event::Mouse(mouse))) => self.handle_mouse(mouse),
                     Some(Ok(_)) => {}
                     Some(Err(err)) => return Err(err.into()),
                     None => break,

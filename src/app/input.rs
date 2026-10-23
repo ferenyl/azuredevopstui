@@ -296,7 +296,11 @@ impl App {
         } else {
             (index + tabs.len() - 1) % tabs.len()
         };
-        self.detail_tab = tabs[index];
+        self.select_tab(tabs[index]);
+    }
+
+    pub(super) fn select_tab(&mut self, tab: DetailTab) {
+        self.detail_tab = tab;
         self.detail_scroll = 0;
         self.detail_thread = None;
         self.scroll_to_thread = false;

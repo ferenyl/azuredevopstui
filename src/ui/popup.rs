@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListState, Paragraph, Wrap};
 use unicode_width::UnicodeWidthChar;
 
-use crate::app::{App, HELP, Selection, TextInput};
+use crate::app::{App, HELP, PickerHit, Selection, TextInput};
 
 const KEY_WIDTH: usize = 15;
 
@@ -112,6 +112,7 @@ pub fn render_picker(frame: &mut Frame, app: &App, title: &str, selection: &Sele
         .title_style(Style::new().fg(theme.title))
         .border_style(Style::new().fg(theme.border_focused))
         .style(Style::new().bg(theme.background).fg(theme.foreground));
+    let rows = block.inner(area);
     let list = List::new(selection.items.iter().map(String::as_str))
         .block(block)
         .highlight_style(Style::new().bg(theme.selection_bg).fg(theme.selection_fg))
@@ -119,6 +120,12 @@ pub fn render_picker(frame: &mut Frame, app: &App, title: &str, selection: &Sele
     let mut state = ListState::default().with_selected(Some(selection.selected));
     frame.render_widget(Clear, area);
     frame.render_stateful_widget(list, area, &mut state);
+    app.areas.borrow_mut().picker = Some(PickerHit {
+        rows,
+        offset: state.offset(),
+        len: selection.items.len(),
+        selected: selection.selected,
+    });
 }
 
 pub fn render_confirm(frame: &mut Frame, app: &App, prompt: &str, area: Rect) {

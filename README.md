@@ -374,6 +374,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `theme` | `mocha` | Color preset: `mocha`, `light` or `terminal`. See [Colors](#colors). |
 | `colors` | none | Overrides for single colors of the preset. See [Colors](#colors). |
 | `layout.left_percent` | `25` | Width of the left column in percent of the screen, from 15 to 60. It is never narrower than 32 columns, up to half the screen. |
+| `mouse` | `true` | Capture the mouse: click a box, row or tab, scroll with the wheel. Set it to `false` to leave the mouse to the terminal. See [Mouse](#mouse). |
 
 ### Others' PRs filter
 
@@ -488,6 +489,20 @@ The table lists the Mocha values.
 | `q`, `ctrl+c` | Quit |
 
 Actions apply to the selected row in the focused list. When the detail panel has focus, they apply to the item shown there. The toolbar always shows the keys that work in the current context.
+
+## Mouse
+
+| Action | Effect |
+|---|---|
+| Click a box title or row | Focus the box and select the row. Clicking the selected row again opens it, like `enter` |
+| Click in the detail panel | Focus the detail panel |
+| Click a detail tab | Show that tab |
+| Wheel over a box | Move the selection in that box |
+| Wheel over the detail panel | Scroll three rows |
+| Click a row in a popup or a setup list | Select it and confirm, like `enter` |
+| Wheel in a popup or a setup list | Move the selection |
+
+Clicks outside an open popup are ignored. While the mouse is captured the terminal cannot select text; hold `shift` (most terminals) while dragging, or set `"mouse": false`.
 
 ## PR markers
 

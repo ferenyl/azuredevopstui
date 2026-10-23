@@ -64,6 +64,9 @@ pub struct Config {
     pub editor: Option<String>,
     #[serde(default)]
     pub layout: LayoutConfig,
+    /// Capture the mouse for clicks and the wheel; off leaves it to the terminal.
+    #[serde(default = "default_true")]
+    pub mouse: bool,
 }
 
 fn default_refresh_interval_secs() -> u64 {
@@ -296,6 +299,7 @@ impl Config {
             recent_tags: Vec::new(),
             editor: None,
             layout: LayoutConfig::default(),
+            mouse: true,
         }
     }
 
@@ -363,6 +367,16 @@ mod tests {
         assert_eq!(config.sort.work_items, WorkItemSort::Priority);
         assert!(config.show_images);
         assert_eq!(config.layout.left_percent, 25);
+    }
+
+    #[test]
+    fn mouse_is_on_unless_disabled() {
+        let json = r#"{"organization":"o","project":"p","team":"t"}"#;
+        let off = r#"{"organization":"o","project":"p","team":"t","mouse":false}"#;
+
+        assert!(serde_json::from_str::<Config>(json).unwrap().mouse);
+        assert!(!serde_json::from_str::<Config>(off).unwrap().mouse);
+        assert!(Config::new("o".into(), "p".into(), "t".into()).mouse);
     }
 
     #[test]
