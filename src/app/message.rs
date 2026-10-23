@@ -86,6 +86,11 @@ pub enum Message {
         reload: Vec<Load>,
         result: Result<()>,
     },
+    /// A pipeline run was queued or cancelled.
+    BuildUpdated {
+        id: u32,
+        result: Result<()>,
+    },
     /// The full description of `pr`, which the lists cut off.
     PrDescription {
         pr: Box<PullRequest>,

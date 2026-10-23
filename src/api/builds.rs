@@ -3,9 +3,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use futures::{StreamExt, stream};
+use serde_json::{Value, json};
 
 use super::models::{Build, ListResponse, Named};
-use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps};
+use super::{API_VERSION, MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps};
 
 const MAX_BUILDS: &str = "1000";
 const BUILD_DAYS: i64 = 14;
@@ -67,6 +68,57 @@ impl ProjectApi {
                 })
         });
         Ok(builds)
+    }
+
+    /// Queues a run of the pipeline; with `source_version` it builds that commit.
+    pub async fn queue_build(
+        &self,
+        definition_id: u32,
+        source_branch: &str,
+        source_version: Option<&str>,
+    ) -> Result<Build> {
+        let mut body = json!({
+            "definition": { "id": definition_id },
+            "sourceBranch": source_branch,
+        });
+        if let Some(version) = source_version {
+            body["sourceVersion"] = json!(version);
+        }
+        self.client
+            .post_versioned(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "build",
+                    "builds",
+                ],
+                &[],
+                &body,
+                API_VERSION,
+            )
+            .await
+    }
+
+    pub async fn cancel_build(&self, id: u32) -> Result<()> {
+        let id = id.to_string();
+        let _: Value = self
+            .client
+            .patch(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "build",
+                    "builds",
+                    &id,
+                ],
+                &json!({ "status": "cancelling" }),
+            )
+            .await?;
+        Ok(())
     }
 
     /// Branches per Azure Repos repository.
@@ -174,7 +226,7 @@ fn is_live(build: &Build, live: &HashMap<String, HashSet<String>>) -> bool {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{body_json, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
@@ -239,6 +291,72 @@ mod tests {
 
         let ids: Vec<_> = builds.iter().map(|build| build.id).collect();
         assert_eq!(ids, [9, 7]);
+    }
+
+    #[tokio::test]
+    async fn queueing_posts_the_pipeline_branch_and_commit() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/build/builds"))
+            .and(body_json(json!({
+                "definition": { "id": 7 },
+                "sourceBranch": "refs/heads/main",
+                "sourceVersion": "abc123"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(build_json(
+                5,
+                7,
+                "refs/heads/main",
+                "notStarted",
+                "",
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/build/builds"))
+            .and(body_json(json!({
+                "definition": { "id": 7 },
+                "sourceBranch": "refs/heads/release"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(build_json(
+                6,
+                7,
+                "refs/heads/release",
+                "notStarted",
+                "",
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let same = client
+            .queue_build(7, "refs/heads/main", Some("abc123"))
+            .await
+            .unwrap();
+        let other = client
+            .queue_build(7, "refs/heads/release", None)
+            .await
+            .unwrap();
+
+        assert_eq!((same.id, other.id), (5, 6));
+    }
+
+    #[tokio::test]
+    async fn cancelling_patches_the_status_as_plain_json() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/build/builds/501"))
+            .and(header("content-type", "application/json"))
+            .and(body_json(json!({ "status": "cancelling" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 501 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        client.cancel_build(501).await.unwrap();
     }
 
     #[test]

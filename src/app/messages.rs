@@ -188,6 +188,13 @@ impl App {
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::BuildUpdated { id, result } => match result {
+                Ok(()) => {
+                    tracing::info!(id, "pipeline run updated");
+                    self.reload_only(&[Load::Builds]);
+                }
+                Err(err) => self.report_error(err),
+            },
             Message::Connected(Err(err)) => self.fail(err, Retry::Continue),
             Message::PullRequestDetails { id, result } => {
                 if self.detail.as_ref().is_some_and(|d| d.is_pull_request(id)) {
@@ -284,6 +291,7 @@ impl App {
             message,
             Message::WorkItemUpdated { result: Ok(()), .. }
                 | Message::PullRequestUpdated { result: Ok(()), .. }
+                | Message::BuildUpdated { result: Ok(()), .. }
         );
         self.handle_message(message);
         if let (true, Some(label)) = (succeeded, label) {

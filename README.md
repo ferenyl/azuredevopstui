@@ -18,7 +18,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 - **Sprint overview** in the detail panel when nothing is open: the sprint dates, the work days left and your items per board column. `esc` closes an open item and brings it back.
 - **Sprint picker**: press `i` to show another sprint than the current one. See [Sprint](#sprint).
 - **Detail panel** with tabs:
-  - **Pipeline run**: pipeline, run number, branch, status, reason, times and duration.
+  - **Pipeline run**: pipeline, run number, branch, status, reason, times and duration. `e` re-runs it, queues a new run on another branch or cancels it, after a `y` / `n` confirmation.
   - **Pull request**:
     - **Overview** shows status, branches, merge status, reviewers and their votes, the linked work items (with a warning when there are none), and the description.
     - **Comments** shows the comment threads with their status (active, resolved, won't fix, closed) and file path. Select a thread with `]` / `[`, reply with `m`, and change its status with `x`. `m` without a selected thread starts a new one.
@@ -477,7 +477,7 @@ The table lists the Mocha values.
 | `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
 | `c` | Complete your PR or set auto-complete: pick the merge strategy, `space` ticks *Delete source branch*, *Transition linked work items*, *Set auto-complete* and *Bypass branch policies*, edit the merge commit message, then `enter`. A PR that is not ready starts with auto-complete ticked; if auto-complete is set, *Cancel auto-complete* is the last row. Bypassing asks `y` / `n` first. `esc` cancels and nothing is sent |
 | `v` | Vote on the PR: pick approve, approve with suggestions, wait for author, reject or reset vote, then `enter`. `esc` cancels and nothing is sent |
-| `e` | PR actions: abandon (asks `y` / `n`) or reactivate, publish or mark as draft, edit title or description, add reviewer (name or email), remove reviewer, link work item (id), then `enter`. `esc` cancels and nothing is sent |
+| `e` | Actions menu of the selected item. PR: abandon (asks `y` / `n`) or reactivate, publish or mark as draft, edit title or description, add reviewer (name or email), remove reviewer, link work item (id), then `enter`. Pipeline run: re-run on the same branch and commit, queue a new run on a branch you type (prefilled), cancel a run that is queued or running; each asks `y` / `n` first. `esc` cancels and nothing is sent |
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `y` | Copy the PR (`!1234`) or work item (`#5678`) number |
 | `Y` | Copy the link to the PR, work item or pipeline run |
