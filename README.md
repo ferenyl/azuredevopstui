@@ -463,6 +463,7 @@ The table lists the Mocha values.
 | `tab` / `shift+tab` | Next or previous detail tab |
 | `S` | Choose the sort order for the focused list |
 | `f` | Choose which work item types are shown, or on a PR, filter others' PRs |
+| `/` | Search the focused list (case-insensitive, matches the number, title and more) or a setup list of organizations, projects, teams or columns. Type to filter, `enter` keeps the filter, `esc` clears it |
 | `space` | Tick or untick an item in the type list |
 | `i` | Pick the sprint to show: type to search, `enter` selects |
 | `s` | Move a work item to another board column |

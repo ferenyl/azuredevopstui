@@ -121,6 +121,8 @@ pub struct App {
     should_quit: bool,
     /// The focused panel fills the left column, or the whole screen when it is the detail.
     pub zoomed: bool,
+    /// The left panel whose search is being typed, with its text.
+    pub search: Option<(Panel, TextInput)>,
 }
 
 impl App {
@@ -171,6 +173,7 @@ impl App {
             rx,
             should_quit: false,
             zoomed: false,
+            search: None,
         }
     }
 

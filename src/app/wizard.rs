@@ -96,6 +96,7 @@ impl App {
         self.board = None;
         self.notified = None;
         self.popup = None;
+        self.search = None;
         self.focus = Panel::Inbox;
         self.last_left = Panel::Inbox;
         self.last_updated = None;

@@ -41,11 +41,28 @@ pub fn render(frame: &mut Frame, app: &App, step: &SetupStep, area: Rect) {
         SetupStep::Failed { error, .. } => render_error(frame, app, inner, error),
         _ => {
             if let Some(selection) = step.selection() {
-                let list = List::new(selection.items.iter().map(String::as_str))
+                let list_area = match &selection.query {
+                    Some(query) => {
+                        let [query_area, list_area] =
+                            Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
+                                .areas(inner);
+                        let (before, after) = query.split();
+                        frame.render_widget(
+                            Line::from(format!("/{before}▏{after}"))
+                                .style(Style::new().fg(theme.foreground)),
+                            query_area,
+                        );
+                        list_area
+                    }
+                    None => inner,
+                };
+                let visible = selection.visible();
+                let selected = (!visible.is_empty()).then_some(selection.selected);
+                let list = List::new(visible)
                     .highlight_style(Style::new().bg(theme.selection_bg).fg(theme.selection_fg))
                     .highlight_symbol("> ");
-                let mut state = ListState::default().with_selected(Some(selection.selected));
-                frame.render_stateful_widget(list, inner, &mut state);
+                let mut state = ListState::default().with_selected(selected);
+                frame.render_stateful_widget(list, list_area, &mut state);
             }
         }
     }

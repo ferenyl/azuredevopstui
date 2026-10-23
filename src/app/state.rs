@@ -42,6 +42,15 @@ impl Detail {
         }
     }
 
+    /// What the list search matches against.
+    pub fn search_text(&self) -> String {
+        match self {
+            Self::PullRequest(pr) => pr_search_text(pr),
+            Self::WorkItem(item) => work_item_search_text(item),
+            Self::Build(build) => build_search_text(build),
+        }
+    }
+
     pub fn is_pull_request(&self, id: u32) -> bool {
         matches!(self, Self::PullRequest(_)) && self.id() == id
     }
@@ -466,6 +475,8 @@ pub struct Data {
     builds: Option<Vec<Build>>,
     /// Only list builds whose pipeline, branch or number contains this, ignoring case.
     pub build_filter: String,
+    /// Search text per left panel, by `Panel::index`; only matching rows are listed.
+    pub filters: [String; LEFT_PANELS.len()],
     /// Things to act on in my PRs, by PR id.
     pr_signals: HashMap<u32, Signals>,
     /// Work items with unanswered mentions of the user.
@@ -598,30 +609,83 @@ impl Data {
 
     pub fn len(&self, panel: Panel) -> usize {
         match panel {
-            Panel::Inbox => self.inbox.len(),
-            Panel::MyPrs => self.my_prs.as_ref().map_or(0, Vec::len),
+            Panel::Inbox => self.shown_inbox().len(),
+            Panel::MyPrs => self.shown_my_prs().map_or(0, |prs| prs.len()),
             Panel::OtherPrs => self.shown_other_prs().map_or(0, |prs| prs.len()),
-            Panel::MyWorkItems => self.my_work_items.as_ref().map_or(0, Vec::len),
-            Panel::ReadyWorkItems => self.ready_work_items.as_ref().map_or(0, Vec::len),
+            Panel::MyWorkItems => self.shown_my_work_items().map_or(0, |items| items.len()),
+            Panel::ReadyWorkItems => self.shown_ready_work_items().map_or(0, |items| items.len()),
             Panel::Builds => self.shown_builds().map_or(0, |builds| builds.len()),
             Panel::Detail => 0,
         }
     }
 
-    /// Others' PRs as listed, without approved and draft ones unless shown.
+    /// The lowercased search of `panel`, if any.
+    fn search_of(&self, panel: Panel) -> Option<String> {
+        let filter = &self.filters[panel.index()?];
+        (!filter.is_empty()).then(|| filter.to_lowercase())
+    }
+
+    /// The inbox as listed, matching the search.
+    pub fn shown_inbox(&self) -> Vec<&InboxEntry> {
+        let search = self.search_of(Panel::Inbox);
+        self.inbox
+            .iter()
+            .filter(|entry| matches_search(&search, || entry.detail.search_text()))
+            .collect()
+    }
+
+    /// My PRs as listed, matching the search.
+    pub fn shown_my_prs(&self) -> Option<Vec<&PullRequest>> {
+        let search = self.search_of(Panel::MyPrs);
+        self.my_prs.as_ref().map(|prs| {
+            prs.iter()
+                .filter(|pr| matches_search(&search, || pr_search_text(pr)))
+                .collect()
+        })
+    }
+
+    /// Others' PRs as listed, without approved and draft ones unless shown, matching the search.
     pub fn shown_other_prs(&self) -> Option<Vec<&PullRequest>> {
+        let search = self.search_of(Panel::OtherPrs);
         self.other_prs.as_ref().map(|prs| {
             prs.iter()
                 .filter(|pr| {
-                    (self.show_approved || !pr.approved) && (self.show_drafts || !pr.is_draft)
+                    (self.show_approved || !pr.approved)
+                        && (self.show_drafts || !pr.is_draft)
+                        && matches_search(&search, || pr_search_text(pr))
                 })
                 .collect()
         })
     }
 
-    /// Builds as listed, matching the build filter.
+    /// My work items as listed, matching the search.
+    pub fn shown_my_work_items(&self) -> Option<Vec<&WorkItem>> {
+        self.shown_work_items(Panel::MyWorkItems, &self.my_work_items)
+    }
+
+    /// The sprint's ready work items as listed, matching the search.
+    pub fn shown_ready_work_items(&self) -> Option<Vec<&WorkItem>> {
+        self.shown_work_items(Panel::ReadyWorkItems, &self.ready_work_items)
+    }
+
+    fn shown_work_items<'a>(
+        &self,
+        panel: Panel,
+        items: &'a Option<Vec<WorkItem>>,
+    ) -> Option<Vec<&'a WorkItem>> {
+        let search = self.search_of(panel);
+        items.as_ref().map(|items| {
+            items
+                .iter()
+                .filter(|item| matches_search(&search, || work_item_search_text(item)))
+                .collect()
+        })
+    }
+
+    /// Builds as listed, matching the build filter and the search.
     pub fn shown_builds(&self) -> Option<Vec<&Build>> {
         let filter = self.build_filter.to_lowercase();
+        let search = self.search_of(Panel::Builds);
         self.builds.as_ref().map(|builds| {
             builds
                 .iter()
@@ -633,6 +697,7 @@ impl Data {
                     ]
                     .iter()
                     .any(|text| text.to_lowercase().contains(&filter))
+                        && matches_search(&search, || build_search_text(build))
                 })
                 .collect()
         })
@@ -775,28 +840,24 @@ impl Data {
     }
 
     pub fn detail(&self, panel: Panel, index: usize) -> Option<Detail> {
-        let pr = |prs: &Option<Vec<PullRequest>>| {
-            prs.as_ref()?
-                .get(index)
-                .cloned()
-                .map(|pr| Detail::PullRequest(Box::new(pr)))
+        let pr = |prs: Vec<&PullRequest>| {
+            prs.get(index)
+                .map(|pr| Detail::PullRequest(Box::new((*pr).clone())))
         };
-        let item = |items: &Option<Vec<WorkItem>>| {
+        let item = |items: Vec<&WorkItem>| {
             items
-                .as_ref()?
                 .get(index)
-                .cloned()
-                .map(|item| Detail::WorkItem(Box::new(item)))
+                .map(|item| Detail::WorkItem(Box::new((*item).clone())))
         };
         match panel {
-            Panel::Inbox => self.inbox.get(index).map(|entry| entry.detail.clone()),
-            Panel::MyPrs => pr(&self.my_prs),
-            Panel::OtherPrs => self
-                .shown_other_prs()?
+            Panel::Inbox => self
+                .shown_inbox()
                 .get(index)
-                .map(|pr| Detail::PullRequest(Box::new((*pr).clone()))),
-            Panel::MyWorkItems => item(&self.my_work_items),
-            Panel::ReadyWorkItems => item(&self.ready_work_items),
+                .map(|entry| entry.detail.clone()),
+            Panel::MyPrs => pr(self.shown_my_prs()?),
+            Panel::OtherPrs => pr(self.shown_other_prs()?),
+            Panel::MyWorkItems => item(self.shown_my_work_items()?),
+            Panel::ReadyWorkItems => item(self.shown_ready_work_items()?),
             Panel::Builds => self
                 .shown_builds()?
                 .get(index)
@@ -804,6 +865,34 @@ impl Data {
             Panel::Detail => None,
         }
     }
+}
+
+fn pr_search_text(pr: &PullRequest) -> String {
+    format!(
+        "!{} {} {} {}",
+        pr.pull_request_id, pr.title, pr.repository.name, pr.created_by.display_name
+    )
+}
+
+fn work_item_search_text(item: &WorkItem) -> String {
+    format!(
+        "#{} {} {} {}",
+        item.id, item.fields.title, item.fields.work_item_type, item.fields.state
+    )
+}
+
+fn build_search_text(build: &Build) -> String {
+    format!(
+        "{} {} {}",
+        build.definition.name, build.source_branch, build.build_number
+    )
+}
+
+/// `search` is lowercased; no search matches everything.
+fn matches_search(search: &Option<String>, text: impl FnOnce() -> String) -> bool {
+    search
+        .as_deref()
+        .is_none_or(|search| text().to_lowercase().contains(search))
 }
 
 fn sort_pull_requests(prs: &mut [PullRequest], sort: PrSort) {
@@ -917,6 +1006,69 @@ mod tests {
             sprint_name: Some("Sprint 1".into()),
             ..Default::default()
         }
+    }
+
+    fn search(data: &mut Data, panel: Panel, text: &str) {
+        data.filters[panel.index().unwrap()] = text.into();
+    }
+
+    #[test]
+    fn search_narrows_every_list_and_len_detail_and_shown_agree() {
+        let mut data = data();
+        data.ready_work_items = Some(vec![work_item(11, "Other story", "Bug", "New")]);
+        search(&mut data, Panel::MyPrs, "mine");
+        search(&mut data, Panel::OtherPrs, "NEWER");
+        search(&mut data, Panel::MyWorkItems, "#10 sTOry");
+        search(&mut data, Panel::ReadyWorkItems, "bug");
+        search(&mut data, Panel::Inbox, "nothing");
+
+        assert_eq!(data.len(Panel::MyPrs), 1);
+        assert_eq!(data.len(Panel::OtherPrs), 1);
+        assert_eq!(data.len(Panel::MyWorkItems), 1);
+        assert_eq!(data.len(Panel::ReadyWorkItems), 1);
+        assert_eq!(data.len(Panel::Inbox), 0);
+        assert!(
+            matches!(data.detail(Panel::OtherPrs, 0), Some(Detail::PullRequest(pr)) if pr.pull_request_id == 3)
+        );
+        assert!(data.detail(Panel::OtherPrs, 1).is_none());
+        assert_eq!(data.shown_my_prs().unwrap().len(), data.len(Panel::MyPrs));
+    }
+
+    #[test]
+    fn search_matches_the_number_and_work_item_type_and_state() {
+        let mut data = data();
+
+        search(&mut data, Panel::OtherPrs, "!2");
+        assert_eq!(data.len(Panel::OtherPrs), 1);
+        search(&mut data, Panel::MyWorkItems, "user story");
+        assert_eq!(data.len(Panel::MyWorkItems), 1);
+        search(&mut data, Panel::MyWorkItems, "closed");
+        assert_eq!(data.len(Panel::MyWorkItems), 0);
+        search(&mut data, Panel::MyWorkItems, "");
+        assert_eq!(data.len(Panel::MyWorkItems), 1);
+    }
+
+    #[test]
+    fn search_on_builds_combines_with_the_pipeline_filter() {
+        let build = |id: u32, name: &str| -> Build {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "buildNumber": id.to_string(), "status": "completed",
+                "definition": { "id": id, "name": name }, "sourceBranch": "refs/heads/main"
+            }))
+            .unwrap()
+        };
+        let mut data = Data::default();
+        data.set_builds(vec![
+            build(1, "api-ci"),
+            build(2, "web-ci"),
+            build(3, "web-cd"),
+        ]);
+
+        search(&mut data, Panel::Builds, "web");
+        assert_eq!(data.len(Panel::Builds), 2);
+        data.build_filter = "cd".into();
+        assert_eq!(data.len(Panel::Builds), 1);
+        assert!(matches!(data.detail(Panel::Builds, 0), Some(Detail::Build(b)) if b.id == 3));
     }
 
     #[test]
