@@ -109,6 +109,8 @@ pub struct App {
     tx: UnboundedSender<Message>,
     rx: UnboundedReceiver<Message>,
     should_quit: bool,
+    /// The focused panel fills the left column, or the whole screen when it is the detail.
+    pub zoomed: bool,
 }
 
 impl App {
@@ -154,6 +156,7 @@ impl App {
             tx,
             rx,
             should_quit: false,
+            zoomed: false,
         }
     }
 
@@ -192,6 +195,14 @@ impl App {
         match self.focus.index() {
             Some(index) => self.data.detail(self.focus, self.selections[index]),
             None => self.detail.clone(),
+        }
+    }
+
+    /// The focused left panel, or the one focus returns to from the detail.
+    pub fn left_focus(&self) -> Panel {
+        match self.focus {
+            Panel::Detail => self.last_left,
+            panel => panel,
         }
     }
 

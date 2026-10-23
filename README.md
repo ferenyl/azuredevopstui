@@ -370,6 +370,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
 | `theme` | `mocha` | Color preset: `mocha`, `light` or `terminal`. See [Colors](#colors). |
 | `colors` | none | Overrides for single colors of the preset. See [Colors](#colors). |
+| `layout.left_percent` | `25` | Width of the left column in percent of the screen, from 15 to 60. It is never narrower than 32 columns, up to half the screen. |
 
 ### Others' PRs filter
 
@@ -452,6 +453,7 @@ The table lists the Mocha values.
 | `ctrl+j` / `ctrl+k`, `ctrl+↓` / `ctrl+↑` | Previous or next box in the left column |
 | `ctrl+l` / `ctrl+h`, `ctrl+→` / `ctrl+←` | Switch between the left column and the detail panel |
 | `enter` | Open the selected item in the detail panel. On a PR's Files tab, show the selected file's diff |
+| `z` | Zoom: the focused box fills the left column, or the detail panel fills the screen. `z` again or `esc` restores. On short terminals only the focused box in the left column is expanded; the others show just their title |
 | `tab` / `shift+tab` | Next or previous detail tab |
 | `S` | Choose the sort order for the focused list |
 | `f` | Choose which work item types are shown, or on a PR, filter others' PRs |

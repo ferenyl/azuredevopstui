@@ -1,4 +1,5 @@
 mod build_detail;
+pub mod layout;
 mod popup;
 mod pr_detail;
 mod pr_files;
@@ -19,8 +20,8 @@ use ratatui_image::StatefulImage;
 
 use crate::api::{PullRequest, ReviewSignals, WorkItem};
 use crate::app::{
-    App, Detail, DetailInfo, DetailTab, InboxEntry, LEFT_PANELS, Panel, Popup, Screen, Selection,
-    Signals, SortKind, TextTarget,
+    App, Detail, DetailInfo, DetailTab, InboxEntry, Panel, Popup, Screen, Selection, Signals,
+    SortKind, TextTarget,
 };
 use crate::images::{ImageState, file_name, image_marker};
 use crate::rich_text::{Marks, RichText};
@@ -42,16 +43,13 @@ pub fn render(frame: &mut Frame, app: &App) {
         return;
     }
 
-    let [left, right] =
-        Layout::horizontal([Constraint::Percentage(25), Constraint::Percentage(75)]).areas(main);
-    let left_areas =
-        Layout::vertical([Constraint::Ratio(1, LEFT_PANELS.len() as u32); LEFT_PANELS.len()])
-            .split(left);
-
-    for (panel, area) in LEFT_PANELS.iter().zip(left_areas.iter()) {
-        render_panel(frame, app, *panel, *area);
+    let areas = layout::layout(app, main);
+    for (panel, area) in areas.panels {
+        render_panel(frame, app, panel, area);
     }
-    render_panel(frame, app, Panel::Detail, right);
+    if let Some(detail) = areas.detail {
+        render_panel(frame, app, Panel::Detail, detail);
+    }
     match &app.popup {
         Some(Popup::Column(picker)) => {
             let title = if picker.unassign {
@@ -250,7 +248,11 @@ fn render_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
             SortKind::PullRequests => config.sort.pull_requests.label(),
             SortKind::WorkItems => config.sort.work_items.label(),
         };
-        title.push_str(&format!(" · {sort}"));
+        let sort = format!(" · {sort}");
+        // Narrow panels drop the sort label before the count gets cut.
+        if text_width(&title) + text_width(&sort) + 3 <= usize::from(area.width) {
+            title.push_str(&sort);
+        }
     }
     title.push(' ');
     let block = Block::bordered()
@@ -1007,6 +1009,21 @@ mod tests {
         app.data.my_work_items = Some(vec![work_item(10, "Order list", "User Story", "Active")]);
         app.data.sprint_name = Some("Sprint 41".into());
         app
+    }
+
+    #[test]
+    fn narrow_panel_title_drops_the_sort_label() {
+        let mut app = main_app();
+        app.data.sprint_name = Some("Sprint 41 is a long one".into());
+
+        let screen = screen(&app);
+
+        let ready = screen
+            .lines()
+            .find(|line| line.contains("Ready – Sprint 41 is a long one"))
+            .unwrap();
+        assert!(!ready.contains("priority"), "{ready}");
+        assert!(screen.contains(" My work items (1) · priority "));
     }
 
     fn pr_details() -> PullRequestDetails {

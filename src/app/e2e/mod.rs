@@ -7,6 +7,7 @@ mod changes;
 mod completion;
 mod flows;
 mod inbox;
+mod layout;
 mod lifecycle;
 mod links;
 mod notifications;
@@ -297,8 +298,12 @@ impl Harness {
 
     /// The rendered screen as text, one line per row.
     pub fn screen(&self) -> String {
-        let mut terminal =
-            Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
+        self.screen_at(SCREEN_WIDTH, SCREEN_HEIGHT)
+    }
+
+    /// The screen rendered at the given terminal size.
+    pub fn screen_at(&self, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
         terminal
             .draw(|frame| crate::ui::render(frame, &self.app))
             .expect("render");
