@@ -6,11 +6,13 @@
 mod changes;
 mod completion;
 mod editor;
+mod feedback;
 mod flows;
 mod inbox;
 mod layout;
 mod lifecycle;
 mod links;
+mod mouse;
 mod navigation;
 mod notifications;
 mod scroll;
@@ -26,7 +28,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use serde::Deserialize;
@@ -308,6 +310,17 @@ impl Harness {
 
     pub fn ctrl(&mut self, c: char) {
         self.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+    }
+
+    /// Sends a mouse event at the given cell of the screen as drawn now.
+    pub fn mouse(&mut self, kind: MouseEventKind, column: u16, row: u16) {
+        self.screen();
+        self.app.handle_mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
     }
 
     pub fn type_text(&mut self, text: &str) {

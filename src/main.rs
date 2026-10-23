@@ -62,7 +62,7 @@ async fn run() -> anyhow::Result<()> {
                 .inspect_err(|err| tracing::info!("no terminal graphics: {err}"))
                 .ok()
         });
-    let mut modes = TerminalModes::enable();
+    let mut modes = TerminalModes::enable(config.as_ref().is_none_or(|config| config.mouse));
     let result = app::App::new(config, picker)
         .run(&mut terminal, &mut modes)
         .await;

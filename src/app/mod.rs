@@ -1,5 +1,6 @@
 mod action;
 mod actions;
+mod activity;
 #[cfg(test)]
 mod e2e;
 mod editor;
@@ -9,6 +10,7 @@ mod input;
 mod loads;
 mod message;
 mod messages;
+mod mouse;
 mod popups;
 mod refresh;
 mod setup;
@@ -20,7 +22,9 @@ mod toolbar;
 mod wizard;
 
 pub use action::{Action, HELP};
+pub use activity::Activity;
 pub use files::Files;
+pub use mouse::{HitAreas, PanelHit, PickerHit};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
     ColumnPicker, CompletePicker, CompleteRow, ConfirmAction, Data, Detail, DetailInfo, DetailTab,
@@ -123,6 +127,10 @@ pub struct App {
     pub zoomed: bool,
     /// The left panel whose search is being typed, with its text.
     pub search: Option<(Panel, TextInput)>,
+    /// Where panels, tabs and the open list were drawn last frame, for mouse hit testing.
+    pub areas: RefCell<HitAreas>,
+    /// Mutations in flight and the history of errors.
+    pub activity: Activity,
 }
 
 impl App {
@@ -174,6 +182,8 @@ impl App {
             should_quit: false,
             zoomed: false,
             search: None,
+            areas: RefCell::default(),
+            activity: Activity::default(),
         }
     }
 
@@ -184,7 +194,7 @@ impl App {
     ) -> anyhow::Result<()> {
         self.authenticate();
         let mut events = EventStream::new();
-        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        let mut ticker = tokio::time::interval(Duration::from_millis(200));
         while !self.should_quit {
             let frame = terminal.draw(|frame| crate::ui::render(frame, &self))?;
             let stale = stale_cells(frame.buffer, &self.images.stale_areas());
@@ -197,6 +207,7 @@ impl App {
                 event = events.next() => match event {
                     Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => self.handle_key(key),
                     Some(Ok(Event::Paste(text))) => self.handle_paste(&text),
+                    Some(Ok(Event::Mouse(mouse))) => self.handle_mouse(mouse),
                     Some(Ok(_)) => {}
                     Some(Err(err)) => return Err(err.into()),
                     None => break,
@@ -278,6 +289,25 @@ impl App {
         tokio::spawn(async move {
             let _ = tx.send(future.await);
         });
+    }
+
+    /// Like [`App::spawn`] for a change; the toolbar shows `label` until the result arrives.
+    fn spawn_action<F>(&mut self, label: String, future: F)
+    where
+        F: Future<Output = Message> + Send + 'static,
+    {
+        let id = self.activity.start(label);
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let message = Box::new(future.await);
+            let _ = tx.send(Message::ActionDone { id, message });
+        });
+    }
+
+    /// Shows `text` in the toolbar until the next refresh and keeps it in the error history.
+    pub(super) fn set_error(&mut self, text: String) {
+        self.activity.push_error(text.clone());
+        self.error = Some(text);
     }
 
     /// Spawns the request for `load`, superseding one in flight; only its response is handled.

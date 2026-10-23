@@ -63,7 +63,7 @@ impl App {
                     *text = TextInput::new(edited);
                 }
             }
-            Err(err) => self.error = Some(format!("editor failed: {err:#}")),
+            Err(err) => self.set_error(format!("editor failed: {err:#}")),
         }
     }
 }

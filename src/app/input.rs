@@ -218,6 +218,7 @@ impl App {
             | Action::HalfPageDown
             | Action::HalfPageUp
             | Action::JumpToPanel(_)
+            | Action::Errors
                 if !matches!(self.screen, Screen::Main) => {}
             Action::Search => self.start_search(),
             Action::SwitchProject => self.switch_project(),
@@ -272,6 +273,7 @@ impl App {
             Action::ThreadStatus => self.open_thread_status(),
             Action::PrActions => self.open_pr_actions(),
             Action::Zoom => self.zoomed = !self.zoomed,
+            Action::Errors => self.popup = Some(Popup::Errors { first: 0 }),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);
@@ -365,7 +367,11 @@ impl App {
         } else {
             (index + tabs.len() - 1) % tabs.len()
         };
-        self.detail_tab = tabs[index];
+        self.select_tab(tabs[index]);
+    }
+
+    pub(super) fn select_tab(&mut self, tab: DetailTab) {
+        self.detail_tab = tab;
         self.detail_scroll = 0;
         self.detail_thread = None;
         self.scroll_to_thread = false;

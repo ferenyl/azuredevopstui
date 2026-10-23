@@ -4,7 +4,7 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, List, ListState, Paragraph, Wrap};
 
-use crate::app::{App, SetupStep, TextInput};
+use crate::app::{App, PickerHit, SetupStep, TextInput};
 
 pub fn render(frame: &mut Frame, app: &App, step: &SetupStep, area: Rect) {
     let theme = &app.theme;
@@ -63,6 +63,12 @@ pub fn render(frame: &mut Frame, app: &App, step: &SetupStep, area: Rect) {
                     .highlight_symbol("> ");
                 let mut state = ListState::default().with_selected(selected);
                 frame.render_stateful_widget(list, list_area, &mut state);
+                app.areas.borrow_mut().picker = Some(PickerHit {
+                    rows: list_area,
+                    offset: state.offset(),
+                    len: selection.visible().len(),
+                    selected: selection.selected,
+                });
             }
         }
     }

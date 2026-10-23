@@ -31,6 +31,17 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_default();
     // Status sits on the right so it stays visible when the actions overflow.
     let mut status = Vec::new();
+    if let Some((label, others)) = app.activity.latest() {
+        let more = if others > 0 {
+            format!(" +{others}")
+        } else {
+            String::new()
+        };
+        status.push(Span::styled(
+            format!("{} {label}…{more}  ", app.activity.spinner()),
+            Style::new().fg(theme.toolbar_key),
+        ));
+    }
     if let Some(error) = &app.error {
         status.push(Span::styled(
             format!("{error}  "),
@@ -41,6 +52,16 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         status.push(Span::styled(
             format!("{notice}  "),
             Style::new().fg(theme.build_succeeded),
+        ));
+    }
+    let errors = app.activity.error_count();
+    if errors > 0 {
+        status.push(Span::styled(
+            format!(
+                "[{}] errors ({errors})  ",
+                crate::app::Action::Errors.key_label()
+            ),
+            Style::new().fg(theme.toolbar_key),
         ));
     }
     status.push(Span::styled(user, Style::new().fg(theme.muted)));

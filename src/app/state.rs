@@ -157,6 +157,10 @@ pub enum Popup {
         pr: Box<PullRequest>,
         selection: Selection,
     },
+    /// The recent errors, newest first, starting at the error with index `first`.
+    Errors {
+        first: usize,
+    },
 }
 
 /// An entry of the pull request menu.

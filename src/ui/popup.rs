@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListState, Paragraph, Wrap};
 use unicode_width::UnicodeWidthChar;
 
-use crate::app::{App, HELP, Selection, TextInput};
+use crate::app::{App, HELP, PickerHit, Selection, TextInput};
 
 const KEY_WIDTH: usize = 15;
 
@@ -40,6 +40,46 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
+pub fn render_errors(frame: &mut Frame, app: &App, first: usize, area: Rect) {
+    const WIDTH: u16 = 80;
+    let theme = &app.theme;
+    let width = WIDTH.min(area.width);
+    let errors: Vec<String> = app
+        .activity
+        .errors()
+        .skip(first)
+        .map(|(at, text)| format!("{} {text}", at.format("%H:%M:%S")))
+        .collect();
+    let rows: u16 = errors.iter().map(|error| wrapped_rows(error, width)).sum();
+    let height = rows
+        .max(1)
+        .min(area.height.saturating_sub(4).max(1))
+        .saturating_add(2);
+    let area = centered(area, width, height);
+
+    let lines: Vec<Line> = if errors.is_empty() {
+        vec![Line::styled("no errors", Style::new().fg(theme.muted))]
+    } else {
+        errors.into_iter().map(Line::from).collect()
+    };
+    let title = format!(
+        " Errors ({}) · j/k: scroll · esc: close ",
+        app.activity.error_count()
+    );
+    let block = Block::bordered()
+        .title(title)
+        .title_style(Style::new().fg(theme.title))
+        .border_style(Style::new().fg(theme.border_focused))
+        .style(Style::new().bg(theme.background).fg(theme.error));
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
 /// Rows `text` takes inside a bordered popup of `width` columns.
 fn wrapped_rows(text: &str, width: u16) -> u16 {
     text.split('\n')
@@ -72,6 +112,7 @@ pub fn render_picker(frame: &mut Frame, app: &App, title: &str, selection: &Sele
         .title_style(Style::new().fg(theme.title))
         .border_style(Style::new().fg(theme.border_focused))
         .style(Style::new().bg(theme.background).fg(theme.foreground));
+    let rows = block.inner(area);
     let list = List::new(selection.items.iter().map(String::as_str))
         .block(block)
         .highlight_style(Style::new().bg(theme.selection_bg).fg(theme.selection_fg))
@@ -79,6 +120,12 @@ pub fn render_picker(frame: &mut Frame, app: &App, title: &str, selection: &Sele
     let mut state = ListState::default().with_selected(Some(selection.selected));
     frame.render_widget(Clear, area);
     frame.render_stateful_widget(list, area, &mut state);
+    app.areas.borrow_mut().picker = Some(PickerHit {
+        rows,
+        offset: state.offset(),
+        len: selection.items.len(),
+        selected: selection.selected,
+    });
 }
 
 pub fn render_confirm(frame: &mut Frame, app: &App, prompt: &str, area: Rect) {

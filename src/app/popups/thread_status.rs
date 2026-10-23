@@ -87,7 +87,8 @@ impl App {
             return;
         };
         let reload = self.reload_after_thread_change(&pr);
-        self.spawn(async move {
+        let label = format!("setting a thread status on !{}", pr.pull_request_id);
+        self.spawn_action(label, async move {
             let result = api.set_thread_status(&pr, thread_id, status).await;
             Message::PullRequestUpdated {
                 id: pr.pull_request_id,

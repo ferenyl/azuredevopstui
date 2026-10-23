@@ -374,6 +374,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `theme` | `mocha` | Color preset: `mocha`, `light` or `terminal`. See [Colors](#colors). |
 | `colors` | none | Overrides for single colors of the preset. See [Colors](#colors). |
 | `layout.left_percent` | `25` | Width of the left column in percent of the screen, from 15 to 60. It is never narrower than 32 columns, up to half the screen. |
+| `mouse` | `true` | Capture the mouse: click a box, row or tab, scroll with the wheel. Set it to `false` to leave the mouse to the terminal. See [Mouse](#mouse). |
 
 ### Others' PRs filter
 
@@ -481,6 +482,7 @@ The table lists the Mocha values.
 | `Y` | Copy the link to the PR, work item or pipeline run |
 | `l` / `L` | Select the next / previous link in the description or comments. While one is selected, `o` opens it and `Y` copies it. Switching tab or item clears the selection |
 | `r` | Reload everything |
+| `E` | Show the last 50 errors, newest first, with the time. `j` / `k` scroll, `esc` closes. The toolbar shows `[E] errors (n)` once there are some. Changes (assign, move, tag, comment, vote and so on) show a spinner and `<action>…` in the toolbar while they run, and `<action> ✓` when done; a failure stays in the error list after a reload clears it from the toolbar |
 | `T` | Enter a new PAT |
 | `P` | Change organization, project or team: the setup opens with the current values preselected. `esc` goes back one step, and from the first step returns to the running view with nothing changed. The new config is saved after you pick the ready column; your other settings are kept |
 | `?` | Show all keys |
@@ -488,6 +490,20 @@ The table lists the Mocha values.
 | `q`, `ctrl+c` | Quit |
 
 Actions apply to the selected row in the focused list. When the detail panel has focus, they apply to the item shown there. The toolbar always shows the keys that work in the current context.
+
+## Mouse
+
+| Action | Effect |
+|---|---|
+| Click a box title or row | Focus the box and select the row. Clicking the selected row again opens it, like `enter` |
+| Click in the detail panel | Focus the detail panel |
+| Click a detail tab | Show that tab |
+| Wheel over a box | Move the selection in that box |
+| Wheel over the detail panel | Scroll three rows |
+| Click a row in a popup or a setup list | Select it and confirm, like `enter` |
+| Wheel in a popup or a setup list | Move the selection |
+
+Clicks outside an open popup are ignored. While the mouse is captured the terminal cannot select text; hold `shift` (most terminals) while dragging, or set `"mouse": false`.
 
 ## PR markers
 
