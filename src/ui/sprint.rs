@@ -35,11 +35,17 @@ pub fn overview(app: &App, width: u16) -> Vec<Line<'static>> {
     if !columns.is_empty() {
         lines.push(Line::default());
         lines.push(heading(app, "My items per column", width));
-        let name_width = columns.iter().map(|(name, _)| name.chars().count()).max();
+        let name_width = columns
+            .iter()
+            .map(|(name, _)| super::text_width(name))
+            .max();
         let name_width = name_width.unwrap_or(0);
         for (name, count) in columns {
             lines.push(Line::from(vec![
-                Span::raw(format!("  {name:<name_width$}  {count:>3}  ")),
+                Span::raw(format!(
+                    "  {}  {count:>3}  ",
+                    super::pad_right(&name, name_width)
+                )),
                 Span::styled(
                     "█".repeat(count.min(MAX_BAR)),
                     Style::new().fg(app.theme.border_focused),

@@ -11,6 +11,7 @@ mod links;
 mod notifications;
 mod threads;
 mod vote;
+mod wide_chars;
 
 use std::fs;
 use std::path::Path;
