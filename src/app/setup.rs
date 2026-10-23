@@ -20,7 +20,11 @@ pub enum SetupStep {
         project: String,
         selection: Selection,
     },
-    SelectReadyColumn(Selection),
+    /// Last step; `config` is saved once a column is picked.
+    SelectReadyColumn {
+        config: Box<Config>,
+        selection: Selection,
+    },
     Failed {
         error: String,
         retry: Retry,
@@ -32,6 +36,7 @@ pub enum Retry {
     Continue,
     Projects(String),
     Teams(String, String),
+    BoardColumns(Box<Config>),
     SaveConfig(Box<Config>),
 }
 
@@ -44,7 +49,7 @@ impl SetupStep {
             Self::SelectOrganization(_) => "Select organization",
             Self::SelectProject { .. } => "Select project",
             Self::SelectTeam { .. } => "Select team",
-            Self::SelectReadyColumn(_) => "Select ready column",
+            Self::SelectReadyColumn { .. } => "Select ready column",
             Self::Failed { .. } => "Setup failed",
         }
     }
@@ -54,7 +59,7 @@ impl SetupStep {
             Self::SelectOrganization(selection)
             | Self::SelectProject { selection, .. }
             | Self::SelectTeam { selection, .. }
-            | Self::SelectReadyColumn(selection) => Some(selection),
+            | Self::SelectReadyColumn { selection, .. } => Some(selection),
             _ => None,
         }
     }
@@ -64,7 +69,7 @@ impl SetupStep {
             Self::SelectOrganization(selection)
             | Self::SelectProject { selection, .. }
             | Self::SelectTeam { selection, .. }
-            | Self::SelectReadyColumn(selection) => Some(selection),
+            | Self::SelectReadyColumn { selection, .. } => Some(selection),
             _ => None,
         }
     }
@@ -109,6 +114,13 @@ impl Selection {
         Self { items, selected: 0 }
     }
 
+    /// Selects `item` if listed.
+    pub fn preselect(&mut self, item: &str) {
+        if let Some(index) = self.items.iter().position(|i| i == item) {
+            self.selected = index;
+        }
+    }
+
     pub fn next(&mut self) {
         if self.selected + 1 < self.items.len() {
             self.selected += 1;
@@ -141,6 +153,16 @@ mod tests {
         selection.next();
         selection.next();
         assert_eq!(selection.current(), Some("b"));
+    }
+
+    #[test]
+    fn preselect_picks_a_listed_item_only() {
+        let mut selection = selection(&["a", "b", "c"]);
+
+        selection.preselect("c");
+        assert_eq!(selection.current(), Some("c"));
+        selection.preselect("missing");
+        assert_eq!(selection.current(), Some("c"));
     }
 
     #[test]
@@ -183,7 +205,10 @@ mod tests {
                 project: "p".into(),
                 selection: selection(&["t"]),
             },
-            SetupStep::SelectReadyColumn(selection(&["Ready"])),
+            SetupStep::SelectReadyColumn {
+                config: Box::new(crate::test_support::config()),
+                selection: selection(&["Ready"]),
+            },
         ];
 
         for step in &mut steps {
