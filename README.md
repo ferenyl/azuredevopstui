@@ -478,6 +478,7 @@ The table lists the Mocha values.
 | `Y` | Copy the link to the PR, work item or pipeline run |
 | `l` / `L` | Select the next / previous link in the description or comments. While one is selected, `o` opens it and `Y` copies it. Switching tab or item clears the selection |
 | `r` | Reload everything |
+| `E` | Show the last 50 errors, newest first, with the time. `j` / `k` scroll, `esc` closes. The toolbar shows `[E] errors (n)` once there are some. Changes (assign, move, tag, comment, vote and so on) show a spinner and `<action>…` in the toolbar while they run, and `<action> ✓` when done; a failure stays in the error list after a reload clears it from the toolbar |
 | `T` | Enter a new PAT |
 | `?` | Show all keys |
 | `esc` | Close a popup or cancel, go back from a diff to the file list, or close the open item to show the sprint overview |

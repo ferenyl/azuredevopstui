@@ -90,6 +90,11 @@ pub enum Message {
     },
     /// A notification closed; holds the item URL when its open action was clicked.
     Notified(Option<String>),
+    /// The result of a change started with `App::spawn_action`.
+    ActionDone {
+        id: u64,
+        message: Box<Message>,
+    },
     /// The response to a request started with `App::spawn_load`.
     Loaded {
         load: Load,

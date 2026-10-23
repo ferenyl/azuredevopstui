@@ -6,6 +6,7 @@
 mod changes;
 mod completion;
 mod editor;
+mod feedback;
 mod flows;
 mod inbox;
 mod layout;

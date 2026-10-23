@@ -1,5 +1,6 @@
 mod action;
 mod actions;
+mod activity;
 #[cfg(test)]
 mod e2e;
 mod editor;
@@ -20,6 +21,7 @@ mod toolbar;
 mod wizard;
 
 pub use action::{Action, HELP};
+pub use activity::Activity;
 pub use files::Files;
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
@@ -117,6 +119,8 @@ pub struct App {
     should_quit: bool,
     /// The focused panel fills the left column, or the whole screen when it is the detail.
     pub zoomed: bool,
+    /// Mutations in flight and the history of errors.
+    pub activity: Activity,
 }
 
 impl App {
@@ -165,6 +169,7 @@ impl App {
             rx,
             should_quit: false,
             zoomed: false,
+            activity: Activity::default(),
         }
     }
 
@@ -175,7 +180,7 @@ impl App {
     ) -> anyhow::Result<()> {
         self.authenticate();
         let mut events = EventStream::new();
-        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        let mut ticker = tokio::time::interval(Duration::from_millis(200));
         while !self.should_quit {
             let frame = terminal.draw(|frame| crate::ui::render(frame, &self))?;
             let stale = stale_cells(frame.buffer, &self.images.stale_areas());
@@ -269,6 +274,25 @@ impl App {
         tokio::spawn(async move {
             let _ = tx.send(future.await);
         });
+    }
+
+    /// Like [`App::spawn`] for a change; the toolbar shows `label` until the result arrives.
+    fn spawn_action<F>(&mut self, label: String, future: F)
+    where
+        F: Future<Output = Message> + Send + 'static,
+    {
+        let id = self.activity.start(label);
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let message = Box::new(future.await);
+            let _ = tx.send(Message::ActionDone { id, message });
+        });
+    }
+
+    /// Shows `text` in the toolbar until the next refresh and keeps it in the error history.
+    pub(super) fn set_error(&mut self, text: String) {
+        self.activity.push_error(text.clone());
+        self.error = Some(text);
     }
 
     /// Spawns the request for `load`, superseding one in flight; only its response is handled.

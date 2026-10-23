@@ -39,7 +39,8 @@ impl App {
             return;
         };
         let user_id = user.id.clone();
-        self.spawn(async move {
+        let label = format!("voting on !{}", pr.pull_request_id);
+        self.spawn_action(label, async move {
             let result = api.vote(&pr, &user_id, vote).await;
             Message::PullRequestUpdated {
                 id: pr.pull_request_id,
