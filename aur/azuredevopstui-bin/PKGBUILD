@@ -1,0 +1,26 @@
+# Maintainer: Ferenyl <ahlback.johan@gmail.com>
+
+pkgname=azuredevopstui-bin
+_pkgname=azuredevopstui
+pkgver=0.1.15
+pkgrel=1
+pkgdesc='Terminal UI for your Azure DevOps pull requests, work items and sprint board (prebuilt binary)'
+arch=('x86_64')
+url='https://github.com/ferenyl/azuredevopstui'
+license=('GPL-3.0-or-later')
+depends=('glibc' 'libgcc')
+optdepends=('azure-cli: sign in with az login'
+            'org.freedesktop.secrets: store a personal access token in the system keyring'
+            'xdg-utils: open links in the browser')
+provides=("$_pkgname=$pkgver")
+conflicts=("$_pkgname")
+options=('!debug')
+_dist="$_pkgname-v$pkgver-x86_64-unknown-linux-gnu"
+source_x86_64=("$_dist.tar.gz::$url/releases/download/v$pkgver/$_dist.tar.gz")
+sha256sums_x86_64=('655d80ab8bc3a3e5ba1aa8fb56ae5d134e365481a71919a8e64e8db65fd05a2b')
+
+package() {
+  cd "$_dist"
+  install -Dm0755 -t "$pkgdir/usr/bin/" "$_pkgname"
+  install -Dm0644 -t "$pkgdir/usr/share/doc/$_pkgname/" README.md
+}

@@ -114,6 +114,15 @@ Copy-Item azuredevopstui-<version>-x86_64-pc-windows-msvc\azuredevopstui.exe "$e
 
 Then add `%LOCALAPPDATA%\Programs\azuredevopstui` to your user `PATH`.
 
+### Arch Linux (AUR)
+
+```sh
+paru -S azuredevopstui-bin   # prebuilt release binary
+paru -S azuredevopstui       # builds from source
+```
+
+Use any AUR helper. The PKGBUILDs live in [`aur/`](aur) in this repository.
+
 ### Install from crates.io
 
 ```sh

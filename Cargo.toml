@@ -8,7 +8,7 @@ repository = "https://github.com/ferenyl/azuredevopstui"
 readme = "README.md"
 keywords = ["azure-devops", "tui", "ratatui", "pull-requests", "work-items"]
 categories = ["command-line-utilities"]
-exclude = [".github", "projectdescription.md"]
+exclude = [".github", "projectdescription.md", "aur"]
 
 [dependencies]
 anyhow = "1.0.104"
