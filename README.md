@@ -183,7 +183,8 @@ The tests are unit tests next to the code (`#[cfg(test)] mod tests`). API calls 
 
 `.github/workflows/release.yml` runs when a GitHub release is published. It first runs [CI](#continuous-integration), then:
 
-1. Create a release on GitHub with a new tag, for example `v0.2.0`. You can do it in the web UI or run `gh release create v0.2.0 --title v0.2.0 --notes ""`.
+0. Bump `version` in `Cargo.toml`, run `cargo check` to update `Cargo.lock`, and merge that change (for example in a PR titled "Release v0.2.0").
+1. Create a release on GitHub with a new tag on that commit, for example `v0.2.0`. You can do it in the web UI or run `gh release create v0.2.0 --title v0.2.0 --notes ""`.
 2. The workflow adds every commit since the previous release tag to the release notes, under *Changes since \<previous tag\>*. Merge commits are skipped. For the first release, every commit is listed. Text you wrote in the release yourself is kept above the list.
 3. It builds the release binaries for Linux and Windows and attaches them to the release:
    - `azuredevopstui-<tag>-x86_64-unknown-linux-gnu.tar.gz`
@@ -196,7 +197,7 @@ Re-running the workflow replaces the assets and the changes list; it does not du
 
 Before you create a release, make sure that:
 
-- **The tag is a version.** The workflow takes the version from the tag, so you don't need to change `Cargo.toml` yourself. Before it builds and publishes, it writes the tag without the leading `v` into `version` in `Cargo.toml` and `Cargo.lock`, so tag `v0.2.0` gives version `0.2.0`. The tag must look like `v1.2.3` or `1.2.3`, optionally with a pre-release suffix such as `v1.2.3-beta.1`; otherwise the workflow stops. The change is only made inside the workflow and is never committed, so `version` in the repo can stay at its old value.
+- **The tag matches `Cargo.toml`.** The tag must be `v` plus the `version` in `Cargo.toml`, so `version = "0.2.0"` needs tag `v0.2.0`. It must look like `v1.2.3` or `1.2.3`, optionally with a pre-release suffix such as `v1.2.3-beta.1`. Otherwise the workflow stops before it builds. The workflow never changes `Cargo.toml`, so local and `cargo install --git` builds report the same version as the release.
 - **The crates.io token is set up.** You only do this once:
   1. Log in to [crates.io](https://crates.io) with GitHub.
   2. Verify your email address under *Account Settings*.
