@@ -36,6 +36,7 @@ pub enum Action {
     PrevThread,
     ThreadStatus,
     PrActions,
+    Zoom,
     Top,
     Bottom,
     PageDown,
@@ -57,6 +58,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::HalfPageDown,
             Action::JumpToPanel(1),
             Action::FocusRight,
+            Action::Zoom,
             Action::NextTab,
             Action::Confirm,
             Action::OpenInBrowser,
@@ -142,6 +144,7 @@ impl Action {
             (KeyCode::Char('['), _) => Some(Self::PrevThread),
             (KeyCode::Char('x'), _) => Some(Self::ThreadStatus),
             (KeyCode::Char('e'), _) => Some(Self::PrActions),
+            (KeyCode::Char('z'), _) => Some(Self::Zoom),
             _ => None,
         }
     }
@@ -182,6 +185,7 @@ impl Action {
             Self::PrevThread => "[",
             Self::ThreadStatus => "x",
             Self::PrActions => "e",
+            Self::Zoom => "z",
             Self::Top => "g/G",
             Self::Bottom => "G",
             Self::PageDown => "pgdn/pgup",
@@ -228,6 +232,7 @@ impl Action {
             Self::PrevThread => "previous thread",
             Self::ThreadStatus => "thread status",
             Self::PrActions => "PR actions",
+            Self::Zoom => "zoom",
             Self::Top => "top/bottom",
             Self::Bottom => "bottom",
             Self::PageDown => "page down/up",
@@ -310,11 +315,12 @@ mod tests {
         );
         assert_eq!(plain(KeyCode::Char(' ')), Some(Action::Toggle));
         assert_eq!(plain(KeyCode::Char('f')), Some(Action::Filter));
+        assert_eq!(plain(KeyCode::Char('z')), Some(Action::Zoom));
     }
 
     #[test]
     fn unbound_key_is_ignored() {
-        assert_eq!(plain(KeyCode::Char('z')), None);
+        assert_eq!(plain(KeyCode::Char('Z')), None);
         assert_eq!(plain(KeyCode::F(1)), None);
         assert_eq!(plain(KeyCode::Char('0')), None);
         assert_eq!(plain(KeyCode::Char('7')), None);

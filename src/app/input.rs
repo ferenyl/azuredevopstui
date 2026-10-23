@@ -68,7 +68,9 @@ impl App {
                 }) => self.screen = Screen::Main,
                 Screen::Setup(_) => self.should_quit = true,
                 Screen::Main => {
-                    if !self.close_file_diff() {
+                    if self.zoomed && self.detail.is_none() {
+                        self.zoomed = false;
+                    } else if !self.close_file_diff() {
                         self.close_detail();
                     }
                 }
@@ -137,6 +139,7 @@ impl App {
             | Action::PrevThread
             | Action::ThreadStatus
             | Action::PrActions
+            | Action::Zoom
             | Action::Top
             | Action::Bottom
             | Action::PageDown
@@ -195,6 +198,7 @@ impl App {
             }
             Action::ThreadStatus => self.open_thread_status(),
             Action::PrActions => self.open_pr_actions(),
+            Action::Zoom => self.zoomed = !self.zoomed,
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);
@@ -800,6 +804,49 @@ mod tests {
 
         assert!(!app.should_quit);
         assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn z_toggles_zoom_in_main_only() {
+        let mut app = app();
+
+        press(&mut app, KeyCode::Char('z'));
+        assert!(app.zoomed);
+        press(&mut app, KeyCode::Char('z'));
+        assert!(!app.zoomed);
+
+        let mut setup = App::new(None, None);
+        press(&mut setup, KeyCode::Char('z'));
+        assert!(!setup.zoomed);
+    }
+
+    #[test]
+    fn zoom_follows_focus() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('z'));
+
+        ctrl(&mut app, 'j');
+        assert_eq!(app.left_focus(), Panel::MyWorkItems);
+        ctrl(&mut app, 'l');
+
+        assert!(app.zoomed);
+        assert_eq!(app.focus, Panel::Detail);
+        assert_eq!(app.left_focus(), Panel::MyWorkItems);
+    }
+
+    #[test]
+    fn esc_closes_the_detail_before_unzooming() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        press(&mut app, KeyCode::Char('z'));
+
+        press(&mut app, KeyCode::Esc);
+        assert!(app.detail.is_none());
+        assert!(app.zoomed);
+
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.zoomed);
+        assert!(!app.should_quit);
     }
 
     #[test]
