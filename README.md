@@ -194,6 +194,7 @@ The tests are unit tests next to the code (`#[cfg(test)] mod tests`). API calls 
 
    Each archive contains the binary and this README.
 4. When both builds succeed, it publishes the crate to crates.io with `cargo publish --locked`.
+5. The `aur` job is **off by default**. To turn it on, set the repository variable `AUR_ENABLED` to `true` (*Settings → Secrets and variables → Actions → Variables*, or `gh variable set AUR_ENABLED --body true`) and set up the secret `AUR_SSH_PRIVATE_KEY` as described below. Until then, update the AUR by hand with the steps below. When enabled, after the builds it runs `aur/bump.sh` on the tag's version, which sets `pkgver` and `pkgrel=1` in the PKGBUILDs under `aur/`, updates the checksums and regenerates `.SRCINFO`. It attaches the result as the artifact `aur-<tag>`. If the secret `AUR_SSH_PRIVATE_KEY` is set, it also pushes both packages to the AUR, then opens a PR that copies the bumped files back into `aur/`. Merge that PR. Pre-releases (a tag with a suffix such as `-beta.1`, or a release marked as pre-release) are not packaged.
 
 Re-running the workflow replaces the assets and the changes list; it does not duplicate them. A crates.io version can only be published once, so the publish step fails on a re-run of the same version.
 
@@ -205,6 +206,17 @@ Before you create a release, make sure that:
   2. Verify your email address under *Account Settings*.
   3. Create a token under *Account Settings → API Tokens* with the scopes `publish-new` and `publish-update`.
   4. Add the token as the repository secret `CARGO_REGISTRY_TOKEN` (*Settings → Secrets and variables → Actions → New repository secret*), or run `gh secret set CARGO_REGISTRY_TOKEN`.
+- **The AUR push is set up (optional).** Without it the `aur` job only builds the artifact and says so in the log. You only do this once:
+  1. Create a key with `ssh-keygen -t ed25519 -f aur_key -C aur-release` and add `aur_key.pub` under *My Account → SSH Public Key* on [aur.archlinux.org](https://aur.archlinux.org).
+  2. Add the private key as the repository secret `AUR_SSH_PRIVATE_KEY`, for example `gh secret set AUR_SSH_PRIVATE_KEY < aur_key`.
+  3. Allow *Settings → Actions → General → Allow GitHub Actions to create and approve pull requests*, so the job can open the PR that syncs `aur/`. Without it the step only warns and you commit the artifact files yourself.
+
+To update the AUR packages by hand, for example for a release made without the secret:
+
+1. Run `aur/bump.sh X.Y.Z` (needs `pacman-contrib` and the release to exist, since it downloads the sources to compute the checksums).
+2. Check a package with `makepkg -f` and `namcap *.pkg.tar.zst` in a copy of its directory.
+3. Copy `PKGBUILD` and `.SRCINFO` into your clone of `ssh://aur@aur.archlinux.org/<package>.git`, commit and push. Do this for both `azuredevopstui` and `azuredevopstui-bin`.
+4. Commit the bumped files in `aur/` to this repo.
 
 ## Windows
 
