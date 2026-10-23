@@ -1,0 +1,19 @@
+pkgbase = azuredevopstui-bin
+	pkgdesc = Terminal UI for your Azure DevOps pull requests, work items and sprint board (prebuilt binary)
+	pkgver = 0.1.15
+	pkgrel = 1
+	url = https://github.com/ferenyl/azuredevopstui
+	arch = x86_64
+	license = GPL-3.0-or-later
+	depends = glibc
+	depends = libgcc
+	optdepends = azure-cli: sign in with az login
+	optdepends = org.freedesktop.secrets: store a personal access token in the system keyring
+	optdepends = xdg-utils: open links in the browser
+	provides = azuredevopstui=0.1.15
+	conflicts = azuredevopstui
+	options = !debug
+	source_x86_64 = azuredevopstui-v0.1.15-x86_64-unknown-linux-gnu.tar.gz::https://github.com/ferenyl/azuredevopstui/releases/download/v0.1.15/azuredevopstui-v0.1.15-x86_64-unknown-linux-gnu.tar.gz
+	sha256sums_x86_64 = 655d80ab8bc3a3e5ba1aa8fb56ae5d134e365481a71919a8e64e8db65fd05a2b
+
+pkgname = azuredevopstui-bin
