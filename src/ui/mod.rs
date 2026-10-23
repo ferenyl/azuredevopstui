@@ -78,10 +78,10 @@ pub fn render(frame: &mut Frame, app: &App) {
                 .map(|(index, tag)| {
                     if picker.is_new(index) {
                         format!("+ create \"{tag}\"")
-                    } else if picker.is_current(index) {
-                        format!("✓ {tag}")
+                    } else if picker.is_checked(index) {
+                        format!("[x] {tag}")
                     } else {
-                        format!("  {tag}")
+                        format!("[ ] {tag}")
                     }
                 })
                 .collect();
@@ -90,7 +90,10 @@ pub fn render(frame: &mut Frame, app: &App) {
                 ..Selection::new(items)
             };
             let (before, after) = picker.query.split();
-            let title = format!(" Tag #{}: {before}▏{after}", picker.work_item_id);
+            let title = format!(
+                " Tag #{}: {before}▏{after}  (tab: toggle · enter: save) ",
+                picker.work_item_id
+            );
             popup::render_picker(frame, app, &title, &selection, main);
         }
         Some(Popup::Sprint(picker)) => {

@@ -18,6 +18,7 @@ mod navigation;
 mod notifications;
 mod scroll;
 mod search;
+mod tags;
 mod theme;
 mod threads;
 mod vote;

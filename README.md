@@ -471,7 +471,7 @@ The table lists the Mocha values.
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
-| `t` | Edit tags on your work item: type to search, `enter` adds the tag or removes it if it is already set (✓). A tag that does not exist is created |
+| `t` | Edit tags on any work item: type to search, `tab` checks or unchecks the highlighted tag (`[x]`), `enter` saves all checked tags in one change. `enter` without `tab` adds the highlighted tag or removes it if it is already set. A tag that does not exist is created |
 | `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels, asking first when there is text. Edit with `←` `→` `↑` `↓`, `home` / `end` (line), `ctrl+home` / `ctrl+end` (text), `ctrl+←` / `ctrl+→` or `alt+b` / `alt+f` (word), `ctrl+w` or `alt+backspace` (delete word). `ctrl+e` edits the text in `$EDITOR` |
 | `]` / `[` | Select the next or previous comment thread on a PR's Comments tab |
 | `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
