@@ -59,6 +59,11 @@ pub struct Config {
     /// Tags added by the user, most recent first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_tags: Vec<String>,
+    /// Editor opened by `ctrl+e` in text popups; falls back to `$VISUAL`, then `$EDITOR`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor: Option<String>,
+    #[serde(default)]
+    pub layout: LayoutConfig,
 }
 
 fn default_refresh_interval_secs() -> u64 {
@@ -146,6 +151,19 @@ pub enum AuthMethod {
     Auto,
     Azcli,
     Pat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LayoutConfig {
+    /// Width of the list column in percent of the screen; clamped to 15–60.
+    pub left_percent: u16,
+}
+
+impl Default for LayoutConfig {
+    fn default() -> Self {
+        Self { left_percent: 25 }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -276,6 +294,8 @@ impl Config {
             theme: ThemeName::default(),
             colors: ColorOverrides::default(),
             recent_tags: Vec::new(),
+            editor: None,
+            layout: LayoutConfig::default(),
         }
     }
 
@@ -342,6 +362,16 @@ mod tests {
         assert_eq!(config.sort.pull_requests, PrSort::Newest);
         assert_eq!(config.sort.work_items, WorkItemSort::Priority);
         assert!(config.show_images);
+        assert_eq!(config.layout.left_percent, 25);
+    }
+
+    #[test]
+    fn layout_left_percent_is_read() {
+        let json = r#"{"organization":"o","project":"p","team":"t","layout":{"left_percent":40}}"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+
+        assert_eq!(config.layout.left_percent, 40);
     }
 
     #[test]

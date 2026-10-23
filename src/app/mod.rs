@@ -2,6 +2,7 @@ mod action;
 mod actions;
 #[cfg(test)]
 mod e2e;
+mod editor;
 mod files;
 mod inbox;
 mod input;
@@ -44,6 +45,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::api::{AdoClient, Board, CurrentUser, ProjectApi, WorkItem};
 use crate::config::Config;
 use crate::images::Images;
+use crate::terminal::TerminalModes;
 use crate::theme::Theme;
 use loads::{Load, Loads};
 use message::Message;
@@ -78,6 +80,8 @@ pub struct App {
     pub detail_max_scroll: std::cell::Cell<u16>,
     /// Visible content rows of the last drawn detail.
     pub detail_height: std::cell::Cell<u16>,
+    /// Visible rows of the focused left list in the last frame; ten before the first draw.
+    pub list_height: std::cell::Cell<u16>,
     /// Changed files of the shown PR, once its Files tab was shown.
     pub files: Option<Files>,
     /// Targets of the links drawn in the detail pane last frame, in reading order.
@@ -92,6 +96,8 @@ pub struct App {
     setup_back: Vec<SetupStep>,
     /// The setup was opened from the main view to change organization, project or team.
     switching: bool,
+    /// Text of the popup to edit in the editor; the run loop picks it up between frames.
+    edit_request: Option<String>,
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
     sprint: Option<String>,
     pub show_help: bool,
@@ -113,6 +119,8 @@ pub struct App {
     tx: UnboundedSender<Message>,
     rx: UnboundedReceiver<Message>,
     should_quit: bool,
+    /// The focused panel fills the left column, or the whole screen when it is the detail.
+    pub zoomed: bool,
 }
 
 impl App {
@@ -136,6 +144,7 @@ impl App {
             thread_row: std::cell::Cell::new(None),
             detail_max_scroll: std::cell::Cell::new(u16::MAX),
             detail_height: std::cell::Cell::new(0),
+            list_height: std::cell::Cell::new(10),
             files: None,
             detail_links: RefCell::default(),
             link_index: None,
@@ -144,6 +153,7 @@ impl App {
             popup: None,
             setup_back: Vec::new(),
             switching: false,
+            edit_request: None,
             show_help: false,
             last_updated: None,
             last_refresh: Instant::now(),
@@ -160,10 +170,15 @@ impl App {
             tx,
             rx,
             should_quit: false,
+            zoomed: false,
         }
     }
 
-    pub async fn run(mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
+    pub async fn run(
+        mut self,
+        terminal: &mut DefaultTerminal,
+        modes: &mut TerminalModes,
+    ) -> anyhow::Result<()> {
         self.authenticate();
         let mut events = EventStream::new();
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
@@ -189,6 +204,15 @@ impl App {
                 }
                 _ = ticker.tick() => self.auto_refresh(),
             }
+            if let Some(text) = self.edit_request.take() {
+                // The event stream would take the editor's input.
+                drop(events);
+                modes.suspend();
+                self.edit_in_editor(&text);
+                modes.resume();
+                events = EventStream::new();
+                terminal.clear()?;
+            }
         }
         Ok(())
     }
@@ -198,6 +222,14 @@ impl App {
         match self.focus.index() {
             Some(index) => self.data.detail(self.focus, self.selections[index]),
             None => self.detail.clone(),
+        }
+    }
+
+    /// The focused left panel, or the one focus returns to from the detail.
+    pub fn left_focus(&self) -> Panel {
+        match self.focus {
+            Panel::Detail => self.last_left,
+            panel => panel,
         }
     }
 

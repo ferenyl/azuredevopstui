@@ -350,6 +350,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `team` | set by setup | Team. Used for the current sprint and the board. |
 | `refresh_interval_secs` | `120` | Auto refresh interval in seconds. Set it to `0` to turn auto refresh off. Auto refresh pauses while a popup is open. |
 | `browser_command` | `null` | Command used to open URLs, with the URL appended as the last argument, for example `"wslview"` or `"firefox --new-tab"`. The command is split on spaces, so it must be on `PATH` (use `"chrome"`, not `"C:\\Program Files\\…"`). When `null`, the system default is used. |
+| `editor` | `null` | Command that `ctrl+e` opens in a text popup, with a temporary file as the last argument, for example `"nvim"` or `"code --wait"`. Split on spaces. When `null`, `$VISUAL`, then `$EDITOR`, then `vi` (`notepad` on Windows). |
 | `auth.method` | `"auto"` | `auto`, `azcli` or `pat`. See [Authentication](#authentication). |
 | `auth.azure_config_dir` | not set | Azure CLI config directory for the DevOps login, for example `"~/.azure-devops"`. Use it when the DevOps account differs from your Azure portal account. When not set, the default `~/.azure` is used. See [Separate account for Azure DevOps](#separate-account-for-azure-devops-azure_config_dir). |
 | `other_prs_filter.reviewers` | `[]` | Show PRs where any of these users or groups is a reviewer. |
@@ -372,6 +373,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
 | `theme` | `mocha` | Color preset: `mocha`, `light` or `terminal`. See [Colors](#colors). |
 | `colors` | none | Overrides for single colors of the preset. See [Colors](#colors). |
+| `layout.left_percent` | `25` | Width of the left column in percent of the screen, from 15 to 60. It is never narrower than 32 columns, up to half the screen. |
 
 ### Others' PRs filter
 
@@ -450,10 +452,14 @@ The table lists the Mocha values.
 
 | Key | Action |
 |---|---|
-| `j` / `k`, `↓` / `↑` | Move in a list, or scroll the detail panel. On a PR's Files tab, select a file |
+| `j` / `k`, `↓` / `↑` | Move in a list (wraps around), or scroll the detail panel. On a PR's Files tab, select a file |
+| `g` / `G` | First or last row of a list, top or bottom of the detail panel |
+| `pgdn` / `pgup`, `ctrl+d` / `ctrl+u` | Move a page or half a page in a list or the detail panel |
+| `1`–`6` | Focus the numbered box in the left column |
 | `ctrl+j` / `ctrl+k`, `ctrl+↓` / `ctrl+↑` | Previous or next box in the left column |
 | `ctrl+l` / `ctrl+h`, `ctrl+→` / `ctrl+←` | Switch between the left column and the detail panel |
 | `enter` | Open the selected item in the detail panel. On a PR's Files tab, show the selected file's diff |
+| `z` | Zoom: the focused box fills the left column, or the detail panel fills the screen. `z` again or `esc` restores. On short terminals only the focused box in the left column is expanded; the others show just their title |
 | `tab` / `shift+tab` | Next or previous detail tab |
 | `S` | Choose the sort order for the focused list |
 | `f` | Choose which work item types are shown, or on a PR, filter others' PRs |
@@ -463,7 +469,7 @@ The table lists the Mocha values.
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
 | `t` | Edit tags on your work item: type to search, `enter` adds the tag or removes it if it is already set (✓). A tag that does not exist is created |
-| `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels |
+| `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels, asking first when there is text. Edit with `←` `→` `↑` `↓`, `home` / `end` (line), `ctrl+home` / `ctrl+end` (text), `ctrl+←` / `ctrl+→` or `alt+b` / `alt+f` (word), `ctrl+w` or `alt+backspace` (delete word). `ctrl+e` edits the text in `$EDITOR` |
 | `]` / `[` | Select the next or previous comment thread on a PR's Comments tab |
 | `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
 | `c` | Complete your PR or set auto-complete: pick the merge strategy, `space` ticks *Delete source branch*, *Transition linked work items*, *Set auto-complete* and *Bypass branch policies*, edit the merge commit message, then `enter`. A PR that is not ready starts with auto-complete ticked; if auto-complete is set, *Cancel auto-complete* is the last row. Bypassing asks `y` / `n` first. `esc` cancels and nothing is sent |

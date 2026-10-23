@@ -14,7 +14,7 @@ pub(super) const MY_PRS: &str = "/contoso/Fabrikam/_apis/git/pullrequests";
 const BUILDS: &str = "/contoso/Fabrikam/_apis/build/builds";
 const CONNECTION_DATA: &str = "/contoso/_apis/connectionData";
 const WORK_ITEM_301: &str = "/contoso/Fabrikam/_apis/wit/workitems/301";
-const COMMENTS_301: &str = "/contoso/Fabrikam/_apis/wit/workItems/301/comments";
+pub(super) const COMMENTS_301: &str = "/contoso/Fabrikam/_apis/wit/workItems/301/comments";
 
 pub(super) async fn connected() -> Harness {
     let mut harness = Harness::new().await;
