@@ -52,16 +52,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check tag matches Cargo.toml
+      - name: Check the tag format
         run: |
           version="${TAG#v}"
           if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Tag $TAG is not a version like v1.2.3"
-            exit 1
-          fi
-          cargo_version=$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[0].version')
-          if [ "$version" != "$cargo_version" ]; then
-            echo "::error::Tag $TAG does not match version $cargo_version in Cargo.toml"
             exit 1
           fi
 
@@ -90,6 +85,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+
+      - uses: ./.github/actions/set-version
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
@@ -131,8 +128,11 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
+      - uses: ./.github/actions/set-version
+
       - name: Publish
-        run: cargo publish --locked
+        # The version is set from the tag and not committed, so the tree is dirty.
+        run: cargo publish --locked --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 

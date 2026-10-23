@@ -1,0 +1,12 @@
+name: Set version
+description: Set the crate version in Cargo.toml and Cargo.lock from the release tag (the tag is not committed back).
+
+runs:
+  using: composite
+  steps:
+    - name: Set the version from the tag
+      shell: bash
+      run: |
+        version="${TAG#v}"
+        sed -i "/^\[package\]/,/^\[/ s/^version = .*/version = \"$version\"/" Cargo.toml
+        cargo update -p azuredevopstui --precise "$version"
