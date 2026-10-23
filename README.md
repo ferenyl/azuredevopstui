@@ -448,7 +448,10 @@ The table lists the Mocha values.
 
 | Key | Action |
 |---|---|
-| `j` / `k`, `↓` / `↑` | Move in a list, or scroll the detail panel. On a PR's Files tab, select a file |
+| `j` / `k`, `↓` / `↑` | Move in a list (wraps around), or scroll the detail panel. On a PR's Files tab, select a file |
+| `g` / `G` | First or last row of a list, top or bottom of the detail panel |
+| `pgdn` / `pgup`, `ctrl+d` / `ctrl+u` | Move a page or half a page in a list or the detail panel |
+| `1`–`6` | Focus the numbered box in the left column |
 | `ctrl+j` / `ctrl+k`, `ctrl+↓` / `ctrl+↑` | Previous or next box in the left column |
 | `ctrl+l` / `ctrl+h`, `ctrl+→` / `ctrl+←` | Switch between the left column and the detail panel |
 | `enter` | Open the selected item in the detail panel. On a PR's Files tab, show the selected file's diff |
