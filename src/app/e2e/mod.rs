@@ -4,6 +4,7 @@
 //! the test, so tests stay offline and deterministic. See `docs/e2e.md`.
 
 mod changes;
+mod comment_paging;
 mod completion;
 mod editor;
 mod feedback;

@@ -1123,6 +1123,7 @@ mod tests {
             repro_steps: None,
             comment_count: 0,
             comments: Vec::new(),
+            comments_continuation: None,
             children: vec![
                 work_item(20, "Write API", "Task", "Active"),
                 work_item(21, "Deploy", "Release Task", "New"),

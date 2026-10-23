@@ -351,6 +351,8 @@ impl App {
         let max = self.detail_max_scroll.get();
         let current = usize::from(self.detail_scroll.min(max));
         self.detail_scroll = step.target(current, usize::from(max) + 1, page) as u16;
+        self.older_comments_failed = false;
+        self.load_older_comments();
     }
 
     pub(super) fn switch_tab(&mut self, next: bool) {

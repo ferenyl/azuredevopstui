@@ -5,9 +5,9 @@ use futures::{StreamExt, TryStreamExt, stream};
 use serde_json::json;
 
 use super::models::{
-    CommentList, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention, Partial,
-    PullRequest, Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails,
-    WorkItemResponse, WorkItemState, WorkItemTypeCategory,
+    CommentList, CommentsPage, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention,
+    Partial, PullRequest, Relation, SprintWorkItems, WiqlResult, WorkItem, WorkItemComment,
+    WorkItemDetails, WorkItemResponse, WorkItemState, WorkItemTypeCategory,
 };
 use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, is_unauthorized};
 use crate::rich_text::RichText;
@@ -35,6 +35,7 @@ const PULL_REQUEST_ARTIFACT: &str = "vstfs:///Git/PullRequestId/";
 const HIDDEN_CATEGORY: &str = "Microsoft.HiddenCategory";
 const COMMENTS_API_VERSION: &str = "7.1-preview.4";
 const MAX_COMMENTS: &str = "10";
+const OLDER_COMMENTS_PAGE: &str = "50";
 const CLOSED_CATEGORIES: [&str; 2] = ["Completed", "Removed"];
 /// Used when the states cannot be loaded.
 const DEFAULT_CLOSED_STATES: [&str; 2] = ["Closed", "Removed"];
@@ -140,15 +141,19 @@ impl ProjectApi {
             ),
             repro_steps: rich_text("Microsoft.VSTS.TCM.ReproSteps", fields.repro_steps),
             comment_count: comments.total_count,
-            comments: comments
-                .comments
-                .into_iter()
-                .map(|comment| DetailComment {
-                    author: comment.created_by.display_name,
-                    date: comment.created_date,
-                    text: to_rich_text(&comment.text, comment.format.as_deref()),
-                })
-                .collect(),
+            comments_continuation: comments.continuation_token,
+            comments: detail_comments(comments.comments),
+        })
+    }
+
+    /// The page of comments older than the one `token` came from.
+    pub async fn older_comments(&self, id: u32, token: &str) -> Result<CommentsPage> {
+        let list = self
+            .comments_page(id, OLDER_COMMENTS_PAGE, Some(token))
+            .await?;
+        Ok(CommentsPage {
+            comments: detail_comments(list.comments),
+            continuation_token: list.continuation_token,
         })
     }
 
@@ -255,6 +260,19 @@ impl ProjectApi {
 
     /// The newest comments first.
     async fn comments(&self, id: u32) -> Result<CommentList> {
+        self.comments_page(id, MAX_COMMENTS, None).await
+    }
+
+    async fn comments_page(
+        &self,
+        id: u32,
+        top: &str,
+        continuation_token: Option<&str>,
+    ) -> Result<CommentList> {
+        let mut query = vec![("$top", top), ("order", "desc"), ("$expand", "reactions")];
+        if let Some(token) = continuation_token {
+            query.push(("continuationToken", token));
+        }
         self.client
             .get_versioned(
                 &self.client.urls.dev_azure,
@@ -267,11 +285,7 @@ impl ProjectApi {
                     &id.to_string(),
                     "comments",
                 ],
-                &[
-                    ("$top", MAX_COMMENTS),
-                    ("order", "desc"),
-                    ("$expand", "reactions"),
-                ],
+                &query,
                 COMMENTS_API_VERSION,
             )
             .await
@@ -568,6 +582,17 @@ fn closed_state_names(states: Vec<WorkItemState>) -> Vec<String> {
     names
 }
 
+fn detail_comments(comments: Vec<WorkItemComment>) -> Vec<DetailComment> {
+    comments
+        .into_iter()
+        .map(|comment| DetailComment {
+            author: comment.created_by.display_name,
+            date: comment.created_date,
+            text: to_rich_text(&comment.text, comment.format.as_deref()),
+        })
+        .collect()
+}
+
 fn to_rich_text(value: &str, format: Option<&str>) -> RichText {
     if format.is_some_and(|format| format.eq_ignore_ascii_case("markdown")) {
         RichText::from_markdown(value)
@@ -803,6 +828,76 @@ mod tests {
         assert_eq!(details.comment_count, 3);
         assert_eq!(details.comments[0].author, "Bo");
         assert_eq!(details.comments[0].text.plain(), "Looks good");
+        assert_eq!(details.comments_continuation, None);
+    }
+
+    fn comments_page_json(text: &str, token: Option<&str>) -> Value {
+        let mut page = json!({
+            "totalCount": 3,
+            "comments": [{
+                "createdBy": { "id": "u", "displayName": "Bo" },
+                "createdDate": "2026-10-01T10:00:00Z",
+                "text": text
+            }]
+        });
+        if let Some(token) = token {
+            page["continuationToken"] = json!(token);
+        }
+        page
+    }
+
+    #[tokio::test]
+    async fn first_comment_page_keeps_the_continuation_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .and(query_param("$top", "10"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(comments_page_json("new", Some("page2"))),
+            )
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let list = client.comments(10).await.unwrap();
+
+        assert_eq!(list.continuation_token.as_deref(), Some("page2"));
+    }
+
+    #[tokio::test]
+    async fn older_comments_send_the_token_and_a_bigger_page() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .and(query_param("continuationToken", "page2"))
+            .and(query_param("$top", OLDER_COMMENTS_PAGE))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(comments_page_json("old", Some("page3"))),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let page = client.older_comments(10, "page2").await.unwrap();
+
+        assert_eq!(page.comments[0].text.plain(), "old");
+        assert_eq!(page.continuation_token.as_deref(), Some("page3"));
+    }
+
+    #[tokio::test]
+    async fn last_older_comment_page_has_no_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(comments_page_json("old", None)))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let page = client.older_comments(10, "page2").await.unwrap();
+
+        assert_eq!(page.continuation_token, None);
     }
 
     #[tokio::test]

@@ -1,8 +1,9 @@
 use anyhow::Result;
 
 use crate::api::{
-    Board, Build, CurrentUser, Iteration, Mention, Partial, PullRequest, PullRequestChanges,
-    PullRequestChecks, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
+    Board, Build, CommentsPage, CurrentUser, Iteration, Mention, Partial, PullRequest,
+    PullRequestChanges, PullRequestChecks, PullRequestDetails, SprintWorkItems, WorkItem,
+    WorkItemDetails,
 };
 use crate::auth::Auth;
 use crate::config::{Config, MergeStrategy};
@@ -42,6 +43,10 @@ pub enum Message {
     WorkItemDetails {
         id: u32,
         result: Result<WorkItemDetails>,
+    },
+    OlderComments {
+        id: u32,
+        result: Result<CommentsPage>,
     },
     Board {
         item: WorkItem,
