@@ -1,4 +1,5 @@
 mod build_detail;
+mod build_log;
 pub mod layout;
 mod popup;
 mod pr_detail;
@@ -78,10 +79,10 @@ pub fn render(frame: &mut Frame, app: &App) {
                 .map(|(index, tag)| {
                     if picker.is_new(index) {
                         format!("+ create \"{tag}\"")
-                    } else if picker.is_current(index) {
-                        format!("✓ {tag}")
+                    } else if picker.is_checked(index) {
+                        format!("[x] {tag}")
                     } else {
-                        format!("  {tag}")
+                        format!("[ ] {tag}")
                     }
                 })
                 .collect();
@@ -90,7 +91,10 @@ pub fn render(frame: &mut Frame, app: &App) {
                 ..Selection::new(items)
             };
             let (before, after) = picker.query.split();
-            let title = format!(" Tag #{}: {before}▏{after}", picker.work_item_id);
+            let title = format!(
+                " Tag #{}: {before}▏{after}  (tab: toggle · enter: save) ",
+                picker.work_item_id
+            );
             popup::render_picker(frame, app, &title, &selection, main);
         }
         Some(Popup::Sprint(picker)) => {
@@ -152,6 +156,9 @@ pub fn render(frame: &mut Frame, app: &App) {
                 TextTarget::LinkWorkItem(pr) => {
                     format!(" Work item id to link to !{}", pr.pull_request_id)
                 }
+                TextTarget::QueueBranch(build) => {
+                    format!(" Branch to queue {} on", build.definition.name)
+                }
             };
             let title = format!("{title} · shift/alt+enter: new line ");
             popup::render_text_input(frame, app, &title, text, main);
@@ -194,6 +201,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
         Some(Popup::PrActions { pr, selection, .. }) => {
             let title = format!(" !{} ", pr.pull_request_id);
+            popup::render_picker(frame, app, &title, selection, main);
+        }
+        Some(Popup::BuildActions {
+            build, selection, ..
+        }) => {
+            let title = format!(" {} {} ", build.definition.name, build.build_number);
             popup::render_picker(frame, app, &title, selection, main);
         }
         Some(Popup::RemoveReviewer { pr, selection }) => {
@@ -383,6 +396,9 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
         (Detail::WorkItem(item), _) => {
             workitem_detail::lines(app, item, None, app.detail_tab, width)
         }
+        (Detail::Build(_), _) if app.detail_tab == DetailTab::Timeline => {
+            build_log::lines(app, width)
+        }
         (Detail::Build(build), _) => build_detail::lines(app, build),
     };
     let (lines, slots) = place_images(app, lines, width);
@@ -395,6 +411,9 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
     let scroll = match detail {
         Detail::PullRequest(_) if app.detail_tab == DetailTab::Files => {
             pr_files::list_scroll(app, content.height, content.width)
+        }
+        Detail::Build(_) if app.detail_tab == DetailTab::Timeline => {
+            build_log::list_scroll(app, content.height, content.width)
         }
         _ => None,
     }
@@ -512,7 +531,7 @@ fn wrapped_rows(line: &Line<'static>, width: u16) -> usize {
 
 fn tab_title(app: &App, tab: DetailTab) -> String {
     let count = match (tab, &app.detail_info) {
-        (DetailTab::Overview, _) => return tab.title().into(),
+        (DetailTab::Overview | DetailTab::Timeline, _) => return tab.title().into(),
         (DetailTab::Comments, Some(DetailInfo::PullRequest(info))) => {
             info.threads.len().to_string()
         }
@@ -1128,6 +1147,7 @@ mod tests {
             repro_steps: None,
             comment_count: 0,
             comments: Vec::new(),
+            comments_continuation: None,
             children: vec![
                 work_item(20, "Write API", "Task", "Active"),
                 work_item(21, "Deploy", "Release Task", "New"),

@@ -133,7 +133,8 @@ impl App {
             Action::Complete => {
                 matches!(&item, Some(Detail::PullRequest(pr)) if self.can_complete(pr))
             }
-            Action::Vote | Action::PrActions => matches!(item, Some(Detail::PullRequest(_))),
+            Action::Vote => matches!(item, Some(Detail::PullRequest(_))),
+            Action::PrActions => matches!(item, Some(Detail::PullRequest(_) | Detail::Build(_))),
             Action::ChangeColumn => matches!(item, Some(Detail::WorkItem(_))),
             Action::Comment => matches!(item, Some(Detail::WorkItem(_) | Detail::PullRequest(_))),
             Action::NextThread | Action::PrevThread => {
@@ -142,7 +143,8 @@ impl App {
             Action::ThreadStatus => {
                 matches!(&item, Some(Detail::PullRequest(pr)) if self.selected_thread_of(pr).is_some())
             }
-            Action::Unassign | Action::Tag => work_item_assigned_to_me(true),
+            Action::Unassign => work_item_assigned_to_me(true),
+            Action::Tag => matches!(item, Some(Detail::WorkItem(_))),
             Action::AssignToMe => work_item_assigned_to_me(false),
             Action::Confirm | Action::OpenInBrowser | Action::CopyLink => item.is_some(),
             Action::NextLink => !self.detail_links.borrow().is_empty(),
@@ -483,6 +485,7 @@ mod tests {
                     NextTab,
                     Confirm,
                     ChangeColumn,
+                    Tag,
                     AssignToMe,
                     Comment,
                     OpenInBrowser,
@@ -507,6 +510,7 @@ mod tests {
                     NextTab,
                     Confirm,
                     ChangeColumn,
+                    Tag,
                     AssignToMe,
                     Comment,
                     OpenInBrowser,
@@ -532,6 +536,7 @@ mod tests {
                     OpenInBrowser,
                     CopyLink,
                     Filter,
+                    PrActions,
                     Zoom,
                     SprintBoard,
                     Reload,

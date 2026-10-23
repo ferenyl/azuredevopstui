@@ -5,6 +5,7 @@ use crate::auth::Auth;
 use crate::config::{AuthMethod, Config};
 use crate::theme::Theme;
 
+use super::loads::Load;
 use super::message::Message;
 use super::setup::organization_name;
 use super::{App, Data, LEFT_PANELS, Panel, Retry, Screen, SetupStep};
@@ -95,6 +96,7 @@ impl App {
         self.close_detail();
         self.board_view = false;
         self.board = None;
+        self.loads.cancel(Load::SprintBoard);
         self.notified = None;
         self.popup = None;
         self.search = None;

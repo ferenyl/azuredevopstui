@@ -37,6 +37,13 @@ pub fn lines(app: &App, build: &Build) -> Vec<Line<'static>> {
     if let Some(duration) = duration(build) {
         lines.push(field(app, "Duration", vec![Span::raw(duration)]));
     }
+    if build.failed() {
+        lines.push(Line::default());
+        lines.push(Line::styled(
+            "tab: timeline and logs",
+            Style::new().fg(app.theme.muted),
+        ));
+    }
     lines
 }
 

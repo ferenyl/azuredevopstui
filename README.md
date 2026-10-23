@@ -19,7 +19,9 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 - **Sprint picker**: press `i` to show another sprint than the current one. See [Sprint](#sprint).
 - **Sprint board**: press `b` to see all items of the sprint as lanes, one per board column. See [Sprint](#sprint).
 - **Detail panel** with tabs:
-  - **Pipeline run**: pipeline, run number, branch, status, reason, times and duration.
+  - **Pipeline run**:
+    - **Overview** shows pipeline, run number, branch, status, reason, times and duration. `e` re-runs it, queues a new run on another branch or cancels it, after a `y` / `n` confirmation.
+    - **Timeline** lists the stages, jobs and tasks of the run with their status; failed tasks show their error messages. With the detail panel focused, `j`/`k` select a task, `enter` shows its log (the last 5000 lines, `##[error]` in red) and `esc` goes back to the timeline. The failed task is selected first.
   - **Pull request**:
     - **Overview** shows status, branches, merge status, reviewers and their votes, the linked work items (with a warning when there are none), and the description.
     - **Comments** shows the comment threads with their status (active, resolved, won't fix, closed) and file path. Select a thread with `]` / `[`, reply with `m`, and change its status with `x`. `m` without a selected thread starts a new one.
@@ -28,7 +30,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - **Work item**:
     - **Overview** shows type, state, board column, priority, assignee, sprint, tags, linked pull requests, description, repro steps and acceptance criteria.
     - **Children** shows child items grouped by type (Task, Release Task, User Story, …), each with state and assignee.
-    - **Comments** shows the 10 newest comments.
+    - **Comments** shows the 10 newest comments. Scroll to the end to load older ones, 50 at a time.
   - **Images** in descriptions and comments are drawn inline when the terminal supports graphics. See [Images](#images).
 - **Actions**:
   - Open a PR or work item in the browser.
@@ -475,13 +477,13 @@ The table lists the Mocha values.
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
-| `t` | Edit tags on your work item: type to search, `enter` adds the tag or removes it if it is already set (✓). A tag that does not exist is created |
+| `t` | Edit tags on any work item: type to search, `tab` checks or unchecks the highlighted tag (`[x]`), `enter` saves all checked tags in one change. `enter` without `tab` adds the highlighted tag or removes it if it is already set. A tag that does not exist is created |
 | `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels, asking first when there is text. Edit with `←` `→` `↑` `↓`, `home` / `end` (line), `ctrl+home` / `ctrl+end` (text), `ctrl+←` / `ctrl+→` or `alt+b` / `alt+f` (word), `ctrl+w` or `alt+backspace` (delete word). `ctrl+e` edits the text in `$EDITOR` |
 | `]` / `[` | Select the next or previous comment thread on a PR's Comments tab |
 | `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
 | `c` | Complete your PR or set auto-complete: pick the merge strategy, `space` ticks *Delete source branch*, *Transition linked work items*, *Set auto-complete* and *Bypass branch policies*, edit the merge commit message, then `enter`. A PR that is not ready starts with auto-complete ticked; if auto-complete is set, *Cancel auto-complete* is the last row. Bypassing asks `y` / `n` first. `esc` cancels and nothing is sent |
 | `v` | Vote on the PR: pick approve, approve with suggestions, wait for author, reject or reset vote, then `enter`. `esc` cancels and nothing is sent |
-| `e` | PR actions: abandon (asks `y` / `n`) or reactivate, publish or mark as draft, edit title or description, add reviewer (name or email), remove reviewer, link work item (id), then `enter`. `esc` cancels and nothing is sent |
+| `e` | Actions menu of the selected item. PR: abandon (asks `y` / `n`) or reactivate, publish or mark as draft, edit title or description, add reviewer (name or email), remove reviewer, link work item (id), then `enter`. Pipeline run: re-run on the same branch and commit, queue a new run on a branch you type (prefilled), cancel a run that is queued or running; each asks `y` / `n` first. `esc` cancels and nothing is sent |
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `y` | Copy the PR (`!1234`) or work item (`#5678`) number |
 | `Y` | Copy the link to the PR, work item or pipeline run |

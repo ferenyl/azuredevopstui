@@ -1,8 +1,9 @@
 use anyhow::Result;
 
 use crate::api::{
-    Board, Build, CurrentUser, Iteration, Mention, Partial, PullRequest, PullRequestChanges,
-    PullRequestChecks, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
+    Board, Build, CommentsPage, CurrentUser, Iteration, Mention, Partial, PullRequest,
+    PullRequestChanges, PullRequestChecks, PullRequestDetails, SprintWorkItems, TimelineRecord,
+    WorkItem, WorkItemDetails,
 };
 use crate::auth::Auth;
 use crate::config::{Config, MergeStrategy};
@@ -44,6 +45,10 @@ pub enum Message {
         id: u32,
         result: Result<WorkItemDetails>,
     },
+    OlderComments {
+        id: u32,
+        result: Result<CommentsPage>,
+    },
     Board {
         item: WorkItem,
         unassign: bool,
@@ -81,10 +86,24 @@ pub enum Message {
         file: usize,
         result: Result<FileDiff>,
     },
+    BuildTimeline {
+        id: u32,
+        result: Result<Vec<TimelineRecord>>,
+    },
+    BuildLog {
+        build_id: u32,
+        log_id: u32,
+        result: Result<String>,
+    },
     PullRequestUpdated {
         id: u32,
         /// The panels showing what the change touched.
         reload: Vec<Load>,
+        result: Result<()>,
+    },
+    /// A pipeline run was queued or cancelled.
+    BuildUpdated {
+        id: u32,
         result: Result<()>,
     },
     /// The full description of `pr`, which the lists cut off.

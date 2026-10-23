@@ -196,8 +196,46 @@ impl App {
                     Message::WorkItemDetails { id, result }
                 });
             }
-            Detail::Build(_) => self.loads.cancel(Load::Detail),
+            Detail::Build(build) => {
+                let id = build.id;
+                self.spawn_load(Load::Detail, async move {
+                    let result = api.build_timeline(id).await;
+                    Message::BuildTimeline { id, result }
+                });
+            }
         }
+    }
+
+    pub fn loading_older_comments(&self) -> bool {
+        self.loads.is_loading(Load::Comments)
+    }
+
+    /// Loads the next page of older comments when the end of the Comments tab is on screen.
+    pub(super) fn load_older_comments(&mut self) {
+        let (Some(Detail::WorkItem(item)), Some(DetailInfo::WorkItem(info))) =
+            (&self.detail, &self.detail_info)
+        else {
+            return;
+        };
+        let Some(token) = info.comments_continuation.clone() else {
+            return;
+        };
+        let at_end = self.detail_scroll >= self.detail_max_scroll.get();
+        if self.detail_tab != DetailTab::Comments
+            || !at_end
+            || self.older_comments_failed
+            || self.loads.is_loading(Load::Comments)
+        {
+            return;
+        }
+        let Some(api) = self.api() else {
+            return;
+        };
+        let id = item.id;
+        self.spawn_load(Load::Comments, async move {
+            let result = api.older_comments(id, &token).await;
+            Message::OlderComments { id, result }
+        });
     }
 
     /// Starts downloading images in the shown detail that are not cached yet.
@@ -232,7 +270,7 @@ impl App {
                 );
                 rich.extend(info.comments.iter().map(|comment| &comment.text));
             }
-            None => {}
+            Some(DetailInfo::Build(_)) | None => {}
         }
         let urls = texts
             .into_iter()
@@ -288,7 +326,10 @@ impl App {
         self.detail = Some(detail);
         self.load_images();
         self.detail_info = None;
+        self.loads.cancel(Load::Comments);
+        self.older_comments_failed = false;
         self.clear_files();
+        self.clear_build_log();
         self.detail_scroll = 0;
         self.link_index = None;
         self.detail_tab = DetailTab::Overview;
@@ -302,6 +343,7 @@ impl App {
         self.detail = None;
         self.detail_info = None;
         self.clear_files();
+        self.clear_build_log();
         self.detail_links.borrow_mut().clear();
         self.link_index = None;
         if self.focus == Panel::Detail {
@@ -323,8 +365,9 @@ mod tests {
     use crate::api::{AdoClient, Iteration};
     use crate::app::loads::Load;
     use crate::app::test_helpers::{app, me, open_pull_request, press};
-    use crate::app::{DetailTab, Panel, Popup, SprintPicker};
+    use crate::app::{App, Detail, DetailInfo, DetailTab, Panel, Popup, SprintPicker};
     use crate::auth::Auth;
+    use crate::test_support::{work_item, work_item_details};
 
     #[test]
     fn enter_opens_selected_item_on_overview() {
@@ -460,5 +503,95 @@ mod tests {
 
         assert!(started.iter().all(Option::is_some));
         assert_eq!(loads.map(|load| app.loads.generation(load)), started);
+    }
+
+    /// Work item 10 open on its Comments tab, scrolled to the end of what is drawn.
+    fn on_comments(token: Option<&str>) -> App {
+        let mut app = app();
+        // Nothing listens there; the request stays pending or fails, and is never handled.
+        app.client = Some(AdoClient::with_base_url(
+            Auth::from_pat("pat"),
+            "http://127.0.0.1:9",
+        ));
+        app.sync_api();
+        app.detail = Some(Detail::WorkItem(Box::new(work_item(
+            10,
+            "Story",
+            "User Story",
+            "Active",
+        ))));
+        app.detail_info = Some(DetailInfo::WorkItem(Box::new(work_item_details(
+            &["new"],
+            token,
+        ))));
+        app.detail_tab = DetailTab::Comments;
+        app.detail_max_scroll.set(0);
+        app
+    }
+
+    #[tokio::test]
+    async fn older_comments_load_at_the_end_of_the_comments() {
+        let mut app = on_comments(Some("page2"));
+
+        app.load_older_comments();
+
+        assert!(app.loading_older_comments());
+    }
+
+    #[tokio::test]
+    async fn scrolling_to_the_end_loads_older_comments() {
+        let mut app = on_comments(Some("page2"));
+        app.detail_max_scroll.set(5);
+        app.focus = Panel::Detail;
+
+        press(&mut app, KeyCode::Char('j'));
+        assert!(!app.loading_older_comments());
+        press(&mut app, KeyCode::Char('G'));
+
+        assert!(app.loading_older_comments());
+    }
+
+    #[tokio::test]
+    async fn older_comments_wait_while_more_is_to_scroll() {
+        let mut app = on_comments(Some("page2"));
+        app.detail_max_scroll.set(5);
+
+        app.load_older_comments();
+
+        assert!(!app.loading_older_comments());
+    }
+
+    #[tokio::test]
+    async fn older_comments_need_a_token_and_the_comments_tab() {
+        let mut app = on_comments(None);
+        app.load_older_comments();
+        assert!(!app.loading_older_comments());
+
+        let mut app = on_comments(Some("page2"));
+        app.detail_tab = DetailTab::Overview;
+        app.load_older_comments();
+        assert!(!app.loading_older_comments());
+    }
+
+    #[tokio::test]
+    async fn older_comments_are_not_requested_twice_at_once() {
+        let mut app = on_comments(Some("page2"));
+        app.load_older_comments();
+        let started = app.loads.generation(Load::Comments);
+
+        app.load_older_comments();
+
+        assert!(started.is_some());
+        assert_eq!(app.loads.generation(Load::Comments), started);
+    }
+
+    #[tokio::test]
+    async fn drawing_does_not_retry_failed_older_comments() {
+        let mut app = on_comments(Some("page2"));
+        app.older_comments_failed = true;
+
+        app.load_older_comments();
+
+        assert!(!app.loading_older_comments());
     }
 }

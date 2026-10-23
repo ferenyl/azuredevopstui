@@ -140,7 +140,7 @@ impl App {
                 Screen::Main => {
                     if self.zoomed && self.detail.is_none() {
                         self.zoomed = false;
-                    } else if !self.close_file_diff() {
+                    } else if !self.close_file_diff() && !self.close_build_log() {
                         if self.detail.is_none() && self.board_view {
                             self.toggle_sprint_board();
                         }
@@ -170,7 +170,8 @@ impl App {
                     let step = Move::Line {
                         down: action == Action::Down,
                     };
-                    if !self.jump_file_selection(step, 1) {
+                    if !self.jump_file_selection(step, 1) && !self.jump_timeline_selection(step, 1)
+                    {
                         self.scroll_detail(action == Action::Down);
                     }
                 }
@@ -186,7 +187,10 @@ impl App {
                 }
             },
             Action::Confirm => match self.screen {
-                Screen::Main if self.focus == Panel::Detail => self.open_file_diff(),
+                Screen::Main if self.focus == Panel::Detail => {
+                    self.open_file_diff();
+                    self.open_build_log();
+                }
                 Screen::Main => self.open_selected(),
                 Screen::Setup(_) => self.confirm_setup_step(),
             },
@@ -276,7 +280,10 @@ impl App {
                 self.move_thread(action == Action::NextThread)
             }
             Action::ThreadStatus => self.open_thread_status(),
-            Action::PrActions => self.open_pr_actions(),
+            Action::PrActions => match self.current_item() {
+                Some(Detail::Build(_)) => self.open_build_actions(),
+                _ => self.open_pr_actions(),
+            },
             Action::Zoom => self.zoomed = !self.zoomed,
             Action::Errors => self.popup = Some(Popup::Errors { first: 0 }),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
@@ -333,7 +340,7 @@ impl App {
     fn move_by(&mut self, step: Move) {
         if self.focus == Panel::Detail {
             let page = usize::from(self.detail_height.get());
-            if !self.jump_file_selection(step, page) {
+            if !self.jump_file_selection(step, page) && !self.jump_timeline_selection(step, page) {
                 self.scroll_detail_by(step, page);
             }
         } else if let Some(index) = self.focus.index() {
@@ -356,6 +363,8 @@ impl App {
         let max = self.detail_max_scroll.get();
         let current = usize::from(self.detail_scroll.min(max));
         self.detail_scroll = step.target(current, usize::from(max) + 1, page) as u16;
+        self.older_comments_failed = false;
+        self.load_older_comments();
     }
 
     pub(super) fn switch_tab(&mut self, next: bool) {
@@ -381,6 +390,7 @@ impl App {
         self.detail_thread = None;
         self.scroll_to_thread = false;
         self.link_index = None;
+        self.close_build_log();
         if self.detail_tab == DetailTab::Files {
             self.load_files();
         }

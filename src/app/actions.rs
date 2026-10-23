@@ -154,10 +154,6 @@ impl App {
         let Some(item) = self.current_work_item() else {
             return;
         };
-        if !self.is_assigned_to_me(&item) {
-            self.set_error(format!("#{} is not assigned to you", item.id));
-            return;
-        }
         let Some(api) = self.api() else {
             return;
         };

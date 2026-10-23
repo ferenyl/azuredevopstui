@@ -5,6 +5,7 @@
 
 mod board;
 mod changes;
+mod comment_paging;
 mod completion;
 mod editor;
 mod feedback;
@@ -17,8 +18,11 @@ mod links;
 mod mouse;
 mod navigation;
 mod notifications;
+mod pipeline_actions;
+mod pipeline_logs;
 mod scroll;
 mod search;
+mod tags;
 mod theme;
 mod threads;
 mod vote;
@@ -65,6 +69,8 @@ struct Fixture {
     status: u16,
     #[serde(default)]
     body: Value,
+    /// Served as `text/plain` instead of `body`, e.g. for build logs.
+    text: Option<String>,
 }
 
 fn ok() -> u16 {
@@ -84,13 +90,16 @@ impl Fixture {
             builder = builder.and(body_string_contains(text.as_str()));
         }
         let specific = !self.query.is_empty() || self.body_contains.is_some();
-        builder
-            .respond_with(ResponseTemplate::new(self.status).set_body_json(&self.body))
-            .with_priority(if specific {
-                SPECIFIC_PRIORITY
-            } else {
-                PLAIN_PRIORITY
-            })
+        let response = ResponseTemplate::new(self.status);
+        let response = match &self.text {
+            Some(text) => response.set_body_string(text.as_str()),
+            None => response.set_body_json(&self.body),
+        };
+        builder.respond_with(response).with_priority(if specific {
+            SPECIFIC_PRIORITY
+        } else {
+            PLAIN_PRIORITY
+        })
     }
 }
 

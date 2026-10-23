@@ -276,7 +276,7 @@ impl Action {
             Self::NextThread => "next thread",
             Self::PrevThread => "previous thread",
             Self::ThreadStatus => "thread status",
-            Self::PrActions => "PR actions",
+            Self::PrActions => "actions",
             Self::SwitchProject => "change project",
             Self::Zoom => "zoom",
             Self::Top => "top/bottom",
