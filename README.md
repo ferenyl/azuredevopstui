@@ -33,6 +33,8 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - Open a PR or work item in the browser.
   - Move a work item to another board column. The columns come from your team's board, and split columns (for example *Active → Doing / Done*) are supported.
   - Assign a work item to yourself.
+  - Press `e` on a work item to change its state, title, assignee, priority or sprint, or to add a child task. The current value is preselected and keeping it sends nothing.
+  - Create a work item with `n`: type, then title. It is assigned to you in the shown sprint.
   - Unassign yourself from a work item and pick its new board column in the same step.
   - Complete one of your PRs once it shows `✔`, or set auto-complete on one that is not ready yet (and cancel it again). You pick a merge strategy among the ones the branch policies allow, and choose whether to delete the source branch, transition linked work items, bypass branch policies (asks for confirmation) and the merge commit message. The last strategy and the first two toggles are remembered in the config. The overview shows who set auto-complete. `esc` cancels without completing.
   - Vote on any PR with `v`: approve, approve with suggestions, wait for author, reject or reset your vote. Your current vote is preselected and `esc` cancels. The inbox entry "needs your vote" goes away once you voted.
@@ -477,7 +479,8 @@ The table lists the Mocha values.
 | `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
 | `c` | Complete your PR or set auto-complete: pick the merge strategy, `space` ticks *Delete source branch*, *Transition linked work items*, *Set auto-complete* and *Bypass branch policies*, edit the merge commit message, then `enter`. A PR that is not ready starts with auto-complete ticked; if auto-complete is set, *Cancel auto-complete* is the last row. Bypassing asks `y` / `n` first. `esc` cancels and nothing is sent |
 | `v` | Vote on the PR: pick approve, approve with suggestions, wait for author, reject or reset vote, then `enter`. `esc` cancels and nothing is sent |
-| `e` | Actions menu of the selected item. PR: abandon (asks `y` / `n`) or reactivate, publish or mark as draft, edit title or description, add reviewer (name or email), remove reviewer, link work item (id), then `enter`. Pipeline run: re-run on the same branch and commit, queue a new run on a branch you type (prefilled), cancel a run that is queued or running; each asks `y` / `n` first. `esc` cancels and nothing is sent |
+| `e` | Actions menu of the selected item. PR: abandon (asks `y` / `n`) or reactivate, publish or mark as draft, edit title or description, add reviewer (name or email), remove reviewer, link work item (id), then `enter`. Work item: change state, edit title, assign to someone (type to filter the people from the loaded lists, `enter` on text without a match searches the organization), set priority (1–4), move to another sprint, or create a child task (title). Pipeline run: re-run on the same branch and commit, queue a new run on a branch you type (prefilled), cancel a run that is queued or running; each asks `y` / `n` first. `esc` cancels and nothing is sent |
+| `n` | Create a work item: pick the type (your configured types first), type the title, `enter`. It is assigned to you, in the shown sprint and the team's default area |
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `y` | Copy the PR (`!1234`) or work item (`#5678`) number |
 | `Y` | Copy the link to the PR, work item or pipeline run |
@@ -534,7 +537,7 @@ A key is a character (`"q"`, `"G"`, `"?"`) or a name (`enter`, `esc`, `tab`, `sh
 | `copy_link` | `Y` | `next_link` | `l` |
 | `prev_link` | `L` | `errors` | `E` |
 | `change_token` | `T` | `switch_project` | `P` |
-| `help` | `?` | | |
+| `help` | `?` | `new_work_item` | `n` |
 
 ## Mouse
 

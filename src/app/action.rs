@@ -46,6 +46,7 @@ pub enum Action {
     JumpToPanel(u8),
     Search,
     Errors,
+    NewWorkItem,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -86,6 +87,8 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::Unassign,
             Action::Tag,
             Action::Comment,
+            Action::PrActions,
+            Action::NewWorkItem,
         ],
     ),
     (
@@ -104,7 +107,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
 
 impl Action {
     /// Every action that can be bound in the config's `keys`; `Toggle` (`space`) is fixed.
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 50] = [
         Self::Quit,
         Self::Cancel,
         Self::Up,
@@ -154,6 +157,7 @@ impl Action {
         Self::JumpToPanel(6),
         Self::Search,
         Self::Errors,
+        Self::NewWorkItem,
     ];
 
     /// Name in the config's `keys`.
@@ -209,6 +213,7 @@ impl Action {
             Self::JumpToPanel(_) => "panel_6",
             Self::Search => "search",
             Self::Errors => "errors",
+            Self::NewWorkItem => "new_work_item",
         }
     }
 
@@ -284,6 +289,7 @@ impl Action {
             Self::JumpToPanel(_) => "go to box",
             Self::Search => "search",
             Self::Errors => "errors",
+            Self::NewWorkItem => "new work item",
         }
     }
 }

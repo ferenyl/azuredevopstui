@@ -21,7 +21,7 @@ use ratatui_image::StatefulImage;
 use crate::api::{PullRequest, ReviewSignals, WorkItem};
 use crate::app::{
     App, Detail, DetailInfo, DetailTab, HitAreas, InboxEntry, Panel, PanelHit, Popup, Screen,
-    Selection, Signals, SortKind, TextTarget,
+    Selection, Signals, SortKind, TextTarget, WorkItemField,
 };
 use crate::images::{ImageState, file_name, image_marker};
 use crate::rich_text::{Marks, RichText};
@@ -158,6 +158,14 @@ pub fn render(frame: &mut Frame, app: &App) {
                 TextTarget::QueueBranch(build) => {
                     format!(" Branch to queue {} on", build.definition.name)
                 }
+                TextTarget::WorkItemTitle(item) => format!(" Title of #{}", item.id),
+                TextTarget::NewWorkItem {
+                    parent: Some(parent),
+                    ..
+                } => format!(" Title of the new task under #{}", parent.id),
+                TextTarget::NewWorkItem { kind, parent: None } => {
+                    format!(" Title of the new {kind}")
+                }
             };
             let title = format!("{title} · shift/alt+enter: new line ");
             popup::render_text_input(frame, app, &title, text, main);
@@ -213,6 +221,36 @@ pub fn render(frame: &mut Frame, app: &App) {
             popup::render_picker(frame, app, &title, selection, main);
         }
         Some(Popup::Errors { first }) => popup::render_errors(frame, app, *first, main),
+        Some(Popup::WorkItemActions {
+            item, selection, ..
+        }) => {
+            let title = format!(" #{} ", item.id);
+            popup::render_picker(frame, app, &title, selection, main);
+        }
+        Some(Popup::WorkItemField {
+            item,
+            field,
+            selection,
+        }) => {
+            let name = match field {
+                WorkItemField::State => "State",
+                WorkItemField::Priority => "Priority",
+                WorkItemField::Iteration => "Sprint",
+            };
+            let title = format!(" {name} of #{} ", item.id);
+            popup::render_picker(frame, app, &title, selection, main);
+        }
+        Some(Popup::Assignee(picker)) => {
+            let (before, after) = picker.query.split();
+            let title = format!(
+                " Assign #{}: {before}▏{after}  (enter without a match: search) ",
+                picker.item.id
+            );
+            popup::render_picker(frame, app, &title, &picker.selection, main);
+        }
+        Some(Popup::NewWorkItem { selection }) => {
+            popup::render_picker(frame, app, " New work item type ", selection, main);
+        }
         None => {}
     }
     if app.show_help {

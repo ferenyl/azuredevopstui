@@ -25,6 +25,7 @@ mod threads;
 mod vote;
 mod wide_chars;
 mod wizard;
+mod work_item_edit;
 
 use std::fs;
 use std::path::Path;

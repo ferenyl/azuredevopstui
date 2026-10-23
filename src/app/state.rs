@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
-    Build, ColumnTarget, CompletionOptions, Iteration, Mention, PullRequest, PullRequestChecks,
-    PullRequestDetails, WorkItem, WorkItemDetails, compare_timestamps, is_approved,
-    is_reviewer_policy,
+    Build, ColumnTarget, CompletionOptions, Iteration, Mention, Person, PullRequest,
+    PullRequestChecks, PullRequestDetails, WorkItem, WorkItemDetails, compare_timestamps,
+    is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 
@@ -167,6 +167,147 @@ pub enum Popup {
         actions: Vec<BuildAction>,
         selection: Selection,
     },
+    /// What can be done to the work item; `selection` lists the labels of `actions`.
+    WorkItemActions {
+        item: Box<WorkItem>,
+        actions: Vec<WorkItemAction>,
+        selection: Selection,
+    },
+    /// The new value of `field`; `selection` lists the values.
+    WorkItemField {
+        item: Box<WorkItem>,
+        field: WorkItemField,
+        selection: Selection,
+    },
+    Assignee(AssigneePicker),
+    /// The type of the work item to create.
+    NewWorkItem {
+        selection: Selection,
+    },
+}
+
+/// An entry of the work item menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkItemAction {
+    ChangeState,
+    EditTitle,
+    AssignTo,
+    Priority,
+    Iteration,
+    NewChildTask,
+}
+
+impl WorkItemAction {
+    pub const ALL: [Self; 6] = [
+        Self::ChangeState,
+        Self::EditTitle,
+        Self::AssignTo,
+        Self::Priority,
+        Self::Iteration,
+        Self::NewChildTask,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ChangeState => "Change state",
+            Self::EditTitle => "Edit title",
+            Self::AssignTo => "Assign to…",
+            Self::Priority => "Set priority",
+            Self::Iteration => "Move to sprint",
+            Self::NewChildTask => "New child task",
+        }
+    }
+}
+
+/// A work item field picked from a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkItemField {
+    State,
+    Priority,
+    Iteration,
+}
+
+impl WorkItemField {
+    /// The value of the field on `item`, as listed in the picker.
+    pub fn value(self, item: &WorkItem) -> Option<String> {
+        match self {
+            Self::State => Some(item.fields.state.clone()),
+            Self::Priority => item.fields.priority.map(|priority| priority.to_string()),
+            Self::Iteration => item.fields.iteration_path.clone(),
+        }
+    }
+}
+
+/// People to assign a work item to, filtered by the typed query.
+pub struct AssigneePicker {
+    pub item: Box<WorkItem>,
+    /// Unassigned first, then the known people by name.
+    pub people: Vec<Person>,
+    pub query: TextInput,
+    /// Labels of the people matching the query.
+    pub selection: Selection,
+    /// Index in `people` of each row of `selection`.
+    matches: Vec<usize>,
+}
+
+impl AssigneePicker {
+    /// Highlights the current assignee.
+    pub fn new(item: Box<WorkItem>, people: Vec<Person>) -> Self {
+        let mut picker = Self {
+            item,
+            people,
+            query: TextInput::default(),
+            selection: Selection::new(Vec::new()),
+            matches: Vec::new(),
+        };
+        picker.filter();
+        let assignee = picker.item.fields.assigned_to.as_ref();
+        let current = picker.matches.iter().position(|index| {
+            let person = &picker.people[*index];
+            match assignee {
+                Some(assignee) => person.display_name == assignee.display_name,
+                None => person.unique_name.is_empty(),
+            }
+        });
+        picker.selection.selected = current.unwrap_or(0);
+        picker
+    }
+
+    pub fn filter(&mut self) {
+        let query = self.query.as_str().trim().to_lowercase();
+        self.matches = (0..self.people.len())
+            .filter(|index| {
+                let person = &self.people[*index];
+                person.display_name.to_lowercase().contains(&query)
+                    || person.unique_name.to_lowercase().contains(&query)
+            })
+            .collect();
+        let labels = self
+            .matches
+            .iter()
+            .map(|index| person_label(&self.people[*index]))
+            .collect();
+        self.selection = Selection::new(labels);
+    }
+
+    /// The highlighted person, if any matches the query.
+    pub fn person(&self) -> Option<&Person> {
+        let index = self.matches.get(self.selection.selected)?;
+        self.people.get(*index)
+    }
+}
+
+fn person_label(person: &Person) -> String {
+    if person.unique_name.is_empty() {
+        "Unassigned".into()
+    } else if person
+        .unique_name
+        .eq_ignore_ascii_case(&person.display_name)
+    {
+        person.display_name.clone()
+    } else {
+        format!("{} <{}>", person.display_name, person.unique_name)
+    }
 }
 
 /// An entry of the pipeline run menu.
@@ -265,6 +406,12 @@ pub enum TextTarget {
     LinkWorkItem(Box<PullRequest>),
     /// The branch to queue a new run of the pipeline on.
     QueueBranch(Box<Build>),
+    WorkItemTitle(Box<WorkItem>),
+    /// The title of a new `kind` work item, a child of `parent` when given.
+    NewWorkItem {
+        kind: String,
+        parent: Option<Box<WorkItem>>,
+    },
 }
 
 pub struct ColumnPicker {

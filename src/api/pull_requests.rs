@@ -8,9 +8,9 @@ use serde_json::{Value, json};
 
 use super::models::{
     ChangeKind, ChangedFile, Comment, FileContent, GitItem, Identity, IterationChanges,
-    ListResponse, Partial, PolicyEvaluation, PullRequest, PullRequestChanges, PullRequestChecks,
-    PullRequestDetails, PullRequestIteration, PullRequestStatus, ResourceRef, ReviewSignals,
-    Thread,
+    ListResponse, Partial, Person, PolicyEvaluation, PullRequest, PullRequestChanges,
+    PullRequestChecks, PullRequestDetails, PullRequestIteration, PullRequestStatus, ResourceRef,
+    ReviewSignals, Thread,
 };
 use super::{MAX_CONCURRENT_REQUESTS, ProjectApi, compare_timestamps, is_unauthorized};
 use crate::config::{MergeStrategy, OtherPrsFilter};
@@ -594,17 +594,9 @@ impl ProjectApi {
         if let Some(id) = cached {
             return Ok(id);
         }
-        let base = format!("{}/{}", self.client.urls.vssps_dev_azure, self.organization);
-        let identities: ListResponse<Identity> = self
-            .client
-            .get(
-                &base,
-                &["_apis", "identities"],
-                &[("searchFilter", "General"), ("filterValue", name)],
-            )
-            .await?;
-        let id = identities
-            .value
+        let id = self
+            .find_identities(name)
+            .await?
             .into_iter()
             .next()
             .map(|identity| identity.id)
@@ -614,6 +606,37 @@ impl ProjectApi {
             .expect("identity cache")
             .insert(name.to_string(), id.clone());
         Ok(id)
+    }
+
+    /// People whose name or email matches `text`.
+    pub async fn search_identities(&self, text: &str) -> Result<Vec<Person>> {
+        let identities = self.find_identities(text).await?;
+        Ok(identities
+            .into_iter()
+            .map(|identity| {
+                let unique_name = identity
+                    .properties
+                    .account
+                    .map_or_else(|| identity.provider_display_name.clone(), |a| a.value);
+                Person {
+                    display_name: identity.provider_display_name,
+                    unique_name,
+                }
+            })
+            .collect())
+    }
+
+    async fn find_identities(&self, text: &str) -> Result<Vec<Identity>> {
+        let base = format!("{}/{}", self.client.urls.vssps_dev_azure, self.organization);
+        let identities: ListResponse<Identity> = self
+            .client
+            .get(
+                &base,
+                &["_apis", "identities"],
+                &[("searchFilter", "General"), ("filterValue", text)],
+            )
+            .await?;
+        Ok(identities.value)
     }
 
     /// The files changed in the latest iteration, compared with the target branch.
@@ -1696,6 +1719,39 @@ mod tests {
         let pr = pull_request(7, "PR", "me", "2026-10-01T10:00:00Z");
 
         client.add_reviewer(&pr, "anna@example.com").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_identities_gives_names_and_accounts() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/_apis/identities"))
+            .and(query_param("filterValue", "ann"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "id": "1", "providerDisplayName": "Anna Berg",
+                  "properties": { "Account": { "$value": "anna@example.com" } } },
+                { "id": "2", "providerDisplayName": "Annika" }
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let people = client.search_identities("ann").await.unwrap();
+
+        assert_eq!(
+            people,
+            [
+                Person {
+                    display_name: "Anna Berg".into(),
+                    unique_name: "anna@example.com".into()
+                },
+                Person {
+                    display_name: "Annika".into(),
+                    unique_name: "Annika".into()
+                }
+            ]
+        );
     }
 
     #[tokio::test]

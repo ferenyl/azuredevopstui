@@ -1,8 +1,9 @@
 use anyhow::Result;
 
 use crate::api::{
-    Board, Build, CurrentUser, Iteration, Mention, Partial, PullRequest, PullRequestChanges,
-    PullRequestChecks, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
+    Board, Build, CurrentUser, Iteration, Mention, Partial, Person, PullRequest,
+    PullRequestChanges, PullRequestChecks, PullRequestDetails, SprintWorkItems, WorkItem,
+    WorkItemDetails,
 };
 use crate::auth::Auth;
 use crate::config::{Config, MergeStrategy};
@@ -95,6 +96,29 @@ pub enum Message {
     PrDescription {
         pr: Box<PullRequest>,
         result: Result<String>,
+    },
+    /// The states of the type of `item`, to pick its new state from.
+    WorkItemStates {
+        item: Box<WorkItem>,
+        result: Result<Vec<String>>,
+    },
+    /// The team's sprints, to move `item` to.
+    WorkItemSprints {
+        item: Box<WorkItem>,
+        result: Result<Vec<Iteration>>,
+    },
+    /// People matching `query`, to assign `item` to.
+    Identities {
+        item: Box<WorkItem>,
+        query: String,
+        result: Result<Vec<Person>>,
+    },
+    /// The types a new work item can have.
+    NewWorkItemTypes(Result<Vec<String>>),
+    /// A work item was created, as a child of `parent` when given.
+    WorkItemCreated {
+        parent: Option<u32>,
+        result: Result<u32>,
     },
     /// A notification closed; holds the item URL when its open action was clicked.
     Notified(Option<String>),
