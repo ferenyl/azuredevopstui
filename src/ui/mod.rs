@@ -63,8 +63,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         Some(Popup::Complete(picker)) => {
             let title = format!(" Complete !{} ", picker.pr.pull_request_id);
             let selection = Selection {
-                items: picker.items(),
                 selected: picker.selection.selected,
+                ..Selection::new(picker.items())
             };
             popup::render_picker(frame, app, &title, &selection, main);
         }
@@ -86,8 +86,8 @@ pub fn render(frame: &mut Frame, app: &App) {
                 })
                 .collect();
             let selection = Selection {
-                items,
                 selected: picker.selection.selected,
+                ..Selection::new(items)
             };
             let (before, after) = picker.query.split();
             let title = format!(" Tag #{}: {before}▏{after}", picker.work_item_id);
@@ -122,8 +122,8 @@ pub fn render(frame: &mut Frame, app: &App) {
                 })
                 .collect();
             let selection = Selection {
-                items,
                 selected: picker.selection.selected,
+                ..Selection::new(items)
             };
             let (before, after) = picker.query.split();
             let title = format!(" Sprint: {before}▏{after}");
@@ -174,8 +174,8 @@ pub fn render(frame: &mut Frame, app: &App) {
                 .map(|(kind, checked)| format!("[{}] {kind}", if *checked { "x" } else { " " }))
                 .collect();
             let selection = Selection {
-                items,
                 selected: selection.selected,
+                ..Selection::new(items)
             };
             let title = if matches!(app.popup, Some(Popup::PrFilter { .. })) {
                 " Filter others' PRs "
@@ -244,6 +244,16 @@ fn render_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
     }
     if panel == Panel::Builds && !app.data.build_filter.is_empty() {
         title.push_str(&format!(" · \"{}\"", app.data.build_filter));
+    }
+    match (&app.search, panel.index()) {
+        (Some((searching, input)), _) if *searching == panel => {
+            let (before, after) = input.split();
+            title.push_str(&format!(" /{before}▏{after}"));
+        }
+        (_, Some(index)) if !app.data.filters[index].is_empty() => {
+            title.push_str(&format!(" /{}", app.data.filters[index]));
+        }
+        _ => {}
     }
     if let (Some(kind), Some(config)) = (panel.sort_kind(), &app.config) {
         let sort = match kind {
@@ -780,23 +790,29 @@ fn panel_items(app: &App, panel: Panel) -> Option<Vec<Line<'static>>> {
     let data = &app.data;
     match panel {
         Panel::Inbox => (data.my_prs().is_some() && data.other_prs().is_some()).then(|| {
-            data.inbox()
-                .iter()
+            data.shown_inbox()
+                .into_iter()
                 .map(|entry| inbox_line(app, entry))
                 .collect()
         }),
-        Panel::MyPrs => data.my_prs().map(|prs| pr_lines(app, prs.iter(), false)),
+        Panel::MyPrs => data
+            .shown_my_prs()
+            .map(|prs| pr_lines(app, prs.into_iter(), false)),
         Panel::OtherPrs => data
             .shown_other_prs()
             .map(|prs| pr_lines(app, prs.into_iter(), true)),
-        Panel::MyWorkItems => data
-            .my_work_items
-            .as_ref()
-            .map(|items| items.iter().map(|item| work_item_line(app, item)).collect()),
-        Panel::ReadyWorkItems => data
-            .ready_work_items
-            .as_ref()
-            .map(|items| items.iter().map(|item| work_item_line(app, item)).collect()),
+        Panel::MyWorkItems => data.shown_my_work_items().map(|items| {
+            items
+                .into_iter()
+                .map(|item| work_item_line(app, item))
+                .collect()
+        }),
+        Panel::ReadyWorkItems => data.shown_ready_work_items().map(|items| {
+            items
+                .into_iter()
+                .map(|item| work_item_line(app, item))
+                .collect()
+        }),
         Panel::Builds => data.shown_builds().map(|builds| {
             builds
                 .iter()

@@ -125,6 +125,8 @@ pub struct App {
     should_quit: bool,
     /// The focused panel fills the left column, or the whole screen when it is the detail.
     pub zoomed: bool,
+    /// The left panel whose search is being typed, with its text.
+    pub search: Option<(Panel, TextInput)>,
     /// Where panels, tabs and the open list were drawn last frame, for mouse hit testing.
     pub areas: RefCell<HitAreas>,
     /// Mutations in flight and the history of errors.
@@ -179,6 +181,7 @@ impl App {
             rx,
             should_quit: false,
             zoomed: false,
+            search: None,
             areas: RefCell::default(),
             activity: Activity::default(),
         }

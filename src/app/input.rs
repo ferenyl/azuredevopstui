@@ -1,4 +1,4 @@
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{
     Action, App, Detail, DetailTab, LEFT_PANELS, Panel, Popup, Retry, Screen, SetupStep, TextInput,
@@ -40,11 +40,80 @@ impl App {
         {
             return;
         }
-        if self.handle_popup_key(key) {
+        if self.handle_search_key(key) || self.handle_popup_key(key) {
             return;
         }
         if let Some(action) = Action::from_key(key) {
             self.apply(action);
+            if self
+                .search
+                .as_ref()
+                .is_some_and(|(panel, _)| *panel != self.focus)
+            {
+                self.search = None;
+            }
+        }
+    }
+
+    /// Types into the search of a list or a setup picker; true when the key was taken.
+    fn handle_search_key(&mut self, key: KeyEvent) -> bool {
+        if let Screen::Setup(step) = &mut self.screen {
+            return step
+                .selection_mut()
+                .is_some_and(|selection| selection.edit_query(key));
+        }
+        if self.popup.is_some() || self.show_help {
+            return false;
+        }
+        let Some((panel, input)) = &mut self.search else {
+            return false;
+        };
+        let panel = *panel;
+        let Some(index) = panel.index() else {
+            return false;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.data.filters[index].clear();
+                self.search = None;
+            }
+            KeyCode::Enter => self.search = None,
+            _ if input.handle_key(key, false) => {
+                self.data.filters[index] = input.as_str().to_string();
+                self.selections[index] = 0;
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn start_search(&mut self) {
+        match &mut self.screen {
+            Screen::Setup(step) => {
+                if let Some(selection) = step.selection_mut() {
+                    selection.start_query();
+                }
+            }
+            Screen::Main => {
+                if let Some(index) = self.focus.index() {
+                    let input = TextInput::new(self.data.filters[index].as_str());
+                    self.search = Some((self.focus, input));
+                }
+            }
+        }
+    }
+
+    /// Esc in a setup picker first shows all items again.
+    fn clear_setup_query(&mut self) -> bool {
+        let Screen::Setup(step) = &mut self.screen else {
+            return false;
+        };
+        match step.selection_mut() {
+            Some(selection) if selection.query.is_some() => {
+                selection.clear_query();
+                true
+            }
+            _ => false,
         }
     }
 
@@ -62,6 +131,7 @@ impl App {
         }
         match action {
             Action::Quit => self.should_quit = true,
+            Action::Cancel if self.clear_setup_query() => {}
             Action::Cancel => match self.screen {
                 Screen::Setup(SetupStep::EnterPat {
                     cancelable: true, ..
@@ -150,6 +220,7 @@ impl App {
             | Action::JumpToPanel(_)
             | Action::Errors
                 if !matches!(self.screen, Screen::Main) => {}
+            Action::Search => self.start_search(),
             Action::SwitchProject => self.switch_project(),
             Action::Top => self.move_by(Move::Top),
             Action::Bottom => self.move_by(Move::Bottom),
@@ -854,6 +925,98 @@ mod tests {
 
         press(&mut app, KeyCode::Esc);
         assert!(!app.zoomed);
+        assert!(!app.should_quit);
+    }
+
+    fn type_keys(app: &mut App, text: &str) {
+        for c in text.chars() {
+            press(app, KeyCode::Char(c));
+        }
+    }
+
+    #[test]
+    fn slash_filters_the_focused_list_live_and_takes_letters_as_text() {
+        let mut app = app();
+        app.selections[1] = 2;
+
+        press(&mut app, KeyCode::Char('/'));
+        type_keys(&mut app, "sec");
+
+        assert!(!app.should_quit);
+        assert_eq!(app.data.len(Panel::MyPrs), 1);
+        assert_eq!(app.data.filters[1], "sec");
+        assert_eq!(app.selections[1], 0);
+        assert_eq!(app.data.len(Panel::OtherPrs), 1);
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(app.data.filters[1], "se");
+    }
+
+    #[test]
+    fn enter_keeps_the_filter_and_esc_clears_it() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('/'));
+        type_keys(&mut app, "third");
+
+        press(&mut app, KeyCode::Enter);
+        assert!(app.search.is_none());
+        assert_eq!(app.data.len(Panel::MyPrs), 1);
+        assert!(app.detail.is_none());
+
+        press(&mut app, KeyCode::Char('/'));
+        assert!(matches!(&app.search, Some((_, input)) if input.as_str() == "third"));
+        press(&mut app, KeyCode::Esc);
+
+        assert!(app.search.is_none());
+        assert_eq!(app.data.len(Panel::MyPrs), 3);
+    }
+
+    #[test]
+    fn moving_focus_ends_the_search_but_keeps_the_filter() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('/'));
+        type_keys(&mut app, "first");
+
+        ctrl(&mut app, 'j');
+
+        assert!(app.search.is_none());
+        assert_eq!(app.data.len(Panel::MyPrs), 1);
+        assert_eq!(app.focus, Panel::MyWorkItems);
+    }
+
+    #[test]
+    fn slash_in_the_detail_does_nothing() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        ctrl(&mut app, 'l');
+
+        press(&mut app, KeyCode::Char('/'));
+
+        assert!(app.search.is_none());
+    }
+
+    #[test]
+    fn slash_filters_a_setup_list_and_esc_clears_before_going_back() {
+        let mut app = App::new(None, None);
+        app.handle_message(Message::Organizations(Ok(vec![
+            "alpha".into(),
+            "beta".into(),
+        ])));
+
+        press(&mut app, KeyCode::Char('/'));
+        type_keys(&mut app, "bet");
+        let Screen::Setup(step) = &app.screen else {
+            panic!("not in setup");
+        };
+        assert_eq!(step.selection().unwrap().visible(), ["beta"]);
+        assert!(!app.should_quit);
+
+        press(&mut app, KeyCode::Esc);
+        let Screen::Setup(step) = &app.screen else {
+            panic!("not in setup");
+        };
+        let selection = step.selection().unwrap();
+        assert!(selection.query.is_none());
+        assert_eq!(selection.current(), Some("beta"));
         assert!(!app.should_quit);
     }
 

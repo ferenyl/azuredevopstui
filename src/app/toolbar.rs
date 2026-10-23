@@ -1,7 +1,7 @@
 use super::{Action, App, Detail, Panel, Popup, Retry, Screen, SetupStep};
 
 /// Every action the toolbar can show, in display order.
-const TOOLBAR: [Action; 30] = [
+const TOOLBAR: [Action; 31] = [
     Action::Down,
     Action::Up,
     Action::Toggle,
@@ -25,6 +25,7 @@ const TOOLBAR: [Action; 30] = [
     Action::NextLink,
     Action::Sort,
     Action::Filter,
+    Action::Search,
     Action::PrActions,
     Action::Zoom,
     Action::Reload,
@@ -58,6 +59,9 @@ impl App {
                 Self::can_in_setup(step, action, self.can_enter_pat(), self.can_go_back())
             }
             Screen::Main if self.show_help => action == Action::Cancel,
+            Screen::Main if self.search.is_some() && self.popup.is_none() => {
+                matches!(action, Action::Confirm | Action::Cancel)
+            }
             Screen::Main => match &self.popup {
                 Some(popup) => Self::can_in_popup(popup, action),
                 None => self.can_in_main(action),
@@ -74,8 +78,11 @@ impl App {
         match action {
             Action::Confirm => step.is_input() || step.selection().is_some(),
             Action::Cancel => {
-                step.is_input() || (can_go_back && !matches!(step, SetupStep::Loading(_)))
+                step.is_input()
+                    || step.selection().is_some_and(|s| s.query.is_some())
+                    || (can_go_back && !matches!(step, SetupStep::Loading(_)))
             }
+            Action::Search => step.selection().is_some_and(|s| s.query.is_none()),
             Action::Down | Action::Up => step.selection().is_some(),
             Action::Reload => matches!(step, SetupStep::Failed { .. }),
             Action::ChangeToken => {
@@ -87,7 +94,9 @@ impl App {
                     }
                 ) && can_enter_pat
             }
-            Action::Quit => !step.is_input(),
+            Action::Quit => {
+                !step.is_input() && !step.selection().is_some_and(|s| s.query.is_some())
+            }
             _ => false,
         }
     }
@@ -137,6 +146,7 @@ impl App {
             Action::NextLink => !self.detail_links.borrow().is_empty(),
             Action::Sort => !is_build && self.focus != Panel::Builds,
             Action::Filter => item.is_some() || self.focus == Panel::Builds,
+            Action::Search => self.focus.index().is_some(),
             _ => false,
         }
     }
@@ -355,7 +365,7 @@ mod tests {
             ("loading", vec![Quit]),
             ("enter pat", vec![Confirm, Cancel]),
             ("enter organization", vec![Confirm, Cancel]),
-            ("select organization", vec![Down, Up, Confirm, Quit]),
+            ("select organization", vec![Down, Up, Confirm, Search, Quit]),
             ("failed authenticate", vec![Reload, ChangeToken, Quit]),
             ("failed continue", vec![Reload, Quit]),
             ("help", vec![Cancel]),
@@ -378,6 +388,7 @@ mod tests {
                     CopyLink,
                     Sort,
                     Filter,
+                    Search,
                     PrActions,
                     Zoom,
                     Reload,
@@ -401,6 +412,7 @@ mod tests {
                     CopyLink,
                     Sort,
                     Filter,
+                    Search,
                     PrActions,
                     Zoom,
                     Reload,
@@ -424,6 +436,7 @@ mod tests {
                     CopyLink,
                     Sort,
                     Filter,
+                    Search,
                     PrActions,
                     Zoom,
                     Reload,
@@ -448,6 +461,7 @@ mod tests {
                     CopyLink,
                     Sort,
                     Filter,
+                    Search,
                     Zoom,
                     Reload,
                     SwitchProject,
@@ -470,6 +484,7 @@ mod tests {
                     CopyLink,
                     Sort,
                     Filter,
+                    Search,
                     Zoom,
                     Reload,
                     SwitchProject,
@@ -492,6 +507,7 @@ mod tests {
                     CopyLink,
                     Sort,
                     Filter,
+                    Search,
                     Zoom,
                     Reload,
                     SwitchProject,
@@ -521,6 +537,7 @@ mod tests {
                     Down,
                     FocusRight,
                     Filter,
+                    Search,
                     Zoom,
                     Reload,
                     SwitchProject,
@@ -534,6 +551,7 @@ mod tests {
                     Down,
                     FocusRight,
                     Sort,
+                    Search,
                     Zoom,
                     Reload,
                     SwitchProject,
