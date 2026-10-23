@@ -1,6 +1,7 @@
 mod action;
 mod actions;
 mod activity;
+mod build_log;
 #[cfg(test)]
 mod e2e;
 mod editor;
@@ -24,6 +25,7 @@ mod wizard;
 
 pub use action::{Action, HELP};
 pub use activity::Activity;
+pub use build_log::BuildLog;
 pub use files::Files;
 pub use keymap::Keymap;
 pub use mouse::{HitAreas, PanelHit, PickerHit};
@@ -92,6 +94,10 @@ pub struct App {
     pub list_height: std::cell::Cell<u16>,
     /// Changed files of the shown PR, once its Files tab was shown.
     pub files: Option<Files>,
+    /// Selected task of the shown run's timeline, among the rows with a log.
+    pub timeline_selection: usize,
+    /// The task log open in the detail pane.
+    pub log: Option<BuildLog>,
     /// Targets of the links drawn in the detail pane last frame, in reading order.
     pub detail_links: RefCell<Vec<String>>,
     /// Selected entry of `detail_links`.
@@ -167,6 +173,8 @@ impl App {
             older_comments_failed: false,
             list_height: std::cell::Cell::new(10),
             files: None,
+            timeline_selection: 0,
+            log: None,
             detail_links: RefCell::default(),
             link_index: None,
             #[cfg(test)]

@@ -18,7 +18,9 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
 - **Sprint overview** in the detail panel when nothing is open: the sprint dates, the work days left and your items per board column. `esc` closes an open item and brings it back.
 - **Sprint picker**: press `i` to show another sprint than the current one. See [Sprint](#sprint).
 - **Detail panel** with tabs:
-  - **Pipeline run**: pipeline, run number, branch, status, reason, times and duration. `e` re-runs it, queues a new run on another branch or cancels it, after a `y` / `n` confirmation.
+  - **Pipeline run**:
+    - **Overview** shows pipeline, run number, branch, status, reason, times and duration. `e` re-runs it, queues a new run on another branch or cancels it, after a `y` / `n` confirmation.
+    - **Timeline** lists the stages, jobs and tasks of the run with their status; failed tasks show their error messages. With the detail panel focused, `j`/`k` select a task, `enter` shows its log (the last 5000 lines, `##[error]` in red) and `esc` goes back to the timeline. The failed task is selected first.
   - **Pull request**:
     - **Overview** shows status, branches, merge status, reviewers and their votes, the linked work items (with a warning when there are none), and the description.
     - **Comments** shows the comment threads with their status (active, resolved, won't fix, closed) and file path. Select a thread with `]` / `[`, reply with `m`, and change its status with `x`. `m` without a selected thread starts a new one.

@@ -294,6 +294,12 @@ impl App {
             }
             Message::PullRequestChanges { id, result } => self.files_loaded(id, result),
             Message::FileDiff { id, file, result } => self.diff_loaded(id, file, result),
+            Message::BuildTimeline { id, result } => self.timeline_loaded(id, result),
+            Message::BuildLog {
+                build_id,
+                log_id,
+                result,
+            } => self.build_log_loaded(build_id, log_id, result),
         }
         if let Some(config) = &self.config {
             self.data.sort(&config.sort);

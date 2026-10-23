@@ -2,8 +2,8 @@ use anyhow::Result;
 
 use crate::api::{
     Board, Build, CommentsPage, CurrentUser, Iteration, Mention, Partial, PullRequest,
-    PullRequestChanges, PullRequestChecks, PullRequestDetails, SprintWorkItems, WorkItem,
-    WorkItemDetails,
+    PullRequestChanges, PullRequestChecks, PullRequestDetails, SprintWorkItems, TimelineRecord,
+    WorkItem, WorkItemDetails,
 };
 use crate::auth::Auth;
 use crate::config::{Config, MergeStrategy};
@@ -84,6 +84,15 @@ pub enum Message {
         /// Index into the changed files.
         file: usize,
         result: Result<FileDiff>,
+    },
+    BuildTimeline {
+        id: u32,
+        result: Result<Vec<TimelineRecord>>,
+    },
+    BuildLog {
+        build_id: u32,
+        log_id: u32,
+        result: Result<String>,
     },
     PullRequestUpdated {
         id: u32,

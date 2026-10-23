@@ -14,6 +14,7 @@ pub enum Load {
     Signals(u32),
     Files,
     Diff,
+    Log,
     /// The next page of older comments of the shown work item.
     Comments,
 }

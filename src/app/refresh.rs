@@ -163,7 +163,13 @@ impl App {
                     Message::WorkItemDetails { id, result }
                 });
             }
-            Detail::Build(_) => self.loads.cancel(Load::Detail),
+            Detail::Build(build) => {
+                let id = build.id;
+                self.spawn_load(Load::Detail, async move {
+                    let result = api.build_timeline(id).await;
+                    Message::BuildTimeline { id, result }
+                });
+            }
         }
     }
 
@@ -231,7 +237,7 @@ impl App {
                 );
                 rich.extend(info.comments.iter().map(|comment| &comment.text));
             }
-            None => {}
+            Some(DetailInfo::Build(_)) | None => {}
         }
         let urls = texts
             .into_iter()
@@ -288,6 +294,7 @@ impl App {
         self.loads.cancel(Load::Comments);
         self.older_comments_failed = false;
         self.clear_files();
+        self.clear_build_log();
         self.detail_scroll = 0;
         self.link_index = None;
         self.detail_tab = DetailTab::Overview;
@@ -301,6 +308,7 @@ impl App {
         self.detail = None;
         self.detail_info = None;
         self.clear_files();
+        self.clear_build_log();
         self.detail_links.borrow_mut().clear();
         self.link_index = None;
         if self.focus == Panel::Detail {

@@ -1,4 +1,5 @@
 mod build_detail;
+mod build_log;
 pub mod layout;
 mod popup;
 mod pr_detail;
@@ -390,6 +391,9 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
         (Detail::WorkItem(item), _) => {
             workitem_detail::lines(app, item, None, app.detail_tab, width)
         }
+        (Detail::Build(_), _) if app.detail_tab == DetailTab::Timeline => {
+            build_log::lines(app, width)
+        }
         (Detail::Build(build), _) => build_detail::lines(app, build),
     };
     let (lines, slots) = place_images(app, lines, width);
@@ -402,6 +406,9 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
     let scroll = match detail {
         Detail::PullRequest(_) if app.detail_tab == DetailTab::Files => {
             pr_files::list_scroll(app, content.height, content.width)
+        }
+        Detail::Build(_) if app.detail_tab == DetailTab::Timeline => {
+            build_log::list_scroll(app, content.height, content.width)
         }
         _ => None,
     }
@@ -519,7 +526,7 @@ fn wrapped_rows(line: &Line<'static>, width: u16) -> usize {
 
 fn tab_title(app: &App, tab: DetailTab) -> String {
     let count = match (tab, &app.detail_info) {
-        (DetailTab::Overview, _) => return tab.title().into(),
+        (DetailTab::Overview | DetailTab::Timeline, _) => return tab.title().into(),
         (DetailTab::Comments, Some(DetailInfo::PullRequest(info))) => {
             info.threads.len().to_string()
         }
