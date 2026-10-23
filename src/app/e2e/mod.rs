@@ -5,6 +5,7 @@
 
 mod board;
 mod changes;
+mod cli_start;
 mod comment_paging;
 mod completion;
 mod editor;
