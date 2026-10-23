@@ -14,6 +14,7 @@ pub enum Load {
     Signals(u32),
     Files,
     Diff,
+    Log,
 }
 
 /// The newest request per [`Load`]; responses from older requests are dropped.

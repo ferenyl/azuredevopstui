@@ -4,7 +4,7 @@ use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
     Build, ColumnTarget, CompletionOptions, Iteration, Mention, PullRequest, PullRequestChecks,
-    PullRequestDetails, WorkItem, WorkItemDetails, compare_timestamps, is_approved,
+    PullRequestDetails, TimelineRow, WorkItem, WorkItemDetails, compare_timestamps, is_approved,
     is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
@@ -73,8 +73,12 @@ impl Detail {
                 DetailTab::Links,
                 DetailTab::Comments,
             ],
-            Self::Build(_) => &[DetailTab::Overview],
+            Self::Build(_) => &[DetailTab::Overview, DetailTab::Timeline],
         }
+    }
+
+    pub fn is_build(&self, id: u32) -> bool {
+        matches!(self, Self::Build(_)) && self.id() == id
     }
 }
 
@@ -87,6 +91,7 @@ pub enum DetailTab {
     Comments,
     Checks,
     Files,
+    Timeline,
 }
 
 impl DetailTab {
@@ -98,6 +103,7 @@ impl DetailTab {
             Self::Comments => "Comments",
             Self::Checks => "Checks",
             Self::Files => "Files",
+            Self::Timeline => "Timeline",
         }
     }
 }
@@ -459,6 +465,8 @@ impl SprintPicker {
 pub enum DetailInfo {
     PullRequest(PullRequestDetails),
     WorkItem(Box<WorkItemDetails>),
+    /// The timeline of the shown pipeline run.
+    Build(Vec<TimelineRow>),
 }
 
 /// `None` means not loaded yet.
@@ -1243,6 +1251,10 @@ mod tests {
                 DetailTab::Links,
                 DetailTab::Comments
             ]
+        );
+        assert_eq!(
+            Detail::Build(Box::new(failed_build(1))).tabs(),
+            [DetailTab::Overview, DetailTab::Timeline]
         );
     }
 

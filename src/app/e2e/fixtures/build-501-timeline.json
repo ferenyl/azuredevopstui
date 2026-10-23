@@ -1,0 +1,76 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/build/builds/501/timeline",
+  "body": {
+    "records": [
+      {
+        "id": "task-test",
+        "parentId": "job-build",
+        "type": "Task",
+        "name": "npm test",
+        "state": "completed",
+        "result": "failed",
+        "order": 2,
+        "errorCount": 2,
+        "log": { "id": 7 },
+        "issues": [
+          { "type": "error", "message": "Cannot find module 'orders'" },
+          { "type": "warning", "message": "deprecated flag" }
+        ]
+      },
+      {
+        "id": "task-install",
+        "parentId": "job-build",
+        "type": "Task",
+        "name": "npm install",
+        "state": "completed",
+        "result": "succeeded",
+        "order": 1,
+        "log": { "id": 6 },
+        "issues": []
+      },
+      {
+        "id": "task-publish",
+        "parentId": "job-build",
+        "type": "Task",
+        "name": "Publish artifacts",
+        "state": "completed",
+        "result": "skipped",
+        "order": 3,
+        "log": { "id": 8 },
+        "issues": []
+      },
+      {
+        "id": "job-build",
+        "parentId": "phase-build",
+        "type": "Job",
+        "name": "Build job",
+        "state": "completed",
+        "result": "failed",
+        "order": 1,
+        "errorCount": 2,
+        "issues": []
+      },
+      {
+        "id": "phase-build",
+        "parentId": "stage-ci",
+        "type": "Phase",
+        "name": "Build job",
+        "state": "completed",
+        "result": "failed",
+        "order": 1,
+        "issues": []
+      },
+      {
+        "id": "stage-ci",
+        "parentId": null,
+        "type": "Stage",
+        "name": "Continuous integration",
+        "state": "completed",
+        "result": "failed",
+        "order": 1,
+        "issues": []
+      }
+    ]
+  }
+}
