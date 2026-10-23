@@ -152,6 +152,9 @@ pub fn render(frame: &mut Frame, app: &App) {
                 TextTarget::LinkWorkItem(pr) => {
                     format!(" Work item id to link to !{}", pr.pull_request_id)
                 }
+                TextTarget::QueueBranch(build) => {
+                    format!(" Branch to queue {} on", build.definition.name)
+                }
             };
             let title = format!("{title} · shift/alt+enter: new line ");
             popup::render_text_input(frame, app, &title, text, main);
@@ -194,6 +197,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
         Some(Popup::PrActions { pr, selection, .. }) => {
             let title = format!(" !{} ", pr.pull_request_id);
+            popup::render_picker(frame, app, &title, selection, main);
+        }
+        Some(Popup::BuildActions {
+            build, selection, ..
+        }) => {
+            let title = format!(" {} {} ", build.definition.name, build.build_number);
             popup::render_picker(frame, app, &title, selection, main);
         }
         Some(Popup::RemoveReviewer { pr, selection }) => {

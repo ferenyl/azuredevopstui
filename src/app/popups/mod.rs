@@ -1,3 +1,4 @@
+mod build_actions;
 mod build_filter;
 mod column;
 mod comment;
@@ -40,6 +41,11 @@ impl App {
                 actions,
                 selection,
             }) => self.confirm_pr_action(pr, &actions, selection.selected),
+            Some(Popup::BuildActions {
+                build,
+                actions,
+                selection,
+            }) => self.confirm_build_action(build, &actions, selection.selected),
             Some(Popup::RemoveReviewer { pr, selection }) => {
                 self.confirm_remove_reviewer(pr, selection.selected)
             }
@@ -113,6 +119,7 @@ impl App {
             | Popup::Vote { selection, .. }
             | Popup::ThreadStatus { selection, .. }
             | Popup::PrActions { selection, .. }
+            | Popup::BuildActions { selection, .. }
             | Popup::RemoveReviewer { selection, .. }
             | Popup::Types { selection, .. }
             | Popup::PrFilter { selection, .. } => selection,

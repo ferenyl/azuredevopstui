@@ -131,7 +131,8 @@ impl App {
             Action::Complete => {
                 matches!(&item, Some(Detail::PullRequest(pr)) if self.can_complete(pr))
             }
-            Action::Vote | Action::PrActions => matches!(item, Some(Detail::PullRequest(_))),
+            Action::Vote => matches!(item, Some(Detail::PullRequest(_))),
+            Action::PrActions => matches!(item, Some(Detail::PullRequest(_) | Detail::Build(_))),
             Action::ChangeColumn => matches!(item, Some(Detail::WorkItem(_))),
             Action::Comment => matches!(item, Some(Detail::WorkItem(_) | Detail::PullRequest(_))),
             Action::NextThread | Action::PrevThread => {
@@ -524,6 +525,7 @@ mod tests {
                     OpenInBrowser,
                     CopyLink,
                     Filter,
+                    PrActions,
                     Zoom,
                     Reload,
                     SwitchProject,

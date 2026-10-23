@@ -30,6 +30,7 @@ impl App {
             TextTarget::PrDescription(pr) => self.confirm_pr_description(pr, text),
             TextTarget::AddReviewer(pr) => self.confirm_add_reviewer(pr, text),
             TextTarget::LinkWorkItem(pr) => self.confirm_link_work_item(pr, text),
+            TextTarget::QueueBranch(build) => self.confirm_queue_branch(build, text),
         }
     }
 

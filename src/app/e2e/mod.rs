@@ -16,6 +16,7 @@ mod links;
 mod mouse;
 mod navigation;
 mod notifications;
+mod pipeline_actions;
 mod scroll;
 mod search;
 mod theme;

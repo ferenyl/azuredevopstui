@@ -603,6 +603,7 @@ pub struct Build {
     pub result: Option<String>,
     pub definition: BuildDefinition,
     pub source_branch: String,
+    pub source_version: Option<String>,
     pub repository: Option<BuildRepository>,
     pub reason: Option<String>,
     pub queue_time: Option<String>,

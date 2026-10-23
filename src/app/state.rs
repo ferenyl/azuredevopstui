@@ -161,6 +161,39 @@ pub enum Popup {
     Errors {
         first: usize,
     },
+    /// What can be done to the pipeline run; `selection` lists the labels of `actions`.
+    BuildActions {
+        build: Box<Build>,
+        actions: Vec<BuildAction>,
+        selection: Selection,
+    },
+}
+
+/// An entry of the pipeline run menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildAction {
+    Rerun,
+    Queue,
+    Cancel,
+}
+
+impl BuildAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rerun => "Re-run (same commit)",
+            Self::Queue => "Queue a new run…",
+            Self::Cancel => "Cancel run",
+        }
+    }
+
+    /// The entries that make sense for `build` as it is now.
+    pub fn of(build: &Build) -> Vec<Self> {
+        let mut actions = vec![Self::Rerun, Self::Queue];
+        if matches!(build.status.as_str(), "inProgress" | "notStarted") {
+            actions.push(Self::Cancel);
+        }
+        actions
+    }
 }
 
 /// An entry of the pull request menu.
@@ -230,6 +263,8 @@ pub enum TextTarget {
     AddReviewer(Box<PullRequest>),
     /// The id of the work item to link.
     LinkWorkItem(Box<PullRequest>),
+    /// The branch to queue a new run of the pipeline on.
+    QueueBranch(Box<Build>),
 }
 
 pub struct ColumnPicker {
@@ -346,6 +381,14 @@ pub enum ConfirmAction {
         auto_complete: bool,
     },
     Abandon(Box<PullRequest>),
+    /// Queues a run of the same pipeline on the same branch and commit.
+    Rerun(Box<Build>),
+    /// Queues a run of the pipeline on `branch` (a full ref).
+    Queue {
+        build: Box<Build>,
+        branch: String,
+    },
+    CancelBuild(Box<Build>),
     /// Throws away the typed text; declining brings the text popup back.
     DiscardText {
         target: TextTarget,

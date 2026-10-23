@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
+use super::build_actions::BuildChange;
 use super::pr_actions::PrChange;
 use crate::app::{App, ConfirmAction, Popup};
 
@@ -12,6 +13,11 @@ impl App {
                 auto_complete,
             } => self.send_completion(pr, options, auto_complete),
             ConfirmAction::Abandon(pr) => self.send_pr_update(pr, PrChange::Abandon),
+            ConfirmAction::Rerun(build) => self.send_build_update(build, BuildChange::Rerun),
+            ConfirmAction::Queue { build, branch } => {
+                self.send_build_update(build, BuildChange::Queue(branch))
+            }
+            ConfirmAction::CancelBuild(build) => self.send_build_update(build, BuildChange::Cancel),
             ConfirmAction::DiscardText { .. } => {}
         }
     }

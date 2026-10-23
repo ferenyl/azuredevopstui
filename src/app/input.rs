@@ -271,7 +271,10 @@ impl App {
                 self.move_thread(action == Action::NextThread)
             }
             Action::ThreadStatus => self.open_thread_status(),
-            Action::PrActions => self.open_pr_actions(),
+            Action::PrActions => match self.current_item() {
+                Some(Detail::Build(_)) => self.open_build_actions(),
+                _ => self.open_pr_actions(),
+            },
             Action::Zoom => self.zoomed = !self.zoomed,
             Action::Errors => self.popup = Some(Popup::Errors { first: 0 }),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
