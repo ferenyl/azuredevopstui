@@ -847,11 +847,7 @@ fn inbox_line(app: &App, entry: &InboxEntry) -> Line<'static> {
     match &entry.detail {
         Detail::PullRequest(pr) => {
             spans.push(Span::styled(format!("!{}  ", pr.pull_request_id), muted));
-            spans.extend(
-                pr_markers(app, pr)
-                    .into_iter()
-                    .map(|span| Span::styled(format!("{} ", span.content), span.style)),
-            );
+            spans.extend(pr_markers(app, pr));
             spans.push(Span::raw(pr.title.clone()));
         }
         Detail::WorkItem(item) => {
@@ -1039,6 +1035,21 @@ mod tests {
             pull_requests: Vec::new(),
             links: Vec::new(),
         }
+    }
+
+    #[test]
+    fn inbox_line_has_one_space_after_the_marker() {
+        let app = main_app();
+        let mut pr = pull_request(101, "Review me", "other", "2026-10-01T10:00:00Z");
+        pr.review.needs_vote = true;
+        let entry = InboxEntry {
+            detail: Detail::PullRequest(Box::new(pr)),
+            since: String::new(),
+        };
+
+        let line = inbox_line(&app, &entry).to_string();
+
+        assert!(line.contains("!101  ◉ Review me"), "{line:?}");
     }
 
     #[test]
