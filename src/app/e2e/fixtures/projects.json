@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/contoso/_apis/projects",
+  "body": {
+    "value": [
+      {
+        "name": "Fabrikam"
+      },
+      {
+        "name": "Northwind"
+      }
+    ]
+  }
+}

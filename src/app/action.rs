@@ -36,6 +36,7 @@ pub enum Action {
     PrevThread,
     ThreadStatus,
     PrActions,
+    SwitchProject,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -55,6 +56,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::Sprint,
             Action::Reload,
             Action::ChangeToken,
+            Action::SwitchProject,
             Action::Help,
             Action::Cancel,
             Action::Quit,
@@ -123,6 +125,7 @@ impl Action {
             (KeyCode::Char('['), _) => Some(Self::PrevThread),
             (KeyCode::Char('x'), _) => Some(Self::ThreadStatus),
             (KeyCode::Char('e'), _) => Some(Self::PrActions),
+            (KeyCode::Char('P'), _) => Some(Self::SwitchProject),
             _ => None,
         }
     }
@@ -163,6 +166,7 @@ impl Action {
             Self::PrevThread => "[",
             Self::ThreadStatus => "x",
             Self::PrActions => "e",
+            Self::SwitchProject => "P",
         }
     }
 
@@ -202,6 +206,7 @@ impl Action {
             Self::PrevThread => "previous thread",
             Self::ThreadStatus => "thread status",
             Self::PrActions => "PR actions",
+            Self::SwitchProject => "change project",
         }
     }
 }

@@ -1,7 +1,7 @@
 use super::{Action, App, Detail, Panel, Popup, Retry, Screen, SetupStep};
 
 /// Every action the toolbar can show, in display order.
-const TOOLBAR: [Action; 28] = [
+const TOOLBAR: [Action; 29] = [
     Action::Down,
     Action::Up,
     Action::Toggle,
@@ -28,6 +28,7 @@ const TOOLBAR: [Action; 28] = [
     Action::PrActions,
     Action::Reload,
     Action::ChangeToken,
+    Action::SwitchProject,
     Action::Help,
     Action::Quit,
 ];
@@ -51,7 +52,9 @@ impl App {
     /// Whether `action` does its work in the current context, which is when the toolbar offers it.
     fn can(&self, action: Action) -> bool {
         match &self.screen {
-            Screen::Setup(step) => Self::can_in_setup(step, action, self.can_enter_pat()),
+            Screen::Setup(step) => {
+                Self::can_in_setup(step, action, self.can_enter_pat(), self.can_go_back())
+            }
             Screen::Main if self.show_help => action == Action::Cancel,
             Screen::Main => match &self.popup {
                 Some(popup) => Self::can_in_popup(popup, action),
@@ -60,10 +63,17 @@ impl App {
         }
     }
 
-    fn can_in_setup(step: &SetupStep, action: Action, can_enter_pat: bool) -> bool {
+    fn can_in_setup(
+        step: &SetupStep,
+        action: Action,
+        can_enter_pat: bool,
+        can_go_back: bool,
+    ) -> bool {
         match action {
             Action::Confirm => step.is_input() || step.selection().is_some(),
-            Action::Cancel => step.is_input(),
+            Action::Cancel => {
+                step.is_input() || (can_go_back && !matches!(step, SetupStep::Loading(_)))
+            }
             Action::Down | Action::Up => step.selection().is_some(),
             Action::Reload => matches!(step, SetupStep::Failed { .. }),
             Action::ChangeToken => {
@@ -97,9 +107,12 @@ impl App {
         let is_build = matches!(item, Some(Detail::Build(_)));
         let work_item_assigned_to_me = |assigned: bool| matches!(&item, Some(Detail::WorkItem(w)) if self.is_assigned_to_me(w) == assigned);
         match action {
-            Action::Down | Action::FocusRight | Action::Reload | Action::Help | Action::Quit => {
-                true
-            }
+            Action::Down
+            | Action::FocusRight
+            | Action::Reload
+            | Action::SwitchProject
+            | Action::Help
+            | Action::Quit => true,
             Action::NextTab | Action::Copy => {
                 matches!(item, Some(Detail::PullRequest(_) | Detail::WorkItem(_)))
             }
@@ -364,6 +377,7 @@ mod tests {
                     Filter,
                     PrActions,
                     Reload,
+                    SwitchProject,
                     Help,
                     Quit,
                 ],
@@ -385,6 +399,7 @@ mod tests {
                     Filter,
                     PrActions,
                     Reload,
+                    SwitchProject,
                     Help,
                     Quit,
                 ],
@@ -406,6 +421,7 @@ mod tests {
                     Filter,
                     PrActions,
                     Reload,
+                    SwitchProject,
                     Help,
                     Quit,
                 ],
@@ -427,6 +443,7 @@ mod tests {
                     Sort,
                     Filter,
                     Reload,
+                    SwitchProject,
                     Help,
                     Quit,
                 ],
@@ -447,6 +464,7 @@ mod tests {
                     Sort,
                     Filter,
                     Reload,
+                    SwitchProject,
                     Help,
                     Quit,
                 ],
@@ -467,6 +485,7 @@ mod tests {
                     Sort,
                     Filter,
                     Reload,
+                    SwitchProject,
                     Help,
                     Quit,
                 ],
@@ -481,17 +500,18 @@ mod tests {
                     CopyLink,
                     Filter,
                     Reload,
+                    SwitchProject,
                     Help,
                     Quit,
                 ],
             ),
             (
                 "builds focus",
-                vec![Down, FocusRight, Filter, Reload, Help, Quit],
+                vec![Down, FocusRight, Filter, Reload, SwitchProject, Help, Quit],
             ),
             (
                 "empty list",
-                vec![Down, FocusRight, Sort, Reload, Help, Quit],
+                vec![Down, FocusRight, Sort, Reload, SwitchProject, Help, Quit],
             ),
         ];
         let actual: Vec<_> = fixtures()

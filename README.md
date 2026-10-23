@@ -217,6 +217,8 @@ When there is no config file, the app runs a setup:
 3. **Project** and then **team**: picked from lists.
 4. **Ready column**: picked from your team's board columns.
 
+`esc` goes back one step; on the first step it quits. Nothing is written until the ready column is picked.
+
 The config is then written to disk, with the default colors filled in. If `ready_column` is ever removed from the config, the app asks for it again on the next start.
 
 ## Authentication
@@ -473,6 +475,7 @@ The table lists the Mocha values.
 | `l` / `L` | Select the next / previous link in the description or comments. While one is selected, `o` opens it and `Y` copies it. Switching tab or item clears the selection |
 | `r` | Reload everything |
 | `T` | Enter a new PAT |
+| `P` | Change organization, project or team: the setup opens with the current values preselected. `esc` goes back one step, and from the first step returns to the running view with nothing changed. The new config is saved after you pick the ready column; your other settings are kept |
 | `?` | Show all keys |
 | `esc` | Close a popup or cancel, go back from a diff to the file list, or close the open item to show the sprint overview |
 | `q`, `ctrl+c` | Quit |

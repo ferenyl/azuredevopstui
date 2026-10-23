@@ -38,7 +38,7 @@ impl App {
                 Screen::Setup(SetupStep::EnterPat {
                     cancelable: true, ..
                 }) => self.screen = Screen::Main,
-                Screen::Setup(_) => self.should_quit = true,
+                Screen::Setup(_) => self.go_back(),
                 Screen::Main => {
                     if !self.close_file_diff() {
                         self.close_detail();
@@ -106,7 +106,9 @@ impl App {
             | Action::PrevThread
             | Action::ThreadStatus
             | Action::PrActions
+            | Action::SwitchProject
                 if !matches!(self.screen, Screen::Main) => {}
+            Action::SwitchProject => self.switch_project(),
             Action::OpenInBrowser => self.open_in_browser(),
             Action::Copy => self.copy_number(),
             Action::CopyLink => self.copy_link(),

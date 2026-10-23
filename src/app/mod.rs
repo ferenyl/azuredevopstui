@@ -88,6 +88,10 @@ pub struct App {
     #[cfg(test)]
     opened: Vec<String>,
     pub popup: Option<Popup>,
+    /// Confirmed setup steps, most recent last; esc goes back to the last one.
+    setup_back: Vec<SetupStep>,
+    /// The setup was opened from the main view to change organization, project or team.
+    switching: bool,
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
     sprint: Option<String>,
     pub show_help: bool,
@@ -138,6 +142,8 @@ impl App {
             #[cfg(test)]
             opened: Vec::new(),
             popup: None,
+            setup_back: Vec::new(),
+            switching: false,
             show_help: false,
             last_updated: None,
             last_refresh: Instant::now(),

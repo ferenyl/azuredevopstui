@@ -1,0 +1,7 @@
+{
+  "method": "GET",
+  "path": "/_apis/profile/profiles/me",
+  "body": {
+    "id": "me-id"
+  }
+}
