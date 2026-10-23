@@ -26,6 +26,10 @@ impl App {
             TextTarget::PrThread { pr, thread_id } => {
                 self.confirm_thread_comment(pr, thread_id, text)
             }
+            TextTarget::PrTitle(pr) => self.confirm_pr_title(pr, text),
+            TextTarget::PrDescription(pr) => self.confirm_pr_description(pr, text),
+            TextTarget::AddReviewer(pr) => self.confirm_add_reviewer(pr, text),
+            TextTarget::LinkWorkItem(pr) => self.confirm_link_work_item(pr, text),
         }
     }
 

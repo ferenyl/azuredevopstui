@@ -83,6 +83,11 @@ pub enum Message {
         reload: Vec<Load>,
         result: Result<()>,
     },
+    /// The full description of `pr`, which the lists cut off.
+    PrDescription {
+        pr: Box<PullRequest>,
+        result: Result<String>,
+    },
     /// A notification closed; holds the item URL when its open action was clicked.
     Notified(Option<String>),
     /// The response to a request started with `App::spawn_load`.

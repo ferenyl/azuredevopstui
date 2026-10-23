@@ -36,6 +36,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - Unassign yourself from a work item and pick its new board column in the same step.
   - Complete one of your PRs once it shows `✔`, or set auto-complete on one that is not ready yet (and cancel it again). You pick a merge strategy among the ones the branch policies allow, and choose whether to delete the source branch, transition linked work items, bypass branch policies (asks for confirmation) and the merge commit message. The last strategy and the first two toggles are remembered in the config. The overview shows who set auto-complete. `esc` cancels without completing.
   - Vote on any PR with `v`: approve, approve with suggestions, wait for author, reject or reset your vote. Your current vote is preselected and `esc` cancels. The inbox entry "needs your vote" goes away once you voted.
+  - Press `e` on a PR for its actions: abandon (asks `y` / `n` first) or reactivate, publish a draft or mark a PR as draft, edit the title or description, add or remove a reviewer, and link a work item.
 - **Sorting** per list type. The choice is saved to the config.
 - **Work item type filter**: pick which types (User Story, Bug, Feature, …) the work item lists show. The list of types comes from the project, and the choice is saved to the config.
 - **Auto refresh** at a configurable interval. The open detail view refreshes too.
@@ -454,6 +455,7 @@ Each value is a hex color, such as `"#89B4FA"`. A key that is missing falls back
 | `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
 | `c` | Complete your PR or set auto-complete: pick the merge strategy, `space` ticks *Delete source branch*, *Transition linked work items*, *Set auto-complete* and *Bypass branch policies*, edit the merge commit message, then `enter`. A PR that is not ready starts with auto-complete ticked; if auto-complete is set, *Cancel auto-complete* is the last row. Bypassing asks `y` / `n` first. `esc` cancels and nothing is sent |
 | `v` | Vote on the PR: pick approve, approve with suggestions, wait for author, reject or reset vote, then `enter`. `esc` cancels and nothing is sent |
+| `e` | PR actions: abandon (asks `y` / `n`) or reactivate, publish or mark as draft, edit title or description, add reviewer (name or email), remove reviewer, link work item (id), then `enter`. `esc` cancels and nothing is sent |
 | `o` | Open the PR, work item or pipeline run in the browser |
 | `y` | Copy the PR (`!1234`) or work item (`#5678`) number |
 | `Y` | Copy the link to the PR, work item or pipeline run |

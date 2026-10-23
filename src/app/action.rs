@@ -35,6 +35,7 @@ pub enum Action {
     NextThread,
     PrevThread,
     ThreadStatus,
+    PrActions,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -79,6 +80,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::NextThread,
             Action::PrevThread,
             Action::ThreadStatus,
+            Action::PrActions,
         ],
     ),
 ];
@@ -120,6 +122,7 @@ impl Action {
             (KeyCode::Char(']'), _) => Some(Self::NextThread),
             (KeyCode::Char('['), _) => Some(Self::PrevThread),
             (KeyCode::Char('x'), _) => Some(Self::ThreadStatus),
+            (KeyCode::Char('e'), _) => Some(Self::PrActions),
             _ => None,
         }
     }
@@ -159,6 +162,7 @@ impl Action {
             Self::NextThread => "]",
             Self::PrevThread => "[",
             Self::ThreadStatus => "x",
+            Self::PrActions => "e",
         }
     }
 
@@ -197,6 +201,7 @@ impl Action {
             Self::NextThread => "next thread",
             Self::PrevThread => "previous thread",
             Self::ThreadStatus => "thread status",
+            Self::PrActions => "PR actions",
         }
     }
 }

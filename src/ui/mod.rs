@@ -142,6 +142,16 @@ pub fn render(frame: &mut Frame, app: &App) {
                 } => {
                     format!(" New thread on !{}", pr.pull_request_id)
                 }
+                TextTarget::PrTitle(pr) => format!(" Title of !{}", pr.pull_request_id),
+                TextTarget::PrDescription(pr) => {
+                    format!(" Description of !{}", pr.pull_request_id)
+                }
+                TextTarget::AddReviewer(pr) => {
+                    format!(" Add reviewer to !{} (name or email)", pr.pull_request_id)
+                }
+                TextTarget::LinkWorkItem(pr) => {
+                    format!(" Work item id to link to !{}", pr.pull_request_id)
+                }
             };
             let title = format!("{title} · shift/alt+enter: new line ");
             popup::render_text_input(frame, app, &title, text, main);
@@ -180,6 +190,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
         Some(Popup::ThreadStatus { pr, selection, .. }) => {
             let title = format!(" Thread status on !{} ", pr.pull_request_id);
+            popup::render_picker(frame, app, &title, selection, main);
+        }
+        Some(Popup::PrActions { pr, selection, .. }) => {
+            let title = format!(" !{} ", pr.pull_request_id);
+            popup::render_picker(frame, app, &title, selection, main);
+        }
+        Some(Popup::RemoveReviewer { pr, selection }) => {
+            let title = format!(" Remove reviewer from !{} ", pr.pull_request_id);
             popup::render_picker(frame, app, &title, selection, main);
         }
         None => {}

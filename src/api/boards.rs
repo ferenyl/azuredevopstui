@@ -118,7 +118,7 @@ impl ProjectApi {
         self.patch_work_item(id, operations).await
     }
 
-    async fn patch_work_item(&self, id: u32, operations: Vec<Value>) -> Result<()> {
+    pub(super) async fn patch_work_item(&self, id: u32, operations: Vec<Value>) -> Result<()> {
         let id = id.to_string();
         let _: serde::de::IgnoredAny = self
             .client

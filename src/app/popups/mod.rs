@@ -3,6 +3,7 @@ mod column;
 mod comment;
 mod complete;
 mod confirm;
+mod pr_actions;
 mod pr_filter;
 mod sort;
 mod sprint;
@@ -34,6 +35,14 @@ impl App {
                 thread_id,
                 selection,
             }) => self.confirm_thread_status(pr, thread_id, selection.selected),
+            Some(Popup::PrActions {
+                pr,
+                actions,
+                selection,
+            }) => self.confirm_pr_action(pr, &actions, selection.selected),
+            Some(Popup::RemoveReviewer { pr, selection }) => {
+                self.confirm_remove_reviewer(pr, selection.selected)
+            }
             None => {}
         }
     }
@@ -83,6 +92,8 @@ impl App {
             Popup::Sort { selection, .. }
             | Popup::Vote { selection, .. }
             | Popup::ThreadStatus { selection, .. }
+            | Popup::PrActions { selection, .. }
+            | Popup::RemoveReviewer { selection, .. }
             | Popup::Types { selection, .. }
             | Popup::PrFilter { selection, .. } => selection,
         };

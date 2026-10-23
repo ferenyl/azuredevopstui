@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
+use super::pr_actions::PrChange;
 use crate::app::{App, ConfirmAction, Popup};
 
 impl App {
@@ -10,6 +11,7 @@ impl App {
                 options,
                 auto_complete,
             } => self.send_completion(pr, options, auto_complete),
+            ConfirmAction::Abandon(pr) => self.send_pr_update(pr, PrChange::Abandon),
         }
     }
 
