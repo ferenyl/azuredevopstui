@@ -1,0 +1,43 @@
+# Maintainer: Ferenyl <ahlback.johan@gmail.com>
+
+pkgname=azuredevopstui
+pkgver=0.1.15
+pkgrel=1
+pkgdesc='Terminal UI for your Azure DevOps pull requests, work items and sprint board'
+arch=('x86_64')
+url='https://github.com/ferenyl/azuredevopstui'
+license=('GPL-3.0-or-later')
+depends=('glibc' 'libgcc')
+makedepends=('cargo')
+options=('!lto')
+optdepends=('azure-cli: sign in with az login'
+            'org.freedesktop.secrets: store a personal access token in the system keyring'
+            'xdg-utils: open links in the browser')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('a5e33f011f265c97c0ca6601160c2bd643e43f96ddda596a85adf7ba6cbd5316')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc --print host-tuple)"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo test --frozen --release
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm0755 -t "$pkgdir/usr/bin/" "target/release/$pkgname"
+  install -Dm0644 -t "$pkgdir/usr/share/doc/$pkgname/" README.md
+}
