@@ -14,13 +14,16 @@ optdepends=('azure-cli: sign in with az login'
             'xdg-utils: open links in the browser')
 provides=("$_pkgname=$pkgver")
 conflicts=("$_pkgname")
-options=('!debug')
-_dist="$_pkgname-v$pkgver-x86_64-unknown-linux-gnu"
+options=('!strip' '!debug')
+_dist="$_pkgname-v$pkgver-$CARCH-unknown-linux-gnu"
+source=("LICENSE-$pkgver::$url/raw/v$pkgver/LICENSE")
 source_x86_64=("$_dist.tar.gz::$url/releases/download/v$pkgver/$_dist.tar.gz")
+sha256sums=('3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986')
 sha256sums_x86_64=('655d80ab8bc3a3e5ba1aa8fb56ae5d134e365481a71919a8e64e8db65fd05a2b')
 
 package() {
   cd "$_dist"
   install -Dm0755 -t "$pkgdir/usr/bin/" "$_pkgname"
   install -Dm0644 -t "$pkgdir/usr/share/doc/$_pkgname/" README.md
+  install -Dm0644 "$srcdir/LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
