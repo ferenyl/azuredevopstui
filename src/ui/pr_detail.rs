@@ -94,14 +94,17 @@ fn overview(
     let name_width = pr
         .reviewers
         .iter()
-        .map(|r| r.display_name.chars().count())
+        .map(|r| super::text_width(&r.display_name))
         .max()
         .unwrap_or(0);
     for reviewer in &pr.reviewers {
         let (symbol, text, color) = vote(app, reviewer.vote);
         let mut spans = vec![
             Span::styled(format!("  {symbol} "), Style::new().fg(color)),
-            Span::raw(format!("{:<name_width$}  ", reviewer.display_name)),
+            Span::raw(format!(
+                "{}  ",
+                super::pad_right(&reviewer.display_name, name_width)
+            )),
             Span::styled(text, Style::new().fg(color)),
         ];
         if reviewer.is_required == Some(true) {

@@ -33,7 +33,7 @@ pub fn list_scroll(app: &App, height: u16, width: u16) -> Option<u16> {
         .iter()
         .take(files.selected + 1)
         .map(|file| {
-            (file.kind.label().chars().count() + 1 + path_text(file).chars().count())
+            (super::text_width(file.kind.label()) + 1 + super::text_width(&path_text(file)))
                 .div_ceil(width)
                 .max(1)
         })

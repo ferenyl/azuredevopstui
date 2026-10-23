@@ -39,6 +39,13 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
+/// Rows `text` takes inside a bordered popup of `width` columns.
+fn wrapped_rows(text: &str, width: u16) -> u16 {
+    text.split('\n')
+        .map(|line| (super::text_width(line) as u16).div_ceil(width - 2).max(1))
+        .sum()
+}
+
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
     let [area] = Layout::horizontal([Constraint::Length(width)])
         .flex(Flex::Center)
@@ -54,7 +61,7 @@ pub fn render_picker(frame: &mut Frame, app: &App, title: &str, selection: &Sele
     let longest = selection
         .items
         .iter()
-        .map(|item| item.chars().count())
+        .map(|item| super::text_width(item))
         .max();
     let width = (longest.unwrap_or(0) as u16 + 4).max(36);
     let area = centered(area, width, selection.items.len() as u16 + 2);
@@ -77,10 +84,7 @@ pub fn render_confirm(frame: &mut Frame, app: &App, prompt: &str, area: Rect) {
     const WIDTH: u16 = 60;
     let theme = &app.theme;
     let text = format!("{prompt}\n\ny / enter: yes    n / esc: no");
-    let lines: u16 = text
-        .split('\n')
-        .map(|line| (line.chars().count() as u16).div_ceil(WIDTH - 2).max(1))
-        .sum();
+    let lines = wrapped_rows(&text, WIDTH);
     let area = centered(area, WIDTH, lines + 2);
 
     let block = Block::bordered()
@@ -98,10 +102,7 @@ pub fn render_text_input(frame: &mut Frame, app: &App, title: &str, input: &Text
     let theme = &app.theme;
     let (before, after) = input.split();
     let text = format!("{before}▏{after}");
-    let lines: u16 = text
-        .split('\n')
-        .map(|line| (line.chars().count() as u16).div_ceil(WIDTH - 2).max(1))
-        .sum();
+    let lines = wrapped_rows(&text, WIDTH);
     let area = centered(area, WIDTH, lines + 2);
 
     let block = Block::bordered()

@@ -13,6 +13,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListState, Padding, Paragraph, Tabs, Wrap};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use ratatui_image::StatefulImage;
 
@@ -502,7 +503,7 @@ fn empty(app: &App, text: &str) -> Vec<Line<'static>> {
 
 fn heading(app: &App, text: &str, width: u16) -> Line<'static> {
     let theme = &app.theme;
-    let rule = (width as usize).saturating_sub(text.chars().count() + 2);
+    let rule = (width as usize).saturating_sub(text_width(text) + 2);
     Line::from(vec![
         Span::styled("▍", Style::new().fg(theme.title)),
         Span::styled(
@@ -620,7 +621,7 @@ fn wrap_lines(
             .iter()
             .rposition(|(c, _)| !c.is_whitespace())
             .map_or(0, |i| i + 1);
-        if end <= available {
+        if chars_width(&chars[..end]) <= available {
             push(chars[..end].to_vec());
             continue;
         }
@@ -638,10 +639,10 @@ fn wrap_lines(
             }
             let mut word = word.to_vec();
             loop {
-                let used = current.len();
+                let used = chars_width(&current);
                 let blank = current.iter().all(|(c, _)| c.is_whitespace());
                 let space = usize::from(!blank);
-                if used + space + word.len() <= available {
+                if used + space + chars_width(&word) <= available {
                     if !blank {
                         current.push((' ', Style::new()));
                     }
@@ -649,7 +650,7 @@ fn wrap_lines(
                     break;
                 }
                 if blank {
-                    let rest = word.split_off(available - used);
+                    let rest = word.split_off(split_index(&word, available - used));
                     current.extend(word);
                     push(std::mem::replace(&mut current, padding.clone()));
                     word = rest;
@@ -664,6 +665,35 @@ fn wrap_lines(
         push(current);
     }
     out
+}
+
+/// Display width of `text` in terminal columns.
+pub(super) fn text_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
+/// Pads `text` with spaces to `width` columns (display width, not chars).
+pub(super) fn pad_right(text: &str, width: usize) -> String {
+    format!(
+        "{text}{}",
+        " ".repeat(width.saturating_sub(text_width(text)))
+    )
+}
+
+fn chars_width(chars: &[(char, Style)]) -> usize {
+    chars.iter().map(|(c, _)| c.width().unwrap_or(0)).sum()
+}
+
+/// Index at which `word` has to be split so the head fits `max` columns (at least one char).
+fn split_index(word: &[(char, Style)], max: usize) -> usize {
+    let mut used = 0;
+    for (i, (c, _)) in word.iter().enumerate() {
+        used += c.width().unwrap_or(0);
+        if used > max {
+            return i.max(1);
+        }
+    }
+    word.len()
 }
 
 fn styled_line(prefix: &Span<'static>, chars: Vec<(char, Style)>) -> Line<'static> {
@@ -756,7 +786,7 @@ fn pr_lines<'a>(
     show_author: bool,
 ) -> Vec<Line<'static>> {
     let rows: Vec<_> = prs.map(|pr| (pr, pr_markers(app, pr))).collect();
-    let width = |spans: &[Span]| spans.iter().map(|span| span.content.chars().count()).sum();
+    let width = |spans: &[Span]| spans.iter().map(Span::width).sum();
     let id_width = rows
         .iter()
         .map(|(pr, _)| pr.pull_request_id.to_string().len())
@@ -1092,6 +1122,64 @@ mod tests {
         let lines = wrap("first\n\nsecond", 20, Span::raw("│ "));
 
         assert_eq!(text(&lines), ["│ first", "│ ", "│ second"]);
+    }
+
+    #[test]
+    fn wrap_keeps_wide_characters_within_the_width() {
+        let lines = wrap(
+            "修复登录页面的错误 🚀 fix the login 🚀🚀🚀 page 修复修复修复修复修复修复修复修复修复修复",
+            12,
+            Span::raw("│ "),
+        );
+
+        assert!(lines.len() > 3);
+        assert!(lines.iter().all(|line| line.width() <= 12), "{lines:?}");
+    }
+
+    #[test]
+    fn wrap_splits_a_wide_word_by_width_never_mid_glyph() {
+        let lines = wrap("修复登录页面的错误修复登录页面的错误", 11, Span::raw(""));
+
+        assert_eq!(
+            text(&lines),
+            ["修复登录页", "面的错误修", "复登录页面", "的错误"]
+        );
+    }
+
+    #[test]
+    fn heading_rule_fills_the_width_with_wide_text() {
+        let app = main_app();
+
+        let line = heading(&app, "修复 🚀", 30);
+
+        assert_eq!(line.width(), 30);
+    }
+
+    #[test]
+    fn pr_titles_start_in_the_same_column_with_wide_markers() {
+        let app = main_app();
+        let prs = [
+            pull_request(7, "修复 🚀", "me", "2026-10-01T10:00:00Z"),
+            pull_request(1234, "Fix", "me", "2026-10-01T10:00:00Z"),
+        ];
+
+        let lines = pr_lines(&app, prs.iter(), false);
+
+        let columns: Vec<_> = lines
+            .iter()
+            .zip(["修复 🚀", "Fix"])
+            .map(|(line, title)| {
+                let line = line.to_string();
+                text_width(&line[..line.find(title).unwrap()])
+            })
+            .collect();
+        assert_eq!(columns[0], columns[1]);
+    }
+
+    #[test]
+    fn pad_right_pads_by_display_width() {
+        assert_eq!(pad_right("修复", 6), "修复  ");
+        assert_eq!(text_width(&pad_right("🚀", 5)), 5);
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod notifications;
 mod scroll;
 mod threads;
 mod vote;
+mod wide_chars;
 
 use std::fs;
 use std::path::Path;
