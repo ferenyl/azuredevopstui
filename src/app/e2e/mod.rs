@@ -3,6 +3,7 @@
 //! Every file in `fixtures/` is one canned endpoint. Requests no fixture or override answers fail
 //! the test, so tests stay offline and deterministic. See `docs/e2e.md`.
 
+mod board;
 mod changes;
 mod comment_paging;
 mod completion;

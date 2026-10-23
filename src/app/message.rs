@@ -32,6 +32,7 @@ pub enum Message {
     MyPullRequests(Result<Vec<PullRequest>>),
     OtherPullRequests(Result<Partial<PullRequest>>),
     SprintWorkItems(Result<SprintWorkItems>),
+    SprintBoard(Result<Vec<WorkItem>>),
     Sprints(Result<Vec<Iteration>>),
     Mentions(Result<Partial<Mention>>),
     Builds(Result<Vec<Build>>),

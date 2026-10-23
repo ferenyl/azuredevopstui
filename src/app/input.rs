@@ -141,6 +141,9 @@ impl App {
                     if self.zoomed && self.detail.is_none() {
                         self.zoomed = false;
                     } else if !self.close_file_diff() && !self.close_build_log() {
+                        if self.detail.is_none() && self.board_view {
+                            self.toggle_sprint_board();
+                        }
                         self.close_detail();
                     }
                 }
@@ -223,7 +226,9 @@ impl App {
             | Action::HalfPageUp
             | Action::JumpToPanel(_)
             | Action::Errors
+            | Action::SprintBoard
                 if !matches!(self.screen, Screen::Main) => {}
+            Action::SprintBoard => self.toggle_sprint_board(),
             Action::Search => self.start_search(),
             Action::SwitchProject => self.switch_project(),
             Action::Top => self.move_by(Move::Top),

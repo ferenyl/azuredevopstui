@@ -115,6 +115,8 @@ pub struct App {
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
     sprint: Option<String>,
     pub show_help: bool,
+    /// The detail pane shows the sprint's board lanes while nothing is open.
+    pub board_view: bool,
     pub last_updated: Option<Instant>,
     last_refresh: Instant,
     board: Option<Board>,
@@ -184,6 +186,7 @@ impl App {
             switching: false,
             edit_request: None,
             show_help: false,
+            board_view: false,
             last_updated: None,
             last_refresh: Instant::now(),
             board: None,

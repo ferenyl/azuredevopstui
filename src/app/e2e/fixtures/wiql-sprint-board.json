@@ -1,0 +1,18 @@
+{
+  "method": "POST",
+  "path": "/contoso/Fabrikam/Web/_apis/wit/wiql",
+  "bodyContains": "ORDER BY [Microsoft.VSTS.Common.BacklogPriority]",
+  "body": {
+    "workItems": [
+      {
+        "id": 301
+      },
+      {
+        "id": 302
+      },
+      {
+        "id": 303
+      }
+    ]
+  }
+}

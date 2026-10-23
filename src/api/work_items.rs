@@ -37,8 +37,10 @@ const COMMENTS_API_VERSION: &str = "7.1-preview.4";
 const MAX_COMMENTS: &str = "10";
 const OLDER_COMMENTS_PAGE: &str = "50";
 const CLOSED_CATEGORIES: [&str; 2] = ["Completed", "Removed"];
+const REMOVED_CATEGORIES: [&str; 1] = ["Removed"];
 /// Used when the states cannot be loaded.
 const DEFAULT_CLOSED_STATES: [&str; 2] = ["Closed", "Removed"];
+const DEFAULT_REMOVED_STATES: [&str; 1] = ["Removed"];
 
 impl ProjectApi {
     pub async fn sprint_work_items(
@@ -47,17 +49,7 @@ impl ProjectApi {
         ready_column: &str,
         types: &[String],
     ) -> Result<SprintWorkItems> {
-        let iterations = self.iterations().await?;
-        let iteration = match sprint {
-            Some(sprint) => iterations
-                .into_iter()
-                .find(|iteration| iteration.path == sprint)
-                .with_context(|| format!("sprint not found: {sprint}"))?,
-            None => iterations
-                .into_iter()
-                .find(Iteration::is_current)
-                .context("team has no current sprint")?,
-        };
+        let iteration = self.sprint_iteration(sprint).await?;
         let path = quote(&iteration.path);
         let types = type_filter(types);
         let closed = self.closed_states_filter().await;
@@ -87,6 +79,41 @@ impl ProjectApi {
             mine,
             ready,
         })
+    }
+
+    /// Every item of the sprint except removed ones, in backlog order.
+    pub async fn sprint_board_items(
+        &self,
+        sprint: Option<&str>,
+        types: &[String],
+    ) -> Result<Vec<WorkItem>> {
+        let iteration = self.sprint_iteration(sprint).await?;
+        let removed = self.removed_states_filter().await;
+        let wiql = format!(
+            "SELECT [System.Id] FROM WorkItems \
+             WHERE [System.IterationPath] = {} \
+             {removed}\
+             {}\
+             ORDER BY [Microsoft.VSTS.Common.BacklogPriority], [System.Id]",
+            quote(&iteration.path),
+            type_filter(types),
+        );
+        self.query_work_items(&wiql).await
+    }
+
+    /// The sprint with this iteration path, or the team's current one.
+    async fn sprint_iteration(&self, sprint: Option<&str>) -> Result<Iteration> {
+        let iterations = self.iterations().await?;
+        match sprint {
+            Some(sprint) => iterations
+                .into_iter()
+                .find(|iteration| iteration.path == sprint)
+                .with_context(|| format!("sprint not found: {sprint}")),
+            None => iterations
+                .into_iter()
+                .find(Iteration::is_current)
+                .context("team has no current sprint"),
+        }
     }
 
     pub async fn work_item_details(&self, id: u32) -> Result<WorkItemDetails> {
@@ -312,20 +339,35 @@ impl ProjectApi {
 
     /// `AND [System.State] NOT IN (...)` over the closed states, falling back to the defaults on error.
     async fn closed_states_filter(&self) -> String {
-        let states = match self.closed_states().await {
-            Ok(states) if !states.is_empty() => states.to_vec(),
-            Ok(_) => DEFAULT_CLOSED_STATES.map(String::from).to_vec(),
+        self.states_filter(&CLOSED_CATEGORIES, &DEFAULT_CLOSED_STATES)
+            .await
+    }
+
+    /// Like [`ProjectApi::closed_states_filter`], but only leaves out the removed states.
+    async fn removed_states_filter(&self) -> String {
+        self.states_filter(&REMOVED_CATEGORIES, &DEFAULT_REMOVED_STATES)
+            .await
+    }
+
+    async fn states_filter(&self, categories: &[&str], defaults: &[&str]) -> String {
+        let names = match self.closed_states().await {
+            Ok(states) => state_names(states, categories),
             Err(err) => {
                 tracing::warn!("failed to load work item states, using defaults: {err:#}");
-                DEFAULT_CLOSED_STATES.map(String::from).to_vec()
+                Vec::new()
             }
         };
-        let states: Vec<String> = states.iter().map(|state| quote(state)).collect();
-        format!("AND [System.State] NOT IN ({}) ", states.join(", "))
+        let names = if names.is_empty() {
+            defaults.iter().map(|name| (*name).to_string()).collect()
+        } else {
+            names
+        };
+        let names: Vec<String> = names.iter().map(|name| quote(name)).collect();
+        format!("AND [System.State] NOT IN ({}) ", names.join(", "))
     }
 
     /// States in the Completed and Removed categories of all visible types, cached per session.
-    async fn closed_states(&self) -> Result<&[String]> {
+    async fn closed_states(&self) -> Result<&[WorkItemState]> {
         let states = self
             .closed_states
             .get_or_try_init(|| async {
@@ -335,7 +377,9 @@ impl ProjectApi {
                     .buffered(MAX_CONCURRENT_REQUESTS)
                     .try_collect()
                     .await?;
-                Ok::<_, anyhow::Error>(closed_state_names(lists.into_iter().flatten().collect()))
+                let mut states: Vec<WorkItemState> = lists.into_iter().flatten().collect();
+                states.retain(|state| CLOSED_CATEGORIES.contains(&state.category.as_str()));
+                Ok::<_, anyhow::Error>(states)
             })
             .await?;
         Ok(states)
@@ -571,11 +615,11 @@ fn visible_types(categories: Vec<WorkItemTypeCategory>) -> Vec<String> {
 }
 
 /// Names of states in a closed category, sorted and deduplicated.
-fn closed_state_names(states: Vec<WorkItemState>) -> Vec<String> {
+fn state_names(states: &[WorkItemState], categories: &[&str]) -> Vec<String> {
     let mut names: Vec<String> = states
-        .into_iter()
-        .filter(|state| CLOSED_CATEGORIES.contains(&state.category.as_str()))
-        .map(|state| state.name)
+        .iter()
+        .filter(|state| categories.contains(&state.category.as_str()))
+        .map(|state| state.name.clone())
         .collect();
     names.sort();
     names.dedup();
@@ -750,6 +794,82 @@ mod tests {
         assert_eq!(sprint.iteration_name, "Sprint 1");
         assert_eq!(ids_of_items(&sprint.mine), [3, 1]);
         assert!(sprint.ready.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sprint_board_items_cover_the_sprint_except_removed_states() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/Team/_apis/work/teamsettings/iterations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "Sprint 1", "path": "MyProject\\Sprint 1", "attributes": { "timeFrame": "current" } }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemtypecategories"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "referenceName": "Microsoft.BugCategory", "workItemTypes": [{ "name": "Bug" }] }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/_apis/wit/workitemtypes/Bug/states",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "Active", "category": "InProgress" },
+                { "name": "Closed", "category": "Completed" },
+                { "name": "Gone", "category": "Removed" }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/Team/_apis/wit/wiql"))
+            .and(body_string_contains(
+                r"[System.IterationPath] = 'MyProject\\Sprint 1' AND [System.State] NOT IN ('Gone') AND [System.WorkItemType] IN ('Bug') ORDER BY [Microsoft.VSTS.Common.BacklogPriority]",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "workItems": [{ "id": 3 }, { "id": 1 }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .and(body_partial_json(json!({ "ids": [3, 1] })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(1, "One", "Bug", "Closed"),
+                work_item_json(3, "Three", "Bug", "Active")
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let items = client
+            .sprint_board_items(None, &["Bug".into()])
+            .await
+            .unwrap();
+
+        assert_eq!(ids_of_items(&items), [3, 1]);
+    }
+
+    #[tokio::test]
+    async fn sprint_board_items_fail_for_an_unknown_sprint() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let err = client
+            .sprint_board_items(Some("MyProject\\Nope"), &[])
+            .await
+            .expect_err("unknown sprint");
+
+        assert!(err.to_string().contains("sprint not found"));
     }
 
     #[tokio::test]
@@ -1009,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn closed_state_names_keep_completed_and_removed_only() {
+    fn state_names_keep_the_wanted_categories_only() {
         let states = vec![
             state("Done", "Completed"),
             state("Resolved", "Resolved"),
@@ -1018,7 +1138,11 @@ mod tests {
             state("Done", "Completed"),
         ];
 
-        assert_eq!(closed_state_names(states), ["Done", "Removed"]);
+        assert_eq!(
+            state_names(&states, &CLOSED_CATEGORIES),
+            ["Done", "Removed"]
+        );
+        assert_eq!(state_names(&states, &REMOVED_CATEGORIES), ["Removed"]);
     }
 
     #[tokio::test]

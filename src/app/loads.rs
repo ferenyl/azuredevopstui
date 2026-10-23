@@ -10,6 +10,8 @@ pub enum Load {
     Builds,
     Mentions,
     Sprint,
+    /// All items of the sprint, only while the board is shown.
+    SprintBoard,
     Detail,
     Signals(u32),
     Files,
