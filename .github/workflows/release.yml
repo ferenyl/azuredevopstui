@@ -135,3 +135,84 @@ jobs:
         run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  aur:
+    name: Update AUR packages
+    needs: build
+    # pkgver cannot contain "-", so pre-releases are not packaged
+    if: ${{ !github.event.release.prerelease && !contains(github.event.release.tag_name, '-') }}
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed git github-cli openssh pacman-contrib namcap
+
+      - uses: actions/checkout@v7
+
+      - name: Bump PKGBUILDs
+        run: |
+          git config --global --add safe.directory '*'
+          useradd -m builder
+          chown -R builder .
+          su builder -c "aur/bump.sh ${TAG#v}"
+
+      - name: Lint PKGBUILDs
+        run: namcap aur/*/PKGBUILD || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aur-${{ github.event.release.tag_name }}
+          path: |
+            aur/*/PKGBUILD
+            aur/*/.SRCINFO
+
+      - name: Push to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "::notice::AUR_SSH_PRIVATE_KEY is not set; download the aur-$TAG artifact and push it to the AUR by hand"
+            exit 0
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+          for dir in aur/*/; do
+            package=$(basename "$dir")
+            git clone "ssh://aur@aur.archlinux.org/$package.git" "$RUNNER_TEMP/$package"
+            cp "$dir/PKGBUILD" "$dir/.SRCINFO" "$RUNNER_TEMP/$package/"
+            git -C "$RUNNER_TEMP/$package" add PKGBUILD .SRCINFO
+            if git -C "$RUNNER_TEMP/$package" diff --cached --quiet; then
+              echo "$package is already up to date"
+              continue
+            fi
+            git -C "$RUNNER_TEMP/$package" \
+              -c user.name=Ferenyl -c user.email=ahlback.johan@gmail.com \
+              commit -m "Update to ${TAG#v}"
+            git -C "$RUNNER_TEMP/$package" push
+          done
+
+      - name: Open a PR with the bumped PKGBUILDs
+        continue-on-error: true
+        run: |
+          branch="aur/$TAG"
+          git checkout -b "$branch"
+          git add aur/*/PKGBUILD aur/*/.SRCINFO
+          if git diff --cached --quiet; then
+            echo "aur/ is already up to date"
+            exit 0
+          fi
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+            commit -m "Update AUR packages to $TAG"
+          if git push origin "$branch" &&
+            gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" \
+              --title "Update AUR packages to $TAG" \
+              --body "Syncs the PKGBUILDs in aur/ with the packages pushed to the AUR for $TAG."; then
+            exit 0
+          fi
+          echo "::warning::Could not open the PR (allow Actions to create pull requests in the repository settings); commit the aur-$TAG artifact files by hand"
+          exit 1
