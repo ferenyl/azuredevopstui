@@ -6,6 +6,7 @@ mod diff;
 mod images;
 mod notify;
 mod rich_text;
+mod terminal;
 mod theme;
 mod ui;
 
@@ -13,19 +14,13 @@ mod ui;
 mod test_support;
 
 use std::fs::{self, File};
-use std::io::stdout;
 use std::sync::Mutex;
 
 use anyhow::Context;
 use tracing_subscriber::EnvFilter;
 
 use config::Config;
-use crossterm::event::{
-    DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
-};
-use crossterm::execute;
-use crossterm::terminal::supports_keyboard_enhancement;
+use terminal::TerminalModes;
 
 fn main() -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
@@ -67,20 +62,11 @@ async fn run() -> anyhow::Result<()> {
                 .inspect_err(|err| tracing::info!("no terminal graphics: {err}"))
                 .ok()
         });
-    // Needed to tell ctrl+h/ctrl+j apart from backspace/enter.
-    let enhanced = supports_keyboard_enhancement().unwrap_or(false)
-        && execute!(
-            stdout(),
-            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-        )
-        .is_ok();
-    // Delivers pasted text as one event instead of keystrokes.
-    let _ = execute!(stdout(), EnableBracketedPaste);
-    let result = app::App::new(config, picker).run(&mut terminal).await;
-    let _ = execute!(stdout(), DisableBracketedPaste);
-    if enhanced {
-        let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
-    }
+    let mut modes = TerminalModes::enable();
+    let result = app::App::new(config, picker)
+        .run(&mut terminal, &mut modes)
+        .await;
+    modes.disable();
     ratatui::restore();
     result
 }

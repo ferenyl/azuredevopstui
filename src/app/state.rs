@@ -333,6 +333,11 @@ pub enum ConfirmAction {
         auto_complete: bool,
     },
     Abandon(Box<PullRequest>),
+    /// Throws away the typed text; declining brings the text popup back.
+    DiscardText {
+        target: TextTarget,
+        text: TextInput,
+    },
 }
 
 pub struct TagPicker {

@@ -12,7 +12,7 @@ mod thread_status;
 mod types;
 mod vote;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{Action, App, CompleteRow, Popup};
 
@@ -58,7 +58,13 @@ impl App {
             }
             Some(Popup::Tags(picker)) => picker.handle_key(key),
             Some(Popup::Sprint(picker)) => picker.handle_key(key),
-            Some(Popup::Text { text, .. }) => text.handle_key(key, true),
+            Some(Popup::Text { text, .. }) => {
+                if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.edit_request = Some(text.as_str().to_string());
+                    return true;
+                }
+                text.handle_key(key, true)
+            }
             Some(Popup::BuildFilter { text }) => text.handle_key(key, false),
             _ => false,
         }
@@ -72,7 +78,7 @@ impl App {
         ) {
             match action {
                 Action::Confirm => self.confirm_popup(),
-                Action::Cancel => self.popup = None,
+                Action::Cancel => self.cancel_popup(),
                 Action::Quit => self.should_quit = true,
                 _ => {}
             }
@@ -125,8 +131,63 @@ impl App {
 mod tests {
     use crossterm::event::KeyCode;
 
-    use crate::app::Popup;
-    use crate::app::test_helpers::{app, press};
+    use crate::app::test_helpers::{app, ctrl, press};
+    use crate::app::{ConfirmAction, Popup, TextInput, TextTarget};
+
+    fn open_text(app: &mut crate::app::App, text: &str) {
+        app.popup = Some(Popup::Text {
+            target: TextTarget::WorkItemComment(1),
+            text: TextInput::new(text),
+        });
+    }
+
+    #[test]
+    fn esc_on_text_asks_and_n_or_esc_brings_it_back_with_the_cursor() {
+        let mut app = app();
+        open_text(&mut app, "draft");
+        press(&mut app, KeyCode::Left);
+
+        press(&mut app, KeyCode::Esc);
+        assert!(matches!(
+            app.popup,
+            Some(Popup::Confirm {
+                action: ConfirmAction::DiscardText { .. },
+                ..
+            })
+        ));
+        press(&mut app, KeyCode::Char('n'));
+        let Some(Popup::Text { text, .. }) = &app.popup else {
+            panic!("text popup not restored");
+        };
+        assert_eq!(text.split(), ("draf", "t"));
+
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Esc);
+        assert!(matches!(app.popup, Some(Popup::Text { .. })));
+    }
+
+    #[test]
+    fn y_discards_the_text_and_empty_text_closes_at_once() {
+        let mut app = app();
+        open_text(&mut app, "draft");
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app.popup.is_none());
+
+        open_text(&mut app, "");
+        press(&mut app, KeyCode::Esc);
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn ctrl_e_requests_the_editor_with_the_text() {
+        let mut app = app();
+        open_text(&mut app, "draft");
+
+        ctrl(&mut app, 'e');
+
+        assert_eq!(app.edit_request.as_deref(), Some("draft"));
+    }
 
     #[test]
     fn popup_selection_moves_with_j_and_k() {
