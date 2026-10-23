@@ -3,6 +3,7 @@ use anyhow::Result;
 use crate::api::{ChangedFile, PullRequestChanges};
 use crate::diff::FileDiff;
 
+use super::input::Move;
 use super::loads::Load;
 use super::message::Message;
 use super::{App, Detail, DetailTab};
@@ -34,15 +35,6 @@ impl Files {
         self.changes
             .as_ref()
             .map_or(&[], |changes| changes.files.as_slice())
-    }
-
-    fn select(&mut self, down: bool) {
-        let last = self.list().len().saturating_sub(1);
-        self.selected = if down {
-            (self.selected + 1).min(last)
-        } else {
-            self.selected.saturating_sub(1)
-        };
     }
 }
 
@@ -86,12 +78,12 @@ impl App {
             .filter(|files| files.changes.is_some() && files.diff.is_none())
     }
 
-    /// Moves the file selection; false when no file list is shown.
-    pub(super) fn move_file_selection(&mut self, down: bool) -> bool {
+    /// Moves the file selection, `page` rows being visible; false when no file list is shown.
+    pub(super) fn jump_file_selection(&mut self, step: Move, page: usize) -> bool {
         let Some(files) = self.shown_file_list() else {
             return false;
         };
-        files.select(down);
+        files.selected = step.target(files.selected, files.list().len(), page);
         true
     }
 

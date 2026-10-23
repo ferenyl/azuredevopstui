@@ -10,6 +10,7 @@ mod inbox;
 mod layout;
 mod lifecycle;
 mod links;
+mod navigation;
 mod notifications;
 mod scroll;
 mod theme;
@@ -284,6 +285,14 @@ impl Harness {
 
     pub fn press(&mut self, code: KeyCode) {
         self.app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    pub fn key(&mut self, key: KeyEvent) {
+        self.app.handle_key(key);
+    }
+
+    pub fn ctrl(&mut self, c: char) {
+        self.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
     }
 
     pub fn type_text(&mut self, text: &str) {

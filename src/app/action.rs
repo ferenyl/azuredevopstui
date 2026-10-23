@@ -37,6 +37,14 @@ pub enum Action {
     ThreadStatus,
     PrActions,
     Zoom,
+    Top,
+    Bottom,
+    PageDown,
+    PageUp,
+    HalfPageDown,
+    HalfPageUp,
+    /// Focuses the left box with this number, starting at 1.
+    JumpToPanel(u8),
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -45,6 +53,10 @@ pub const HELP: [(&str, &[Action]); 4] = [
         "General",
         &[
             Action::Down,
+            Action::Top,
+            Action::PageDown,
+            Action::HalfPageDown,
+            Action::JumpToPanel(1),
             Action::FocusRight,
             Action::Zoom,
             Action::NextTab,
@@ -105,7 +117,14 @@ impl Action {
             (KeyCode::Char('y'), _) => Some(Self::Copy),
             (KeyCode::Char('Y'), _) => Some(Self::CopyLink),
             (KeyCode::Char('a'), _) => Some(Self::AssignToMe),
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => Some(Self::HalfPageDown),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => Some(Self::HalfPageUp),
             (KeyCode::Char('u'), _) => Some(Self::Unassign),
+            (KeyCode::Char('g'), _) => Some(Self::Top),
+            (KeyCode::Char('G'), _) => Some(Self::Bottom),
+            (KeyCode::PageDown, _) => Some(Self::PageDown),
+            (KeyCode::PageUp, _) => Some(Self::PageUp),
+            (KeyCode::Char(c @ '1'..='6'), _) => Some(Self::JumpToPanel(c as u8 - b'0')),
             (KeyCode::Char('s'), _) => Some(Self::ChangeColumn),
             (KeyCode::Char('c'), _) => Some(Self::Complete),
             (KeyCode::Char('S'), _) => Some(Self::Sort),
@@ -167,6 +186,13 @@ impl Action {
             Self::ThreadStatus => "x",
             Self::PrActions => "e",
             Self::Zoom => "z",
+            Self::Top => "g/G",
+            Self::Bottom => "G",
+            Self::PageDown => "pgdn/pgup",
+            Self::PageUp => "pgup",
+            Self::HalfPageDown => "ctrl+d/u",
+            Self::HalfPageUp => "ctrl+u",
+            Self::JumpToPanel(_) => "1-6",
         }
     }
 
@@ -207,6 +233,13 @@ impl Action {
             Self::ThreadStatus => "thread status",
             Self::PrActions => "PR actions",
             Self::Zoom => "zoom",
+            Self::Top => "top/bottom",
+            Self::Bottom => "bottom",
+            Self::PageDown => "page down/up",
+            Self::PageUp => "page up",
+            Self::HalfPageDown => "half page down/up",
+            Self::HalfPageUp => "half page up",
+            Self::JumpToPanel(_) => "go to box",
         }
     }
 }
@@ -289,6 +322,26 @@ mod tests {
     fn unbound_key_is_ignored() {
         assert_eq!(plain(KeyCode::Char('Z')), None);
         assert_eq!(plain(KeyCode::F(1)), None);
+        assert_eq!(plain(KeyCode::Char('0')), None);
+        assert_eq!(plain(KeyCode::Char('7')), None);
+    }
+
+    #[test]
+    fn navigation_keys() {
+        let ctrl = KeyModifiers::CONTROL;
+
+        assert_eq!(plain(KeyCode::Char('g')), Some(Action::Top));
+        assert_eq!(
+            key(KeyCode::Char('G'), KeyModifiers::SHIFT),
+            Some(Action::Bottom)
+        );
+        assert_eq!(plain(KeyCode::PageDown), Some(Action::PageDown));
+        assert_eq!(plain(KeyCode::PageUp), Some(Action::PageUp));
+        assert_eq!(key(KeyCode::Char('d'), ctrl), Some(Action::HalfPageDown));
+        assert_eq!(key(KeyCode::Char('u'), ctrl), Some(Action::HalfPageUp));
+        assert_eq!(plain(KeyCode::Char('u')), Some(Action::Unassign));
+        assert_eq!(plain(KeyCode::Char('1')), Some(Action::JumpToPanel(1)));
+        assert_eq!(plain(KeyCode::Char('6')), Some(Action::JumpToPanel(6)));
     }
 
     #[test]
