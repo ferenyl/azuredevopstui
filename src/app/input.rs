@@ -185,10 +185,11 @@ impl App {
             self.scroll_to_thread = false;
             self.detail_scroll = self.thread_row.get().unwrap_or(self.detail_scroll);
         }
+        let max = self.detail_max_scroll.get();
         self.detail_scroll = if down {
-            self.detail_scroll.saturating_add(1)
+            self.detail_scroll.saturating_add(1).min(max)
         } else {
-            self.detail_scroll.saturating_sub(1)
+            self.detail_scroll.min(max).saturating_sub(1)
         };
     }
 
@@ -326,6 +327,35 @@ mod tests {
 
         assert_eq!(app.detail_scroll, 1);
         assert_eq!(app.selections[1], 0);
+    }
+
+    #[test]
+    fn scrolling_detail_stops_at_the_end_of_the_content() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        ctrl(&mut app, 'l');
+        app.detail_max_scroll.set(2);
+
+        for _ in 0..10 {
+            press(&mut app, KeyCode::Char('j'));
+        }
+        assert_eq!(app.detail_scroll, 2);
+
+        press(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.detail_scroll, 1);
+    }
+
+    #[test]
+    fn scrolling_up_from_beyond_the_end_moves_immediately() {
+        let mut app = app();
+        open_pull_request(&mut app);
+        ctrl(&mut app, 'l');
+        app.detail_scroll = 9;
+        app.detail_max_scroll.set(4);
+
+        press(&mut app, KeyCode::Char('k'));
+
+        assert_eq!(app.detail_scroll, 3);
     }
 
     #[test]
