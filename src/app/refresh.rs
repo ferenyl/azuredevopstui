@@ -89,6 +89,39 @@ impl App {
         if wanted(self, Load::Sprint) {
             self.load_sprint();
         }
+
+        let board_stale = loads.contains(&Load::Sprint) || loads.contains(&Load::SprintBoard);
+        if self.board_view && board_stale && (restart || !self.loads.is_loading(Load::SprintBoard))
+        {
+            self.load_sprint_board();
+        }
+    }
+
+    /// Shows the board lanes in place of the detail, or hides them again.
+    pub(super) fn toggle_sprint_board(&mut self) {
+        if self.board_view {
+            self.board_view = false;
+            self.loads.cancel(Load::SprintBoard);
+            return;
+        }
+        self.close_detail();
+        self.board_view = true;
+        self.data.board_items = None;
+        if self.board.is_none() {
+            self.load_board();
+        }
+        self.load_sprint_board();
+    }
+
+    pub(super) fn load_sprint_board(&mut self) {
+        let (Some(api), Some(config)) = (self.api(), &self.config) else {
+            return;
+        };
+        let types = config.work_item_types.clone();
+        let sprint = self.sprint.clone();
+        self.spawn_load(Load::SprintBoard, async move {
+            Message::SprintBoard(api.sprint_board_items(sprint.as_deref(), &types).await)
+        });
     }
 
     /// Refreshes on the configured interval while the main view is idle. 0 disables it.
@@ -246,6 +279,8 @@ impl App {
         let Some(detail) = self.data.detail(self.focus, self.selections[index]) else {
             return;
         };
+        self.board_view = false;
+        self.loads.cancel(Load::SprintBoard);
         self.load_detail(&detail);
         if let Some(seen) = &mut self.data.inbox_seen {
             seen.insert(detail.key());
@@ -285,10 +320,10 @@ impl App {
 mod tests {
     use crossterm::event::KeyCode;
 
-    use crate::api::AdoClient;
-    use crate::app::DetailTab;
+    use crate::api::{AdoClient, Iteration};
     use crate::app::loads::Load;
-    use crate::app::test_helpers::{app, me, press};
+    use crate::app::test_helpers::{app, me, open_pull_request, press};
+    use crate::app::{DetailTab, Panel, Popup, SprintPicker};
     use crate::auth::Auth;
 
     #[test]
@@ -304,6 +339,100 @@ mod tests {
         assert_eq!(app.detail_tab, DetailTab::Overview);
         assert_eq!(app.detail_scroll, 0);
         assert!(app.detail_info.is_none());
+    }
+
+    #[test]
+    fn b_toggles_the_board_and_closes_an_open_item() {
+        let mut app = app();
+        open_pull_request(&mut app);
+
+        press(&mut app, KeyCode::Char('b'));
+
+        assert!(app.board_view);
+        assert!(app.detail.is_none());
+        press(&mut app, KeyCode::Char('b'));
+        assert!(!app.board_view);
+    }
+
+    #[test]
+    fn esc_hides_the_board_but_first_closes_zoom() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('b'));
+        press(&mut app, KeyCode::Char('z'));
+        app.focus = Panel::Detail;
+
+        press(&mut app, KeyCode::Esc);
+        assert!(app.board_view);
+        assert!(!app.zoomed);
+        press(&mut app, KeyCode::Esc);
+
+        assert!(!app.board_view);
+    }
+
+    #[test]
+    fn opening_an_item_replaces_the_board() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('b'));
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(!app.board_view);
+        assert!(app.detail.is_some());
+    }
+
+    #[tokio::test]
+    async fn the_board_loads_only_while_it_is_shown() {
+        let mut app = app();
+        // Nothing listens there; the requests stay pending or fail, and are never handled.
+        app.client = Some(AdoClient::with_base_url(
+            Auth::from_pat("pat"),
+            "http://127.0.0.1:9",
+        ));
+        app.sync_api();
+        app.user = Some(me());
+
+        press(&mut app, KeyCode::Char('r'));
+        assert_eq!(app.loads.generation(Load::SprintBoard), None);
+
+        press(&mut app, KeyCode::Char('b'));
+        let started = app.loads.generation(Load::SprintBoard);
+        assert!(started.is_some());
+        assert!(app.data.board_items.is_none());
+
+        press(&mut app, KeyCode::Char('r'));
+        assert_eq!(app.loads.generation(Load::SprintBoard), started);
+        app.reload();
+        assert!(app.loads.generation(Load::SprintBoard) > started);
+
+        press(&mut app, KeyCode::Char('b'));
+        assert_eq!(app.loads.generation(Load::SprintBoard), None);
+    }
+
+    #[tokio::test]
+    async fn switching_sprint_reloads_the_board() {
+        let mut app = app();
+        app.client = Some(AdoClient::with_base_url(
+            Auth::from_pat("pat"),
+            "http://127.0.0.1:9",
+        ));
+        app.sync_api();
+        app.user = Some(me());
+        press(&mut app, KeyCode::Char('b'));
+        app.data.board_items = Some(Vec::new());
+        let started = app.loads.generation(Load::SprintBoard);
+        app.popup = Some(Popup::Sprint(SprintPicker::new(
+            vec![Iteration {
+                name: "Sprint 2".into(),
+                path: "Team\\Sprint 2".into(),
+                attributes: Default::default(),
+            }],
+            None,
+        )));
+
+        press(&mut app, KeyCode::Enter);
+
+        assert!(app.data.board_items.is_none());
+        assert!(app.loads.generation(Load::SprintBoard) > started);
     }
 
     #[tokio::test]

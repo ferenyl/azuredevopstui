@@ -472,6 +472,8 @@ pub struct Data {
     pub show_drafts: bool,
     pub my_work_items: Option<Vec<WorkItem>>,
     pub ready_work_items: Option<Vec<WorkItem>>,
+    /// Every item of the sprint; loaded only while the board is shown.
+    pub board_items: Option<Vec<WorkItem>>,
     pub sprint_name: Option<String>,
     pub sprint_start: Option<String>,
     pub sprint_finish: Option<String>,

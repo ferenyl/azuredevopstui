@@ -350,8 +350,8 @@ pub struct ProjectApi {
     organization: Arc<str>,
     project: Arc<str>,
     team: Arc<str>,
-    /// State names in the Completed and Removed categories, fetched once per session.
-    closed_states: Arc<OnceCell<Vec<String>>>,
+    /// States in the Completed and Removed categories, fetched once per session.
+    closed_states: Arc<OnceCell<Vec<models::WorkItemState>>>,
     /// Identity ids of the names in the PR filter, resolved once per session.
     identities: Arc<Mutex<HashMap<String, String>>>,
     /// Review signals of others' PRs by id, reused while a PR is unchanged.

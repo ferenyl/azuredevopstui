@@ -237,6 +237,7 @@ fn render_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
         (Panel::Detail, _, Some(Detail::Build(build))) => {
             format!(" {} {}", build.definition.name, build.build_number)
         }
+        (Panel::Detail, _, None) if app.board_view => " Sprint board".to_string(),
         _ => format!(" {}", panel.title()),
     };
     if let Some(items) = &items {
@@ -324,7 +325,11 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let Some(detail) = &app.detail else {
-        frame.render_widget(Paragraph::new(sprint::overview(app, inner.width)), inner);
+        if app.board_view {
+            sprint::render_board(frame, app, inner);
+        } else {
+            frame.render_widget(Paragraph::new(sprint::overview(app, inner.width)), inner);
+        }
         return;
     };
 

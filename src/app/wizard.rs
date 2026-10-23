@@ -93,6 +93,7 @@ impl App {
         self.data = Data::default();
         self.selections = [0; LEFT_PANELS.len()];
         self.close_detail();
+        self.board_view = false;
         self.board = None;
         self.notified = None;
         self.popup = None;

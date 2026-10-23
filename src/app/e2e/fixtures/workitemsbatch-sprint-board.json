@@ -1,0 +1,53 @@
+{
+  "method": "POST",
+  "path": "/contoso/Fabrikam/_apis/wit/workitemsbatch",
+  "bodyContains": "\"ids\":[301,302,303]",
+  "body": {
+    "value": [
+      {
+        "id": 301,
+        "fields": {
+          "System.Title": "Order list paging",
+          "System.WorkItemType": "User Story",
+          "System.State": "Active",
+          "System.BoardColumn": "Active",
+          "System.ChangedDate": "2026-10-21T10:00:00Z",
+          "System.CreatedDate": "2026-10-01T10:00:00Z",
+          "Microsoft.VSTS.Common.Priority": 2,
+          "System.AssignedTo": {
+            "id": "me-id",
+            "displayName": "Mona Me"
+          }
+        }
+      },
+      {
+        "id": 302,
+        "fields": {
+          "System.Title": "Crash on empty cart",
+          "System.WorkItemType": "Bug",
+          "System.State": "New",
+          "System.BoardColumn": "New",
+          "System.ChangedDate": "2026-10-22T10:00:00Z",
+          "System.CreatedDate": "2026-10-01T10:00:00Z",
+          "Microsoft.VSTS.Common.Priority": 2,
+          "System.AssignedTo": {
+            "id": "other-id",
+            "displayName": "Olle Other"
+          }
+        }
+      },
+      {
+        "id": 303,
+        "fields": {
+          "System.Title": "Export orders to CSV",
+          "System.WorkItemType": "User Story",
+          "System.State": "Closed",
+          "System.BoardColumn": "Closed",
+          "System.ChangedDate": "2026-10-23T10:00:00Z",
+          "System.CreatedDate": "2026-10-01T10:00:00Z",
+          "Microsoft.VSTS.Common.Priority": 2
+        }
+      }
+    ]
+  }
+}

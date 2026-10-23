@@ -142,6 +142,10 @@ impl App {
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::SprintBoard(result) => match result {
+                Ok(items) => self.data.board_items = Some(items),
+                Err(err) => self.report_error(err),
+            },
             Message::Sprints(result) => match result {
                 Ok(sprints) => {
                     let picker = SprintPicker::new(sprints, self.sprint.as_deref());
