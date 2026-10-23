@@ -1,5 +1,3 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Quit,
@@ -105,105 +103,137 @@ pub const HELP: [(&str, &[Action]); 4] = [
 ];
 
 impl Action {
-    pub fn from_key(key: KeyEvent) -> Option<Self> {
-        match (key.code, key.modifiers) {
-            (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(Self::Quit),
-            (KeyCode::Char('h') | KeyCode::Left, KeyModifiers::CONTROL) => Some(Self::FocusLeft),
-            (KeyCode::Char('l') | KeyCode::Right, KeyModifiers::CONTROL) => Some(Self::FocusRight),
-            (KeyCode::Char('k') | KeyCode::Up, KeyModifiers::CONTROL) => Some(Self::FocusUp),
-            (KeyCode::Char('j') | KeyCode::Down, KeyModifiers::CONTROL) => Some(Self::FocusDown),
-            (KeyCode::Char('q'), _) => Some(Self::Quit),
-            (KeyCode::Esc, _) => Some(Self::Cancel),
-            (KeyCode::Char('j') | KeyCode::Down, _) => Some(Self::Down),
-            (KeyCode::Char('k') | KeyCode::Up, _) => Some(Self::Up),
-            (KeyCode::Enter, _) => Some(Self::Confirm),
-            (KeyCode::Char('r'), _) => Some(Self::Reload),
-            (KeyCode::Char('o'), _) => Some(Self::OpenInBrowser),
-            (KeyCode::Char('y'), _) => Some(Self::Copy),
-            (KeyCode::Char('Y'), _) => Some(Self::CopyLink),
-            (KeyCode::Char('a'), _) => Some(Self::AssignToMe),
-            (KeyCode::Char('d'), KeyModifiers::CONTROL) => Some(Self::HalfPageDown),
-            (KeyCode::Char('u'), KeyModifiers::CONTROL) => Some(Self::HalfPageUp),
-            (KeyCode::Char('u'), _) => Some(Self::Unassign),
-            (KeyCode::Char('g'), _) => Some(Self::Top),
-            (KeyCode::Char('G'), _) => Some(Self::Bottom),
-            (KeyCode::PageDown, _) => Some(Self::PageDown),
-            (KeyCode::PageUp, _) => Some(Self::PageUp),
-            (KeyCode::Char(c @ '1'..='6'), _) => Some(Self::JumpToPanel(c as u8 - b'0')),
-            (KeyCode::Char('s'), _) => Some(Self::ChangeColumn),
-            (KeyCode::Char('c'), _) => Some(Self::Complete),
-            (KeyCode::Char('S'), _) => Some(Self::Sort),
-            (KeyCode::Char('t'), _) => Some(Self::Tag),
-            (KeyCode::Char('m'), _) => Some(Self::Comment),
-            (KeyCode::Char('f'), _) => Some(Self::Filter),
-            (KeyCode::Char('i'), _) => Some(Self::Sprint),
-            (KeyCode::Char(' '), _) => Some(Self::Toggle),
-            (KeyCode::Tab, _) => Some(Self::NextTab),
-            (KeyCode::BackTab, _) => Some(Self::PrevTab),
-            (KeyCode::Char('T'), _) => Some(Self::ChangeToken),
-            (KeyCode::Char('l'), _) => Some(Self::NextLink),
-            (KeyCode::Char('L'), _) => Some(Self::PrevLink),
-            (KeyCode::Char('?'), _) => Some(Self::Help),
-            (KeyCode::Char('v'), _) => Some(Self::Vote),
-            (KeyCode::Char(']'), _) => Some(Self::NextThread),
-            (KeyCode::Char('['), _) => Some(Self::PrevThread),
-            (KeyCode::Char('x'), _) => Some(Self::ThreadStatus),
-            (KeyCode::Char('e'), _) => Some(Self::PrActions),
-            (KeyCode::Char('P'), _) => Some(Self::SwitchProject),
-            (KeyCode::Char('z'), _) => Some(Self::Zoom),
-            (KeyCode::Char('/'), _) => Some(Self::Search),
-            (KeyCode::Char('E'), _) => Some(Self::Errors),
-            _ => None,
+    /// Every action that can be bound in the config's `keys`; `Toggle` (`space`) is fixed.
+    pub const ALL: [Self; 49] = [
+        Self::Quit,
+        Self::Cancel,
+        Self::Up,
+        Self::Down,
+        Self::Confirm,
+        Self::Reload,
+        Self::FocusLeft,
+        Self::FocusRight,
+        Self::FocusUp,
+        Self::FocusDown,
+        Self::OpenInBrowser,
+        Self::Copy,
+        Self::CopyLink,
+        Self::AssignToMe,
+        Self::Unassign,
+        Self::Tag,
+        Self::Comment,
+        Self::ChangeColumn,
+        Self::Complete,
+        Self::ChangeToken,
+        Self::Sort,
+        Self::Filter,
+        Self::Sprint,
+        Self::NextTab,
+        Self::PrevTab,
+        Self::Help,
+        Self::NextLink,
+        Self::PrevLink,
+        Self::Vote,
+        Self::NextThread,
+        Self::PrevThread,
+        Self::ThreadStatus,
+        Self::PrActions,
+        Self::SwitchProject,
+        Self::Zoom,
+        Self::Top,
+        Self::Bottom,
+        Self::PageDown,
+        Self::PageUp,
+        Self::HalfPageDown,
+        Self::HalfPageUp,
+        Self::JumpToPanel(1),
+        Self::JumpToPanel(2),
+        Self::JumpToPanel(3),
+        Self::JumpToPanel(4),
+        Self::JumpToPanel(5),
+        Self::JumpToPanel(6),
+        Self::Search,
+        Self::Errors,
+    ];
+
+    /// Name in the config's `keys`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Quit => "quit",
+            Self::Cancel => "cancel",
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::Confirm => "confirm",
+            Self::Reload => "reload",
+            Self::FocusLeft => "focus_left",
+            Self::FocusRight => "focus_right",
+            Self::FocusUp => "focus_up",
+            Self::FocusDown => "focus_down",
+            Self::OpenInBrowser => "open_in_browser",
+            Self::Copy => "copy",
+            Self::CopyLink => "copy_link",
+            Self::AssignToMe => "assign_to_me",
+            Self::Unassign => "unassign",
+            Self::Tag => "tag",
+            Self::Comment => "comment",
+            Self::ChangeColumn => "change_column",
+            Self::Complete => "complete",
+            Self::ChangeToken => "change_token",
+            Self::Sort => "sort",
+            Self::Filter => "filter",
+            Self::Sprint => "sprint",
+            Self::Toggle => "toggle",
+            Self::NextTab => "next_tab",
+            Self::PrevTab => "prev_tab",
+            Self::Help => "help",
+            Self::NextLink => "next_link",
+            Self::PrevLink => "prev_link",
+            Self::Vote => "vote",
+            Self::NextThread => "next_thread",
+            Self::PrevThread => "prev_thread",
+            Self::ThreadStatus => "thread_status",
+            Self::PrActions => "pr_actions",
+            Self::SwitchProject => "switch_project",
+            Self::Zoom => "zoom",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+            Self::PageDown => "page_down",
+            Self::PageUp => "page_up",
+            Self::HalfPageDown => "half_page_down",
+            Self::HalfPageUp => "half_page_up",
+            Self::JumpToPanel(1) => "panel_1",
+            Self::JumpToPanel(2) => "panel_2",
+            Self::JumpToPanel(3) => "panel_3",
+            Self::JumpToPanel(4) => "panel_4",
+            Self::JumpToPanel(5) => "panel_5",
+            Self::JumpToPanel(_) => "panel_6",
+            Self::Search => "search",
+            Self::Errors => "errors",
         }
     }
 
-    pub fn key_label(self) -> &'static str {
+    /// Actions shown as one entry in the toolbar and help, with the first key of each.
+    pub fn group(self) -> Option<&'static [Self]> {
         match self {
-            Self::Quit => "q",
-            Self::Cancel => "esc",
-            Self::Up => "k/↑",
-            Self::Down => "j/k/↑/↓",
-            Self::Confirm => "enter",
-            Self::Reload => "r",
-            Self::FocusLeft => "ctrl+h/←",
-            Self::FocusRight => "ctrl+hjkl",
-            Self::FocusUp => "ctrl+k/↑",
-            Self::FocusDown => "ctrl+j/↓",
-            Self::OpenInBrowser => "o",
-            Self::Copy => "y",
-            Self::CopyLink => "Y",
-            Self::AssignToMe => "a",
-            Self::Unassign => "u",
-            Self::Tag => "t",
-            Self::Comment => "m",
-            Self::ChangeColumn => "s",
-            Self::Complete => "c",
-            Self::ChangeToken => "T",
-            Self::Sort => "S",
-            Self::Filter => "f",
-            Self::Sprint => "i",
-            Self::Toggle => "space",
-            Self::NextTab => "tab",
-            Self::PrevTab => "shift+tab",
-            Self::Help => "?",
-            Self::NextLink => "l",
-            Self::PrevLink => "L",
-            Self::Vote => "v",
-            Self::NextThread => "]",
-            Self::PrevThread => "[",
-            Self::ThreadStatus => "x",
-            Self::PrActions => "e",
-            Self::SwitchProject => "P",
-            Self::Zoom => "z",
-            Self::Top => "g/G",
-            Self::Bottom => "G",
-            Self::PageDown => "pgdn/pgup",
-            Self::PageUp => "pgup",
-            Self::HalfPageDown => "ctrl+d/u",
-            Self::HalfPageUp => "ctrl+u",
-            Self::JumpToPanel(_) => "1-6",
-            Self::Search => "/",
-            Self::Errors => "E",
+            Self::Down => Some(&[Self::Down, Self::Up]),
+            Self::FocusRight => Some(&[
+                Self::FocusLeft,
+                Self::FocusDown,
+                Self::FocusUp,
+                Self::FocusRight,
+            ]),
+            Self::Top => Some(&[Self::Top, Self::Bottom]),
+            Self::PageDown => Some(&[Self::PageDown, Self::PageUp]),
+            Self::HalfPageDown => Some(&[Self::HalfPageDown, Self::HalfPageUp]),
+            Self::JumpToPanel(_) => Some(&[
+                Self::JumpToPanel(1),
+                Self::JumpToPanel(2),
+                Self::JumpToPanel(3),
+                Self::JumpToPanel(4),
+                Self::JumpToPanel(5),
+                Self::JumpToPanel(6),
+            ]),
+            _ => None,
         }
     }
 
@@ -261,112 +291,25 @@ impl Action {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn key(code: KeyCode, modifiers: KeyModifiers) -> Option<Action> {
-        Action::from_key(KeyEvent::new(code, modifiers))
-    }
-
-    fn plain(code: KeyCode) -> Option<Action> {
-        key(code, KeyModifiers::NONE)
-    }
+    use crate::app::Keymap;
 
     #[test]
-    fn hjkl_and_arrows_move() {
-        assert_eq!(plain(KeyCode::Char('j')), Some(Action::Down));
-        assert_eq!(plain(KeyCode::Down), Some(Action::Down));
-        assert_eq!(plain(KeyCode::Char('k')), Some(Action::Up));
-        assert_eq!(plain(KeyCode::Up), Some(Action::Up));
-    }
-
-    #[test]
-    fn ctrl_direction_changes_focus() {
-        let ctrl = KeyModifiers::CONTROL;
-
-        assert_eq!(key(KeyCode::Char('h'), ctrl), Some(Action::FocusLeft));
-        assert_eq!(key(KeyCode::Char('l'), ctrl), Some(Action::FocusRight));
-        assert_eq!(key(KeyCode::Char('k'), ctrl), Some(Action::FocusUp));
-        assert_eq!(key(KeyCode::Char('j'), ctrl), Some(Action::FocusDown));
-        assert_eq!(key(KeyCode::Left, ctrl), Some(Action::FocusLeft));
-        assert_eq!(key(KeyCode::Right, ctrl), Some(Action::FocusRight));
-        assert_eq!(key(KeyCode::Up, ctrl), Some(Action::FocusUp));
-        assert_eq!(key(KeyCode::Down, ctrl), Some(Action::FocusDown));
-    }
-
-    #[test]
-    fn lowercase_and_uppercase_s_differ() {
-        assert_eq!(plain(KeyCode::Char('s')), Some(Action::ChangeColumn));
-        assert_eq!(
-            key(KeyCode::Char('S'), KeyModifiers::SHIFT),
-            Some(Action::Sort)
-        );
-    }
-
-    #[test]
-    fn tab_and_back_tab_switch_tabs() {
-        assert_eq!(plain(KeyCode::Tab), Some(Action::NextTab));
-        assert_eq!(
-            key(KeyCode::BackTab, KeyModifiers::SHIFT),
-            Some(Action::PrevTab)
-        );
-    }
-
-    #[test]
-    fn quit_keys() {
-        assert_eq!(plain(KeyCode::Char('q')), Some(Action::Quit));
-        assert_eq!(
-            key(KeyCode::Char('c'), KeyModifiers::CONTROL),
-            Some(Action::Quit)
-        );
-    }
-
-    #[test]
-    fn other_keys() {
-        assert_eq!(plain(KeyCode::Esc), Some(Action::Cancel));
-        assert_eq!(plain(KeyCode::Enter), Some(Action::Confirm));
-        assert_eq!(
-            key(KeyCode::Char('?'), KeyModifiers::SHIFT),
-            Some(Action::Help)
-        );
-        assert_eq!(plain(KeyCode::Char(' ')), Some(Action::Toggle));
-        assert_eq!(plain(KeyCode::Char('f')), Some(Action::Filter));
-        assert_eq!(plain(KeyCode::Char('z')), Some(Action::Zoom));
-        assert_eq!(plain(KeyCode::Char('/')), Some(Action::Search));
-        assert_eq!(
-            key(KeyCode::Char('E'), KeyModifiers::SHIFT),
-            Some(Action::Errors)
-        );
-    }
-
-    #[test]
-    fn unbound_key_is_ignored() {
-        assert_eq!(plain(KeyCode::Char('Z')), None);
-        assert_eq!(plain(KeyCode::F(1)), None);
-        assert_eq!(plain(KeyCode::Char('0')), None);
-        assert_eq!(plain(KeyCode::Char('7')), None);
-    }
-
-    #[test]
-    fn navigation_keys() {
-        let ctrl = KeyModifiers::CONTROL;
-
-        assert_eq!(plain(KeyCode::Char('g')), Some(Action::Top));
-        assert_eq!(
-            key(KeyCode::Char('G'), KeyModifiers::SHIFT),
-            Some(Action::Bottom)
-        );
-        assert_eq!(plain(KeyCode::PageDown), Some(Action::PageDown));
-        assert_eq!(plain(KeyCode::PageUp), Some(Action::PageUp));
-        assert_eq!(key(KeyCode::Char('d'), ctrl), Some(Action::HalfPageDown));
-        assert_eq!(key(KeyCode::Char('u'), ctrl), Some(Action::HalfPageUp));
-        assert_eq!(plain(KeyCode::Char('u')), Some(Action::Unassign));
-        assert_eq!(plain(KeyCode::Char('1')), Some(Action::JumpToPanel(1)));
-        assert_eq!(plain(KeyCode::Char('6')), Some(Action::JumpToPanel(6)));
+    fn names_are_unique_snake_case() {
+        let mut names: Vec<_> = Action::ALL.iter().map(|a| a.name()).collect();
+        assert!(names.iter().all(|n| {
+            n.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        }));
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), Action::ALL.len());
     }
 
     #[test]
     fn help_entries_have_labels() {
+        let keymap = Keymap::default();
         for action in HELP.iter().flat_map(|(_, actions)| actions.iter()) {
-            assert!(!action.key_label().is_empty(), "{action:?}");
+            assert!(!keymap.label(*action).is_empty(), "{action:?}");
             assert!(!action.label().is_empty(), "{action:?}");
         }
     }

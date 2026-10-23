@@ -43,7 +43,7 @@ impl App {
         if self.handle_search_key(key) || self.handle_popup_key(key) {
             return;
         }
-        if let Some(action) = Action::from_key(key) {
+        if let Some(action) = self.keymap.action(key) {
             self.apply(action);
             if self
                 .search

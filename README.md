@@ -375,6 +375,7 @@ The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usual
 | `colors` | none | Overrides for single colors of the preset. See [Colors](#colors). |
 | `layout.left_percent` | `25` | Width of the left column in percent of the screen, from 15 to 60. It is never narrower than 32 columns, up to half the screen. |
 | `mouse` | `true` | Capture the mouse: click a box, row or tab, scroll with the wheel. Set it to `false` to leave the mouse to the terminal. See [Mouse](#mouse). |
+| `keys` | `{}` | Your own keys for actions, for example `{ "vote": ["V"] }`. See [Key bindings](#key-bindings). |
 
 ### Others' PRs filter
 
@@ -490,6 +491,50 @@ The table lists the Mocha values.
 | `q`, `ctrl+c` | Quit |
 
 Actions apply to the selected row in the focused list. When the detail panel has focus, they apply to the item shown there. The toolbar always shows the keys that work in the current context.
+
+### Key bindings
+
+The keys above are the defaults. Change them with `keys` in the config: each listed action gets exactly the keys you give and loses its defaults, all others keep theirs. An empty list unbinds an action. The toolbar and `?` show your keys.
+
+```json
+"keys": {
+  "vote": ["V"],
+  "down": ["j", "down", "ctrl+n"],
+  "zoom": []
+}
+```
+
+A key is a character (`"q"`, `"G"`, `"?"`) or a name (`enter`, `esc`, `tab`, `shift+tab`, `backspace`, `delete`, `insert`, `home`, `end`, `pgup`, `pgdn`, `up`, `down`, `left`, `right`, `space`, `f1`–`f24`), optionally with `ctrl+`, `alt+` or `shift+` in front. Uppercase letters are typed with shift, so `"G"` and `"shift+g"` are the same key. A wrong action name, a key that cannot be read, or a key bound to two actions (also when one of them keeps its default) stops the app at start with an error naming them.
+
+`ctrl+c` always quits and `space` always ticks rows in popups. Keys inside popups are not configurable either: typing and editing text, `y` / `n` in confirmations, and `ctrl+e` for the editor. Lists in popups follow your `up`, `down`, `confirm` and `cancel` keys.
+
+| Action | Default | Action | Default |
+|---|---|---|---|
+| `quit` | `q` | `cancel` | `esc` |
+| `up` | `k`, `up` | `down` | `j`, `down` |
+| `confirm` | `enter` | `reload` | `r` |
+| `focus_left` | `ctrl+h`, `ctrl+left` | `focus_right` | `ctrl+l`, `ctrl+right` |
+| `focus_up` | `ctrl+k`, `ctrl+up` | `focus_down` | `ctrl+j`, `ctrl+down` |
+| `top` | `g` | `bottom` | `G` |
+| `page_down` | `pgdn` | `page_up` | `pgup` |
+| `half_page_down` | `ctrl+d` | `half_page_up` | `ctrl+u` |
+| `panel_1` | `1` | `panel_2` | `2` |
+| `panel_3` | `3` | `panel_4` | `4` |
+| `panel_5` | `5` | `panel_6` | `6` |
+| `next_tab` | `tab` | `prev_tab` | `shift+tab` |
+| `zoom` | `z` | `search` | `/` |
+| `sort` | `S` | `filter` | `f` |
+| `sprint` | `i` | `change_column` | `s` |
+| `assign_to_me` | `a` | `unassign` | `u` |
+| `tag` | `t` | `comment` | `m` |
+| `next_thread` | `]` | `prev_thread` | `[` |
+| `thread_status` | `x` | `complete` | `c` |
+| `vote` | `v` | `pr_actions` | `e` |
+| `open_in_browser` | `o` | `copy` | `y` |
+| `copy_link` | `Y` | `next_link` | `l` |
+| `prev_link` | `L` | `errors` | `E` |
+| `change_token` | `T` | `switch_project` | `P` |
+| `help` | `?` | | |
 
 ## Mouse
 

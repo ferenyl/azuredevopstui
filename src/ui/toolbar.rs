@@ -13,7 +13,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .flat_map(|action| {
             [
                 Span::styled(
-                    format!(" [{}] ", action.key_label()),
+                    format!(" [{}] ", app.keymap.label(*action)),
                     Style::new().fg(theme.toolbar_key),
                 ),
                 Span::raw(app.action_label(*action)),
@@ -55,12 +55,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
     let errors = app.activity.error_count();
-    if errors > 0 {
+    let errors_key = app.keymap.label(crate::app::Action::Errors);
+    if errors > 0 && !errors_key.is_empty() {
         status.push(Span::styled(
-            format!(
-                "[{}] errors ({errors})  ",
-                crate::app::Action::Errors.key_label()
-            ),
+            format!("[{errors_key}] errors ({errors})  "),
             Style::new().fg(theme.toolbar_key),
         ));
     }
