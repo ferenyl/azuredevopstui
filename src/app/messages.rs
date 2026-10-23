@@ -3,6 +3,7 @@ use std::time::Instant;
 use crate::api;
 use crate::api::AdoClient;
 use crate::auth::Auth;
+use crate::config::Config;
 
 use super::loads::Load;
 use super::message::Message;
@@ -49,7 +50,11 @@ impl App {
             }),
             Message::Authenticated(Err(err)) => self.fail(err, Retry::Authenticate),
             Message::Organizations(Ok(organizations)) if !organizations.is_empty() => {
-                self.set_step(SetupStep::SelectOrganization(Selection::new(organizations)));
+                let mut selection = Selection::new(organizations);
+                if let Some(config) = self.config.as_ref().filter(|_| self.switching) {
+                    selection.preselect(&config.organization);
+                }
+                self.set_step(SetupStep::SelectOrganization(selection));
             }
             Message::Organizations(_) => {
                 self.set_step(SetupStep::EnterOrganization(TextInput::default()));
@@ -58,10 +63,16 @@ impl App {
                 organization,
                 result,
             } => match result {
-                Ok(projects) => self.set_step(SetupStep::SelectProject {
-                    organization,
-                    selection: Selection::new(projects),
-                }),
+                Ok(projects) => {
+                    let mut selection = Selection::new(projects);
+                    if let Some(config) = self.current_config(&organization) {
+                        selection.preselect(&config.project);
+                    }
+                    self.set_step(SetupStep::SelectProject {
+                        organization,
+                        selection,
+                    });
+                }
                 Err(err) => self.fail(err, Retry::Projects(organization)),
             },
             Message::Teams {
@@ -69,17 +80,29 @@ impl App {
                 project,
                 result,
             } => match result {
-                Ok(teams) => self.set_step(SetupStep::SelectTeam {
-                    organization,
-                    project,
-                    selection: Selection::new(teams),
-                }),
+                Ok(teams) => {
+                    let mut selection = Selection::new(teams);
+                    if let Some(config) = self
+                        .current_config(&organization)
+                        .filter(|config| config.project == project)
+                    {
+                        selection.preselect(&config.team);
+                    }
+                    self.set_step(SetupStep::SelectTeam {
+                        organization,
+                        project,
+                        selection,
+                    });
+                }
                 Err(err) => self.fail(err, Retry::Teams(organization, project)),
             },
-            Message::BoardColumns(Ok(columns)) => {
-                self.set_step(SetupStep::SelectReadyColumn(Selection::new(columns)));
-            }
-            Message::BoardColumns(Err(err)) => self.fail(err, Retry::Continue),
+            Message::BoardColumns { config, result } => match result {
+                Ok(columns) => self.set_step(SetupStep::SelectReadyColumn {
+                    config,
+                    selection: Selection::new(columns),
+                }),
+                Err(err) => self.fail(err, Retry::BoardColumns(config)),
+            },
             Message::WorkItemTypes(Ok(types)) => self.open_types_picker(types),
             Message::WorkItemTypes(Err(err)) => self.report_error(err),
             Message::Connected(Ok(user)) => {
@@ -266,6 +289,13 @@ impl App {
         if let (true, Some(label)) = (succeeded, label) {
             self.notice = Some((format!("{label} ✓"), Instant::now()));
         }
+    }
+
+    /// The running config while switching project, if it is for `organization`.
+    fn current_config(&self, organization: &str) -> Option<&Config> {
+        self.config
+            .as_deref()
+            .filter(|config| self.switching && config.organization == organization)
     }
 
     pub(super) fn fail(&mut self, err: anyhow::Error, retry: Retry) {

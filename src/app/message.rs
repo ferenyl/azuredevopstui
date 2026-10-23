@@ -5,7 +5,7 @@ use crate::api::{
     PullRequestChecks, PullRequestDetails, SprintWorkItems, WorkItem, WorkItemDetails,
 };
 use crate::auth::Auth;
-use crate::config::MergeStrategy;
+use crate::config::{Config, MergeStrategy};
 use crate::diff::FileDiff;
 
 use super::loads::Load;
@@ -22,7 +22,10 @@ pub enum Message {
         project: String,
         result: Result<Vec<String>>,
     },
-    BoardColumns(Result<Vec<String>>),
+    BoardColumns {
+        config: Box<Config>,
+        result: Result<Vec<String>>,
+    },
     WorkItemTypes(Result<Vec<String>>),
     Connected(Result<CurrentUser>),
     MyPullRequests(Result<Vec<PullRequest>>),

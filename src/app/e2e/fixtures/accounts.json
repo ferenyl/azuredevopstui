@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/_apis/accounts",
+  "query": {
+    "memberId": "me-id"
+  },
+  "body": {
+    "value": [
+      {
+        "accountName": "contoso"
+      }
+    ]
+  }
+}

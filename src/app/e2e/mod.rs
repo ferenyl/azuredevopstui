@@ -19,6 +19,7 @@ mod theme;
 mod threads;
 mod vote;
 mod wide_chars;
+mod wizard;
 
 use std::fs;
 use std::path::Path;
@@ -236,6 +237,18 @@ impl Harness {
     pub async fn new() -> Self {
         let ado = MockAdo::start().await;
         let mut app = App::new(Some(config()), None);
+        app.client = Some(AdoClient::with_base_url(
+            Auth::from_pat("e2e-pat"),
+            &ado.uri(),
+        ));
+        app.sync_api();
+        Self { app, ado }
+    }
+
+    /// Like [`Harness::new`] without a config, so [`Harness::connect`] runs the setup wizard.
+    pub async fn unconfigured() -> Self {
+        let ado = MockAdo::start().await;
+        let mut app = App::new(None, None);
         app.client = Some(AdoClient::with_base_url(
             Auth::from_pat("e2e-pat"),
             &ado.uri(),

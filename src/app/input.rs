@@ -66,7 +66,7 @@ impl App {
                 Screen::Setup(SetupStep::EnterPat {
                     cancelable: true, ..
                 }) => self.screen = Screen::Main,
-                Screen::Setup(_) => self.should_quit = true,
+                Screen::Setup(_) => self.go_back(),
                 Screen::Main => {
                     if self.zoomed && self.detail.is_none() {
                         self.zoomed = false;
@@ -139,6 +139,7 @@ impl App {
             | Action::PrevThread
             | Action::ThreadStatus
             | Action::PrActions
+            | Action::SwitchProject
             | Action::Zoom
             | Action::Top
             | Action::Bottom
@@ -149,6 +150,7 @@ impl App {
             | Action::JumpToPanel(_)
             | Action::Errors
                 if !matches!(self.screen, Screen::Main) => {}
+            Action::SwitchProject => self.switch_project(),
             Action::Top => self.move_by(Move::Top),
             Action::Bottom => self.move_by(Move::Bottom),
             Action::PageDown => self.move_by(Move::Page {
