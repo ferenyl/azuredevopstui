@@ -225,7 +225,13 @@ impl Keymap {
         if key == RESERVED[0].0 {
             return Some(Action::Quit);
         }
-        self.by_key.get(&key).copied()
+        self.by_key
+            .get(&key)
+            .or_else(|| {
+                self.by_key
+                    .get(&KeyBinding::new(key.code, KeyModifiers::NONE))
+            })
+            .copied()
     }
 
     pub fn keys(&self, action: Action) -> &[KeyBinding] {
@@ -352,6 +358,19 @@ mod tests {
         assert_eq!(key(KeyCode::Right, ctrl), Some(Action::FocusRight));
         assert_eq!(key(KeyCode::Up, ctrl), Some(Action::FocusUp));
         assert_eq!(key(KeyCode::Down, ctrl), Some(Action::FocusDown));
+    }
+
+    #[test]
+    fn unbound_modifiers_fall_back_to_the_plain_key() {
+        let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
+
+        assert_eq!(key(KeyCode::Char('['), altgr), Some(Action::PrevThread));
+        assert_eq!(key(KeyCode::Char(']'), altgr), Some(Action::NextThread));
+        assert_eq!(key(KeyCode::Down, KeyModifiers::SHIFT), Some(Action::Down));
+        assert_eq!(
+            key(KeyCode::Enter, KeyModifiers::CONTROL),
+            Some(Action::Confirm)
+        );
     }
 
     #[test]
