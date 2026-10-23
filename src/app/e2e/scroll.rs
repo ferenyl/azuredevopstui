@@ -7,7 +7,7 @@ use super::flows::{PR_101, select};
 use crate::app::{DetailInfo, Panel};
 
 /// Opens PR 101 with a 60-line description and focuses the detail.
-async fn pull_request_with_long_description() -> Harness {
+pub(super) async fn pull_request_with_long_description() -> Harness {
     let mut harness = Harness::new().await;
     let mut body: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(format!("{}/pr-101.json", super::FIXTURES)).unwrap(),

@@ -78,6 +78,8 @@ pub struct App {
     pub detail_max_scroll: std::cell::Cell<u16>,
     /// Visible content rows of the last drawn detail.
     pub detail_height: std::cell::Cell<u16>,
+    /// Visible rows of the focused left list in the last frame; ten before the first draw.
+    pub list_height: std::cell::Cell<u16>,
     /// Changed files of the shown PR, once its Files tab was shown.
     pub files: Option<Files>,
     /// Targets of the links drawn in the detail pane last frame, in reading order.
@@ -132,6 +134,7 @@ impl App {
             thread_row: std::cell::Cell::new(None),
             detail_max_scroll: std::cell::Cell::new(u16::MAX),
             detail_height: std::cell::Cell::new(0),
+            list_height: std::cell::Cell::new(10),
             files: None,
             detail_links: RefCell::default(),
             link_index: None,

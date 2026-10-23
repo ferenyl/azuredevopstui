@@ -274,6 +274,9 @@ fn render_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
             } else {
                 Style::new().bg(theme.selection_bg)
             };
+            if app.focus == panel {
+                app.list_height.set(block.inner(area).height);
+            }
             let list = List::new(items).block(block).highlight_style(highlight);
             let mut state = ListState::default().with_selected(selected);
             frame.render_stateful_widget(list, area, &mut state);
