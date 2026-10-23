@@ -3,6 +3,7 @@ use std::time::Instant;
 use crate::api;
 use crate::api::AdoClient;
 use crate::auth::Auth;
+use crate::config::Config;
 
 use super::loads::Load;
 use super::message::Message;
@@ -24,10 +25,14 @@ impl App {
                 }
                 *message
             }
+            Message::ActionDone { id, message } => {
+                self.finish_action(id, *message);
+                return;
+            }
             message => message,
         };
         match message {
-            Message::Loaded { .. } => {}
+            Message::Loaded { .. } | Message::ActionDone { .. } => {}
             Message::Notified(url) => {
                 if let Some(url) = url {
                     self.open_url(&url);
@@ -45,7 +50,11 @@ impl App {
             }),
             Message::Authenticated(Err(err)) => self.fail(err, Retry::Authenticate),
             Message::Organizations(Ok(organizations)) if !organizations.is_empty() => {
-                self.set_step(SetupStep::SelectOrganization(Selection::new(organizations)));
+                let mut selection = Selection::new(organizations);
+                if let Some(config) = self.config.as_ref().filter(|_| self.switching) {
+                    selection.preselect(&config.organization);
+                }
+                self.set_step(SetupStep::SelectOrganization(selection));
             }
             Message::Organizations(_) => {
                 self.set_step(SetupStep::EnterOrganization(TextInput::default()));
@@ -54,10 +63,16 @@ impl App {
                 organization,
                 result,
             } => match result {
-                Ok(projects) => self.set_step(SetupStep::SelectProject {
-                    organization,
-                    selection: Selection::new(projects),
-                }),
+                Ok(projects) => {
+                    let mut selection = Selection::new(projects);
+                    if let Some(config) = self.current_config(&organization) {
+                        selection.preselect(&config.project);
+                    }
+                    self.set_step(SetupStep::SelectProject {
+                        organization,
+                        selection,
+                    });
+                }
                 Err(err) => self.fail(err, Retry::Projects(organization)),
             },
             Message::Teams {
@@ -65,17 +80,29 @@ impl App {
                 project,
                 result,
             } => match result {
-                Ok(teams) => self.set_step(SetupStep::SelectTeam {
-                    organization,
-                    project,
-                    selection: Selection::new(teams),
-                }),
+                Ok(teams) => {
+                    let mut selection = Selection::new(teams);
+                    if let Some(config) = self
+                        .current_config(&organization)
+                        .filter(|config| config.project == project)
+                    {
+                        selection.preselect(&config.team);
+                    }
+                    self.set_step(SetupStep::SelectTeam {
+                        organization,
+                        project,
+                        selection,
+                    });
+                }
                 Err(err) => self.fail(err, Retry::Teams(organization, project)),
             },
-            Message::BoardColumns(Ok(columns)) => {
-                self.set_step(SetupStep::SelectReadyColumn(Selection::new(columns)));
-            }
-            Message::BoardColumns(Err(err)) => self.fail(err, Retry::Continue),
+            Message::BoardColumns { config, result } => match result {
+                Ok(columns) => self.set_step(SetupStep::SelectReadyColumn {
+                    config,
+                    selection: Selection::new(columns),
+                }),
+                Err(err) => self.fail(err, Retry::BoardColumns(config)),
+            },
             Message::WorkItemTypes(Ok(types)) => self.open_types_picker(types),
             Message::WorkItemTypes(Err(err)) => self.report_error(err),
             Message::Connected(Ok(user)) => {
@@ -250,6 +277,27 @@ impl App {
         self.sync_detail();
     }
 
+    /// Handles the result of a change as any message, and confirms it when it succeeded.
+    fn finish_action(&mut self, id: u64, message: Message) {
+        let label = self.activity.finish(id);
+        let succeeded = matches!(
+            message,
+            Message::WorkItemUpdated { result: Ok(()), .. }
+                | Message::PullRequestUpdated { result: Ok(()), .. }
+        );
+        self.handle_message(message);
+        if let (true, Some(label)) = (succeeded, label) {
+            self.notice = Some((format!("{label} ✓"), Instant::now()));
+        }
+    }
+
+    /// The running config while switching project, if it is for `organization`.
+    fn current_config(&self, organization: &str) -> Option<&Config> {
+        self.config
+            .as_deref()
+            .filter(|config| self.switching && config.organization == organization)
+    }
+
     pub(super) fn fail(&mut self, err: anyhow::Error, retry: Retry) {
         tracing::error!("setup failed: {err:#}");
         if self.handle_rejected_pat(&err) {
@@ -264,7 +312,7 @@ impl App {
     pub(super) fn report_error(&mut self, err: anyhow::Error) {
         tracing::error!("{err:#}");
         if !self.handle_rejected_pat(&err) {
-            self.error = Some(format!("{err:#}"));
+            self.set_error(format!("{err:#}"));
         }
     }
 
@@ -296,6 +344,45 @@ mod tests {
     use crate::app::message::Message;
     use crate::app::test_helpers::{app, open_pull_request};
     use crate::test_support::{ids_of_prs, pull_request};
+
+    fn action_done(id: u64, result: anyhow::Result<()>) -> Message {
+        Message::ActionDone {
+            id,
+            message: Box::new(Message::WorkItemUpdated {
+                id: 1,
+                reload: &[],
+                result,
+            }),
+        }
+    }
+
+    #[test]
+    fn finished_action_is_confirmed_in_the_notice() {
+        let mut app = app();
+        let id = app.activity.start("assigning #1".into());
+        assert_eq!(app.activity.latest(), Some(("assigning #1", 0)));
+
+        app.handle_message(action_done(id, Ok(())));
+
+        assert_eq!(app.activity.latest(), None);
+        assert_eq!(app.notice(), Some("assigning #1 ✓"));
+        assert_eq!(app.error, None);
+    }
+
+    #[test]
+    fn failed_action_keeps_the_error_in_the_history() {
+        let mut app = app();
+        let id = app.activity.start("assigning #1".into());
+
+        app.handle_message(action_done(id, Err(anyhow::anyhow!("denied"))));
+
+        assert_eq!(app.activity.latest(), None);
+        assert_eq!(app.notice(), None);
+        assert_eq!(app.error.as_deref(), Some("denied"));
+        app.error = None;
+        let history: Vec<_> = app.activity.errors().map(|(_, e)| e.as_str()).collect();
+        assert_eq!(history, ["denied"]);
+    }
 
     #[test]
     fn loaded_lists_use_configured_sort() {

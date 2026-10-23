@@ -43,7 +43,7 @@ impl App {
             Some(Popup::RemoveReviewer { pr, selection }) => {
                 self.confirm_remove_reviewer(pr, selection.selected)
             }
-            None => {}
+            Some(Popup::Errors { .. }) | None => {}
         }
     }
 
@@ -84,6 +84,17 @@ impl App {
             }
             return true;
         }
+        if let Some(Popup::Errors { first }) = &mut self.popup {
+            let last = self.activity.error_count().saturating_sub(1);
+            match action {
+                Action::Down => *first = (*first + 1).min(last),
+                Action::Up => *first = first.saturating_sub(1),
+                Action::Confirm | Action::Cancel => self.popup = None,
+                Action::Quit => self.should_quit = true,
+                _ => {}
+            }
+            return true;
+        }
         let Some(popup) = &mut self.popup else {
             return false;
         };
@@ -92,7 +103,10 @@ impl App {
             Popup::Complete(picker) => &mut picker.selection,
             Popup::Tags(picker) => &mut picker.selection,
             Popup::Sprint(picker) => &mut picker.selection,
-            Popup::Text { .. } | Popup::BuildFilter { .. } | Popup::Confirm { .. } => {
+            Popup::Text { .. }
+            | Popup::BuildFilter { .. }
+            | Popup::Confirm { .. }
+            | Popup::Errors { .. } => {
                 return true;
             }
             Popup::Sort { selection, .. }

@@ -11,7 +11,7 @@ impl App {
         unassign: bool,
     ) {
         let Some(targets) = board.targets(&item.fields.work_item_type) else {
-            self.error = Some(format!(
+            self.set_error(format!(
                 "{} items are not on the board",
                 item.fields.work_item_type
             ));
@@ -46,7 +46,12 @@ impl App {
             return;
         };
         let (id, unassign) = (picker.work_item_id, picker.unassign);
-        self.spawn(async move {
+        let label = if unassign {
+            format!("unassigning #{id}")
+        } else {
+            format!("moving #{id}")
+        };
+        self.spawn_action(label, async move {
             let result = if unassign {
                 api.unassign_work_item(id, &board, &target).await
             } else {

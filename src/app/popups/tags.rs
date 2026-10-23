@@ -62,7 +62,7 @@ impl App {
             }
             tags.push(tag);
         }
-        self.spawn(async move {
+        self.spawn_action(format!("tagging #{id}"), async move {
             let result = api.set_work_item_tags(id, &tags).await;
             Message::WorkItemUpdated {
                 id,

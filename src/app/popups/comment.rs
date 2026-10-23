@@ -40,7 +40,7 @@ impl App {
         let Some(api) = self.api() else {
             return;
         };
-        self.spawn(async move {
+        self.spawn_action(format!("commenting on #{id}"), async move {
             let result = api.add_work_item_comment(id, &text).await;
             Message::WorkItemUpdated {
                 id,
@@ -60,7 +60,12 @@ impl App {
         };
         let parent = thread_id.map(|thread_id| self.first_comment_id(thread_id));
         let reload = self.reload_after_thread_change(&pr);
-        self.spawn(async move {
+        let label = if thread_id.is_some() {
+            format!("replying on !{}", pr.pull_request_id)
+        } else {
+            format!("starting a thread on !{}", pr.pull_request_id)
+        };
+        self.spawn_action(label, async move {
             let result = match thread_id.zip(parent) {
                 Some((thread_id, parent)) => api.reply(&pr, thread_id, parent, &text).await,
                 None => api.create_thread(&pr, &text).await,

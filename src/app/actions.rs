@@ -87,7 +87,7 @@ impl App {
         };
         if let Err(err) = result {
             tracing::warn!("failed to open browser: {err}");
-            self.error = Some(format!("failed to open browser: {err}"));
+            self.set_error(format!("failed to open browser: {err}"));
         }
     }
 
@@ -110,7 +110,7 @@ impl App {
         let copy = CopyToClipboard::to_clipboard_from(text.as_str());
         match crossterm::execute!(std::io::stdout(), copy) {
             Ok(()) => self.notice = Some((format!("copied {text}"), Instant::now())),
-            Err(err) => self.error = Some(format!("failed to copy: {err}")),
+            Err(err) => self.set_error(format!("failed to copy: {err}")),
         }
     }
 
@@ -121,7 +121,7 @@ impl App {
             return;
         };
         let (id, assignee) = (item.id, user.unique_name().to_string());
-        self.spawn(async move {
+        self.spawn_action(format!("assigning #{id}"), async move {
             let result = api.assign_work_item(id, &assignee).await;
             Message::WorkItemUpdated {
                 id,
@@ -146,7 +146,7 @@ impl App {
         if self.is_assigned_to_me(&item) {
             self.change_column(true);
         } else {
-            self.error = Some(format!("#{} is not assigned to you", item.id));
+            self.set_error(format!("#{} is not assigned to you", item.id));
         }
     }
 
@@ -155,7 +155,7 @@ impl App {
             return;
         };
         if !self.is_assigned_to_me(&item) {
-            self.error = Some(format!("#{} is not assigned to you", item.id));
+            self.set_error(format!("#{} is not assigned to you", item.id));
             return;
         }
         let Some(api) = self.api() else {
@@ -210,7 +210,7 @@ impl App {
             return;
         };
         if !self.can_complete(&pr) {
-            self.error = Some(format!("!{} is not your pull request", pr.pull_request_id));
+            self.set_error(format!("!{} is not your pull request", pr.pull_request_id));
             return;
         }
         let Some(api) = self.api() else {

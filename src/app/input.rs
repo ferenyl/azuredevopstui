@@ -66,7 +66,7 @@ impl App {
                 Screen::Setup(SetupStep::EnterPat {
                     cancelable: true, ..
                 }) => self.screen = Screen::Main,
-                Screen::Setup(_) => self.should_quit = true,
+                Screen::Setup(_) => self.go_back(),
                 Screen::Main => {
                     if self.zoomed && self.detail.is_none() {
                         self.zoomed = false;
@@ -139,6 +139,7 @@ impl App {
             | Action::PrevThread
             | Action::ThreadStatus
             | Action::PrActions
+            | Action::SwitchProject
             | Action::Zoom
             | Action::Top
             | Action::Bottom
@@ -147,7 +148,9 @@ impl App {
             | Action::HalfPageDown
             | Action::HalfPageUp
             | Action::JumpToPanel(_)
+            | Action::Errors
                 if !matches!(self.screen, Screen::Main) => {}
+            Action::SwitchProject => self.switch_project(),
             Action::Top => self.move_by(Move::Top),
             Action::Bottom => self.move_by(Move::Bottom),
             Action::PageDown => self.move_by(Move::Page {
@@ -199,6 +202,7 @@ impl App {
             Action::ThreadStatus => self.open_thread_status(),
             Action::PrActions => self.open_pr_actions(),
             Action::Zoom => self.zoomed = !self.zoomed,
+            Action::Errors => self.popup = Some(Popup::Errors { first: 0 }),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);

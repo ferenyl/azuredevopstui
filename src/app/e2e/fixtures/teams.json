@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/contoso/_apis/projects/Fabrikam/teams",
+  "body": {
+    "value": [
+      {
+        "name": "Web"
+      },
+      {
+        "name": "Mobile"
+      }
+    ]
+  }
+}

@@ -132,7 +132,7 @@ impl App {
     pub(in crate::app) fn confirm_link_work_item(&mut self, pr: Box<PullRequest>, text: &str) {
         match text.trim().trim_start_matches('#').parse() {
             Ok(id) => self.send_pr_update(pr, PrChange::LinkWorkItem(id)),
-            Err(_) => self.error = Some(format!("not a work item id: {}", text.trim())),
+            Err(_) => self.set_error(format!("not a work item id: {}", text.trim())),
         }
     }
 
@@ -141,7 +141,19 @@ impl App {
             return;
         };
         let reload = vec![Load::MyPullRequests, Load::OtherPullRequests, Load::Detail];
-        self.spawn(async move {
+        let number = pr.pull_request_id;
+        let label = match &change {
+            PrChange::Abandon => format!("abandoning !{number}"),
+            PrChange::Reactivate => format!("reactivating !{number}"),
+            PrChange::Draft(true) => format!("marking !{number} as draft"),
+            PrChange::Draft(false) => format!("publishing !{number}"),
+            PrChange::Title(_) => format!("renaming !{number}"),
+            PrChange::Description(_) => format!("editing the description of !{number}"),
+            PrChange::AddReviewer(_) => format!("adding a reviewer to !{number}"),
+            PrChange::RemoveReviewer(_) => format!("removing a reviewer from !{number}"),
+            PrChange::LinkWorkItem(id) => format!("linking #{id} to !{number}"),
+        };
+        self.spawn_action(label, async move {
             let result = match change {
                 PrChange::Abandon => api.abandon(&pr).await,
                 PrChange::Reactivate => api.reactivate(&pr).await,

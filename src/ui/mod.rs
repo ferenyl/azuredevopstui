@@ -200,6 +200,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             let title = format!(" Remove reviewer from !{} ", pr.pull_request_id);
             popup::render_picker(frame, app, &title, selection, main);
         }
+        Some(Popup::Errors { first }) => popup::render_errors(frame, app, *first, main),
         None => {}
     }
     if app.show_help {
