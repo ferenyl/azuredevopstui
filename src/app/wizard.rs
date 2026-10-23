@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::api::ProjectApi;
 use crate::auth::Auth;
 use crate::config::{AuthMethod, Config};
+use crate::theme::Theme;
 
 use super::message::Message;
 use super::setup::organization_name;
@@ -148,7 +149,7 @@ impl App {
             } => match selection.current() {
                 Some(team) => {
                     let config = Config::new(organization, project, team.to_string());
-                    self.theme = config.colors.clone();
+                    self.theme = Theme::from_config(&config);
                     self.save_config(config);
                 }
                 None => self.set_step(SetupStep::SelectTeam {

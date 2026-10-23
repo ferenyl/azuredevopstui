@@ -111,10 +111,7 @@ impl App {
     pub fn new(config: Option<Config>, picker: Option<ratatui_image::picker::Picker>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         Self {
-            theme: config
-                .as_ref()
-                .map(|c| c.colors.clone())
-                .unwrap_or_default(),
+            theme: config.as_ref().map(Theme::from_config).unwrap_or_default(),
             sprint: config.as_ref().and_then(|c| c.default_sprint.clone()),
             config: config.map(Arc::new),
             screen: Screen::Setup(SetupStep::Loading("Signing in…")),
