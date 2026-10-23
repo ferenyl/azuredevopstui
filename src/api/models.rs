@@ -539,6 +539,15 @@ pub struct WorkItemDetailFields {
 pub struct CommentList {
     pub total_count: u32,
     pub comments: Vec<WorkItemComment>,
+    /// Present while older comments remain.
+    #[serde(default)]
+    pub continuation_token: Option<String>,
+}
+
+/// A page of work item comments, newest first.
+pub struct CommentsPage {
+    pub comments: Vec<DetailComment>,
+    pub continuation_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -572,6 +581,8 @@ pub struct WorkItemDetails {
     pub repro_steps: Option<RichText>,
     pub comment_count: u32,
     pub comments: Vec<DetailComment>,
+    /// Token for the next older page of comments, while there is one.
+    pub comments_continuation: Option<String>,
     pub children: Vec<WorkItem>,
     pub pull_requests: Vec<PullRequest>,
     /// Relations other than children and pull requests, sorted by category.

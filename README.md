@@ -27,7 +27,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - **Work item**:
     - **Overview** shows type, state, board column, priority, assignee, sprint, tags, linked pull requests, description, repro steps and acceptance criteria.
     - **Children** shows child items grouped by type (Task, Release Task, User Story, …), each with state and assignee.
-    - **Comments** shows the 10 newest comments.
+    - **Comments** shows the 10 newest comments. Scroll to the end to load older ones, 50 at a time.
   - **Images** in descriptions and comments are drawn inline when the terminal supports graphics. See [Images](#images).
 - **Actions**:
   - Open a PR or work item in the browser.

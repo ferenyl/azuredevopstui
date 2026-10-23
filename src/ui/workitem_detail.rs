@@ -254,15 +254,55 @@ fn comments(app: &App, details: &WorkItemDetails, width: u16) -> Vec<Line<'stati
         lines.extend(rich_lines(app, &comment.text, width, bar.clone()));
         lines.push(Line::default());
     }
-    let shown = details.comments.len();
-    if (details.comment_count as usize) > shown {
-        lines.push(Line::styled(
-            format!(
-                "Showing the {shown} newest of {} comments",
-                details.comment_count
-            ),
-            muted,
-        ));
+    if let Some(footer) = comments_footer(details, app.loading_older_comments()) {
+        lines.push(Line::styled(footer, muted));
     }
     lines
+}
+
+/// What follows the comments while older ones remain.
+fn comments_footer(details: &WorkItemDetails, loading: bool) -> Option<String> {
+    details.comments_continuation.as_ref()?;
+    Some(if loading {
+        "Loading older comments…".to_string()
+    } else {
+        format!(
+            "Showing the {} newest of {} comments · scroll down for older",
+            details.comments.len(),
+            details.comment_count
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::work_item_details;
+
+    #[test]
+    fn footer_names_the_shown_and_total_comments_while_older_remain() {
+        let details = work_item_details(&["a", "b"], Some("page2"));
+
+        assert_eq!(
+            comments_footer(&details, false).as_deref(),
+            Some("Showing the 2 newest of 12 comments · scroll down for older")
+        );
+    }
+
+    #[test]
+    fn footer_says_loading_while_older_comments_load() {
+        let details = work_item_details(&["a"], Some("page2"));
+
+        assert_eq!(
+            comments_footer(&details, true).as_deref(),
+            Some("Loading older comments…")
+        );
+    }
+
+    #[test]
+    fn no_footer_when_all_comments_are_shown() {
+        let details = work_item_details(&["a"], None);
+
+        assert_eq!(comments_footer(&details, false), None);
+    }
 }
