@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 
-use crate::api::{PullRequest, WorkItem};
+use crate::api::{DetailComment, PullRequest, WorkItem, WorkItemDetails};
 use crate::config::Config;
+use crate::rich_text::RichText;
 
 pub fn config() -> Config {
     let mut config = Config::new("contoso".into(), "MyProject".into(), "My Team".into());
@@ -70,4 +71,33 @@ pub fn ids_of_prs(prs: &[PullRequest]) -> Vec<u32> {
 
 pub fn ids_of_items(items: &[WorkItem]) -> Vec<u32> {
     items.iter().map(|item| item.id).collect()
+}
+
+pub fn detail_comment(text: &str) -> DetailComment {
+    DetailComment {
+        author: "Bo".into(),
+        date: "2026-10-01T10:00:00Z".into(),
+        text: RichText::from_html(text),
+    }
+}
+
+/// Details of a work item with `comments` and a token for older ones, if given.
+pub fn work_item_details(comments: &[&str], token: Option<&str>) -> WorkItemDetails {
+    WorkItemDetails {
+        state: "Active".into(),
+        board_column: None,
+        board_column_done: false,
+        assigned_to: None,
+        iteration_path: None,
+        tags: None,
+        description: None,
+        acceptance_criteria: None,
+        repro_steps: None,
+        comment_count: 12,
+        comments: comments.iter().map(|text| detail_comment(text)).collect(),
+        comments_continuation: token.map(String::from),
+        children: Vec::new(),
+        pull_requests: Vec::new(),
+        links: Vec::new(),
+    }
 }

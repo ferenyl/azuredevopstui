@@ -31,9 +31,9 @@ pub use keymap::Keymap;
 pub use mouse::{HitAreas, PanelHit, PickerHit};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
-    ColumnPicker, CompletePicker, CompleteRow, ConfirmAction, Data, Detail, DetailInfo, DetailTab,
-    InboxEntry, LEFT_PANELS, Panel, Popup, PrAction, Signals, SortKind, SprintPicker, TagPicker,
-    TextTarget,
+    BuildAction, ColumnPicker, CompletePicker, CompleteRow, ConfirmAction, Data, Detail,
+    DetailInfo, DetailTab, InboxEntry, LEFT_PANELS, Panel, Popup, PrAction, Signals, SortKind,
+    SprintPicker, TagPicker, TextTarget,
 };
 pub use text_input::TextInput;
 
@@ -88,6 +88,8 @@ pub struct App {
     pub detail_max_scroll: std::cell::Cell<u16>,
     /// Visible content rows of the last drawn detail.
     pub detail_height: std::cell::Cell<u16>,
+    /// Loading older comments failed; scrolling retries, drawing does not.
+    older_comments_failed: bool,
     /// Visible rows of the focused left list in the last frame; ten before the first draw.
     pub list_height: std::cell::Cell<u16>,
     /// Changed files of the shown PR, once its Files tab was shown.
@@ -168,6 +170,7 @@ impl App {
             thread_row: std::cell::Cell::new(None),
             detail_max_scroll: std::cell::Cell::new(u16::MAX),
             detail_height: std::cell::Cell::new(0),
+            older_comments_failed: false,
             list_height: std::cell::Cell::new(10),
             files: None,
             timeline_selection: 0,
@@ -213,6 +216,7 @@ impl App {
         let mut ticker = tokio::time::interval(Duration::from_millis(200));
         while !self.should_quit {
             let frame = terminal.draw(|frame| crate::ui::render(frame, &self))?;
+            self.load_older_comments();
             let stale = stale_cells(frame.buffer, &self.images.stale_areas());
             if !stale.is_empty() {
                 let backend = terminal.backend_mut();

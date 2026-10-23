@@ -79,10 +79,10 @@ pub fn render(frame: &mut Frame, app: &App) {
                 .map(|(index, tag)| {
                     if picker.is_new(index) {
                         format!("+ create \"{tag}\"")
-                    } else if picker.is_current(index) {
-                        format!("✓ {tag}")
+                    } else if picker.is_checked(index) {
+                        format!("[x] {tag}")
                     } else {
-                        format!("  {tag}")
+                        format!("[ ] {tag}")
                     }
                 })
                 .collect();
@@ -91,7 +91,10 @@ pub fn render(frame: &mut Frame, app: &App) {
                 ..Selection::new(items)
             };
             let (before, after) = picker.query.split();
-            let title = format!(" Tag #{}: {before}▏{after}", picker.work_item_id);
+            let title = format!(
+                " Tag #{}: {before}▏{after}  (tab: toggle · enter: save) ",
+                picker.work_item_id
+            );
             popup::render_picker(frame, app, &title, &selection, main);
         }
         Some(Popup::Sprint(picker)) => {
@@ -153,6 +156,9 @@ pub fn render(frame: &mut Frame, app: &App) {
                 TextTarget::LinkWorkItem(pr) => {
                     format!(" Work item id to link to !{}", pr.pull_request_id)
                 }
+                TextTarget::QueueBranch(build) => {
+                    format!(" Branch to queue {} on", build.definition.name)
+                }
             };
             let title = format!("{title} · shift/alt+enter: new line ");
             popup::render_text_input(frame, app, &title, text, main);
@@ -195,6 +201,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         }
         Some(Popup::PrActions { pr, selection, .. }) => {
             let title = format!(" !{} ", pr.pull_request_id);
+            popup::render_picker(frame, app, &title, selection, main);
+        }
+        Some(Popup::BuildActions {
+            build, selection, ..
+        }) => {
+            let title = format!(" {} {} ", build.definition.name, build.build_number);
             popup::render_picker(frame, app, &title, selection, main);
         }
         Some(Popup::RemoveReviewer { pr, selection }) => {
@@ -1130,6 +1142,7 @@ mod tests {
             repro_steps: None,
             comment_count: 0,
             comments: Vec::new(),
+            comments_continuation: None,
             children: vec![
                 work_item(20, "Write API", "Task", "Active"),
                 work_item(21, "Deploy", "Release Task", "New"),

@@ -4,6 +4,7 @@
 //! the test, so tests stay offline and deterministic. See `docs/e2e.md`.
 
 mod changes;
+mod comment_paging;
 mod completion;
 mod editor;
 mod feedback;
@@ -16,9 +17,11 @@ mod links;
 mod mouse;
 mod navigation;
 mod notifications;
+mod pipeline_actions;
 mod pipeline_logs;
 mod scroll;
 mod search;
+mod tags;
 mod theme;
 mod threads;
 mod vote;

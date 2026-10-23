@@ -275,7 +275,10 @@ impl App {
                 self.move_thread(action == Action::NextThread)
             }
             Action::ThreadStatus => self.open_thread_status(),
-            Action::PrActions => self.open_pr_actions(),
+            Action::PrActions => match self.current_item() {
+                Some(Detail::Build(_)) => self.open_build_actions(),
+                _ => self.open_pr_actions(),
+            },
             Action::Zoom => self.zoomed = !self.zoomed,
             Action::Errors => self.popup = Some(Popup::Errors { first: 0 }),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
@@ -355,6 +358,8 @@ impl App {
         let max = self.detail_max_scroll.get();
         let current = usize::from(self.detail_scroll.min(max));
         self.detail_scroll = step.target(current, usize::from(max) + 1, page) as u16;
+        self.older_comments_failed = false;
+        self.load_older_comments();
     }
 
     pub(super) fn switch_tab(&mut self, next: bool) {

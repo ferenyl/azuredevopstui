@@ -167,6 +167,39 @@ pub enum Popup {
     Errors {
         first: usize,
     },
+    /// What can be done to the pipeline run; `selection` lists the labels of `actions`.
+    BuildActions {
+        build: Box<Build>,
+        actions: Vec<BuildAction>,
+        selection: Selection,
+    },
+}
+
+/// An entry of the pipeline run menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildAction {
+    Rerun,
+    Queue,
+    Cancel,
+}
+
+impl BuildAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rerun => "Re-run (same commit)",
+            Self::Queue => "Queue a new run…",
+            Self::Cancel => "Cancel run",
+        }
+    }
+
+    /// The entries that make sense for `build` as it is now.
+    pub fn of(build: &Build) -> Vec<Self> {
+        let mut actions = vec![Self::Rerun, Self::Queue];
+        if matches!(build.status.as_str(), "inProgress" | "notStarted") {
+            actions.push(Self::Cancel);
+        }
+        actions
+    }
 }
 
 /// An entry of the pull request menu.
@@ -236,6 +269,8 @@ pub enum TextTarget {
     AddReviewer(Box<PullRequest>),
     /// The id of the work item to link.
     LinkWorkItem(Box<PullRequest>),
+    /// The branch to queue a new run of the pipeline on.
+    QueueBranch(Box<Build>),
 }
 
 pub struct ColumnPicker {
@@ -352,6 +387,14 @@ pub enum ConfirmAction {
         auto_complete: bool,
     },
     Abandon(Box<PullRequest>),
+    /// Queues a run of the same pipeline on the same branch and commit.
+    Rerun(Box<Build>),
+    /// Queues a run of the pipeline on `branch` (a full ref).
+    Queue {
+        build: Box<Build>,
+        branch: String,
+    },
+    CancelBuild(Box<Build>),
     /// Throws away the typed text; declining brings the text popup back.
     DiscardText {
         target: TextTarget,
@@ -362,6 +405,10 @@ pub enum ConfirmAction {
 pub struct TagPicker {
     pub work_item_id: u32,
     pub current: Vec<String>,
+    /// The tag set being built with `tab`; starts as `current`.
+    pub pending: Vec<String>,
+    /// Whether `tab` toggled anything; `enter` then saves `pending` instead of the highlighted row.
+    pub toggled: bool,
     /// Existing tags, most recently used first.
     pub tags: Vec<String>,
     pub query: TextInput,
@@ -373,6 +420,8 @@ impl TagPicker {
     pub fn new(work_item_id: u32, current: Vec<String>, tags: Vec<String>) -> Self {
         let mut picker = Self {
             work_item_id,
+            pending: current.clone(),
+            toggled: false,
             current,
             tags,
             query: TextInput::default(),
@@ -384,16 +433,21 @@ impl TagPicker {
 
     pub fn filter(&mut self) {
         let query = self.query.as_str().trim().to_lowercase();
-        let others = self.tags.iter().filter(|tag| !self.has(tag));
+        let added = self.pending.iter().filter(|tag| !self.has(tag));
+        let others = self
+            .tags
+            .iter()
+            .filter(|tag| !self.has(tag) && !self.is_pending(tag));
         let mut items: Vec<String> = self
             .current
             .iter()
+            .chain(added)
             .chain(others)
             .filter(|tag| tag.to_lowercase().contains(&query))
             .cloned()
             .collect();
         let exists = self.tags.iter().any(|tag| tag.to_lowercase() == query);
-        if !query.is_empty() && !exists && !self.has(&query) {
+        if !query.is_empty() && !exists && !self.has(&query) && !self.is_pending(&query) {
             items.push(self.query.as_str().trim().to_string());
         }
         self.selection = Selection::new(items);
@@ -401,24 +455,61 @@ impl TagPicker {
 
     /// Whether `index` is the query offered as a new tag.
     pub fn is_new(&self, index: usize) -> bool {
-        self.selection
-            .items
-            .get(index)
-            .is_some_and(|item| !self.tags.contains(item) && !self.has(item))
+        self.selection.items.get(index).is_some_and(|item| {
+            !self.tags.contains(item) && !self.has(item) && !self.is_pending(item)
+        })
     }
 
-    /// Whether `index` is a tag already on the item.
-    pub fn is_current(&self, index: usize) -> bool {
+    /// Whether `index` is in the tag set being built.
+    pub fn is_checked(&self, index: usize) -> bool {
         self.selection
             .items
             .get(index)
-            .is_some_and(|item| self.has(item))
+            .is_some_and(|item| self.is_pending(item))
     }
 
     pub fn has(&self, tag: &str) -> bool {
         self.current
             .iter()
             .any(|current| current.eq_ignore_ascii_case(tag))
+    }
+
+    /// Whether `pending` is the same set as `current`, ignoring case and order.
+    pub fn is_unchanged(&self) -> bool {
+        self.pending.len() == self.current.len() && self.pending.iter().all(|tag| self.has(tag))
+    }
+
+    pub fn is_pending(&self, tag: &str) -> bool {
+        self.pending
+            .iter()
+            .any(|pending| pending.eq_ignore_ascii_case(tag))
+    }
+
+    /// Adds or removes the highlighted row in `pending`; a new tag also clears the query.
+    pub fn toggle(&mut self) {
+        let Some(tag) = self.selection.items.get(self.selection.selected).cloned() else {
+            return;
+        };
+        self.toggled = true;
+        if self.is_pending(&tag) {
+            self.pending
+                .retain(|pending| !pending.eq_ignore_ascii_case(&tag));
+        } else {
+            let was_new = self.is_new(self.selection.selected);
+            self.pending.push(tag.clone());
+            if was_new {
+                self.query = TextInput::default();
+            }
+        }
+        let selected = self.selection.selected;
+        self.filter();
+        let last = self.selection.items.len().saturating_sub(1);
+        let moved = self
+            .selection
+            .items
+            .iter()
+            .position(|item| item.eq_ignore_ascii_case(&tag));
+        self.selection.selected = moved.unwrap_or(selected.min(last));
     }
 }
 

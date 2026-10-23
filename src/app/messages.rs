@@ -188,6 +188,13 @@ impl App {
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::BuildUpdated { id, result } => match result {
+                Ok(()) => {
+                    tracing::info!(id, "pipeline run updated");
+                    self.reload_only(&[Load::Builds]);
+                }
+                Err(err) => self.report_error(err),
+            },
             Message::Connected(Err(err)) => self.fail(err, Retry::Continue),
             Message::PullRequestDetails { id, result } => {
                 if self.detail.as_ref().is_some_and(|d| d.is_pull_request(id)) {
@@ -259,11 +266,29 @@ impl App {
                 if self.detail.as_ref().is_some_and(|d| d.is_work_item(id)) {
                     match result {
                         Ok(info) => {
+                            self.loads.cancel(Load::Comments);
+                            self.older_comments_failed = false;
                             self.detail_info = Some(DetailInfo::WorkItem(Box::new(info)));
                             self.link_index = None;
                             self.load_images();
                         }
                         Err(err) => self.report_error(err),
+                    }
+                }
+            }
+            Message::OlderComments { id, result } => {
+                if self.detail.as_ref().is_some_and(|d| d.is_work_item(id)) {
+                    match (result, &mut self.detail_info) {
+                        (Ok(page), Some(DetailInfo::WorkItem(info))) => {
+                            info.comments.extend(page.comments);
+                            info.comments_continuation = page.continuation_token;
+                            self.load_images();
+                        }
+                        (Err(err), _) => {
+                            self.older_comments_failed = true;
+                            self.report_error(err);
+                        }
+                        (Ok(_), _) => {}
                     }
                 }
             }
@@ -290,6 +315,7 @@ impl App {
             message,
             Message::WorkItemUpdated { result: Ok(()), .. }
                 | Message::PullRequestUpdated { result: Ok(()), .. }
+                | Message::BuildUpdated { result: Ok(()), .. }
         );
         self.handle_message(message);
         if let (true, Some(label)) = (succeeded, label) {
@@ -349,7 +375,9 @@ mod tests {
     use crate::app::loads::Load;
     use crate::app::message::Message;
     use crate::app::test_helpers::{app, open_pull_request};
-    use crate::test_support::{ids_of_prs, pull_request};
+    use crate::test_support::{
+        detail_comment, ids_of_prs, pull_request, work_item, work_item_details,
+    };
 
     fn action_done(id: u64, result: anyhow::Result<()>) -> Message {
         Message::ActionDone {
@@ -546,5 +574,112 @@ mod tests {
         app.handle_message(loaded(Load::Sprint, old, sprint("Old project")));
 
         assert_eq!(app.data.sprint_name.as_deref(), Some("Sprint 1"));
+    }
+
+    fn open_work_item_10(app: &mut App, token: Option<&str>) {
+        app.detail = Some(Detail::WorkItem(Box::new(work_item(
+            10,
+            "Story",
+            "User Story",
+            "Active",
+        ))));
+        app.detail_info = Some(DetailInfo::WorkItem(Box::new(work_item_details(
+            &["newest", "newer"],
+            token,
+        ))));
+    }
+
+    fn comment_texts(app: &App) -> Vec<String> {
+        match &app.detail_info {
+            Some(DetailInfo::WorkItem(info)) => info
+                .comments
+                .iter()
+                .map(|comment| comment.text.plain())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn older_page(texts: &[&str], token: Option<&str>) -> Message {
+        Message::OlderComments {
+            id: 10,
+            result: Ok(api::CommentsPage {
+                comments: texts.iter().map(|text| detail_comment(text)).collect(),
+                continuation_token: token.map(String::from),
+            }),
+        }
+    }
+
+    #[test]
+    fn older_comments_follow_the_newer_ones_and_replace_the_token() {
+        let mut app = app();
+        open_work_item_10(&mut app, Some("page2"));
+
+        app.handle_message(older_page(&["older"], Some("page3")));
+
+        assert_eq!(comment_texts(&app), ["newest", "newer", "older"]);
+        let Some(DetailInfo::WorkItem(info)) = &app.detail_info else {
+            panic!("work item details");
+        };
+        assert_eq!(info.comments_continuation.as_deref(), Some("page3"));
+    }
+
+    #[test]
+    fn the_last_page_of_older_comments_clears_the_token() {
+        let mut app = app();
+        open_work_item_10(&mut app, Some("page2"));
+
+        app.handle_message(older_page(&["oldest"], None));
+
+        let Some(DetailInfo::WorkItem(info)) = &app.detail_info else {
+            panic!("work item details");
+        };
+        assert_eq!(info.comments_continuation, None);
+    }
+
+    #[test]
+    fn older_comments_of_another_work_item_are_ignored() {
+        let mut app = app();
+        open_work_item_10(&mut app, Some("page2"));
+        let message = Message::OlderComments {
+            id: 99,
+            result: Ok(api::CommentsPage {
+                comments: vec![detail_comment("stray")],
+                continuation_token: None,
+            }),
+        };
+
+        app.handle_message(message);
+
+        assert_eq!(comment_texts(&app), ["newest", "newer"]);
+    }
+
+    #[test]
+    fn failed_older_comments_keep_the_first_page_and_report_the_error() {
+        let mut app = app();
+        open_work_item_10(&mut app, Some("page2"));
+
+        app.handle_message(Message::OlderComments {
+            id: 10,
+            result: Err(anyhow::anyhow!("boom")),
+        });
+
+        assert_eq!(comment_texts(&app), ["newest", "newer"]);
+        assert!(app.error.is_some());
+        assert!(app.older_comments_failed);
+    }
+
+    #[test]
+    fn reloaded_details_start_at_the_first_page_again() {
+        let mut app = app();
+        open_work_item_10(&mut app, Some("page2"));
+        app.handle_message(older_page(&["older"], Some("page3")));
+
+        app.handle_message(Message::WorkItemDetails {
+            id: 10,
+            result: Ok(work_item_details(&["newest"], Some("page2"))),
+        });
+
+        assert_eq!(comment_texts(&app), ["newest"]);
     }
 }
