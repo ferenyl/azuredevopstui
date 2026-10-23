@@ -47,6 +47,7 @@ pub enum Action {
     Search,
     Errors,
     NewWorkItem,
+    SprintBoard,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -69,6 +70,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::NextLink,
             Action::PrevLink,
             Action::Sprint,
+            Action::SprintBoard,
             Action::Reload,
             Action::Errors,
             Action::ChangeToken,
@@ -107,7 +109,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
 
 impl Action {
     /// Every action that can be bound in the config's `keys`; `Toggle` (`space`) is fixed.
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 51] = [
         Self::Quit,
         Self::Cancel,
         Self::Up,
@@ -158,6 +160,7 @@ impl Action {
         Self::Search,
         Self::Errors,
         Self::NewWorkItem,
+        Self::SprintBoard,
     ];
 
     /// Name in the config's `keys`.
@@ -214,6 +217,7 @@ impl Action {
             Self::Search => "search",
             Self::Errors => "errors",
             Self::NewWorkItem => "new_work_item",
+            Self::SprintBoard => "board",
         }
     }
 
@@ -290,6 +294,7 @@ impl Action {
             Self::Search => "search",
             Self::Errors => "errors",
             Self::NewWorkItem => "new work item",
+            Self::SprintBoard => "sprint board",
         }
     }
 }

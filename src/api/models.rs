@@ -564,6 +564,15 @@ pub struct WorkItemDetailFields {
 pub struct CommentList {
     pub total_count: u32,
     pub comments: Vec<WorkItemComment>,
+    /// Present while older comments remain.
+    #[serde(default)]
+    pub continuation_token: Option<String>,
+}
+
+/// A page of work item comments, newest first.
+pub struct CommentsPage {
+    pub comments: Vec<DetailComment>,
+    pub continuation_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -597,6 +606,8 @@ pub struct WorkItemDetails {
     pub repro_steps: Option<RichText>,
     pub comment_count: u32,
     pub comments: Vec<DetailComment>,
+    /// Token for the next older page of comments, while there is one.
+    pub comments_continuation: Option<String>,
     pub children: Vec<WorkItem>,
     pub pull_requests: Vec<PullRequest>,
     /// Relations other than children and pull requests, sorted by category.
@@ -640,6 +651,44 @@ impl Build {
     pub fn failed(&self) -> bool {
         self.status == "completed" && self.result.as_deref() == Some("failed")
     }
+}
+
+/// A stage, job or task of a build, from its timeline.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TimelineRecord {
+    pub id: String,
+    pub parent_id: Option<String>,
+    /// Stage, Phase, Job, Task or Checkpoint.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub name: String,
+    pub state: String,
+    pub result: Option<String>,
+    pub order: Option<u32>,
+    pub log: Option<LogRef>,
+    pub error_count: u32,
+    pub issues: Vec<TimelineIssue>,
+}
+
+impl TimelineRecord {
+    pub fn failed(&self) -> bool {
+        self.result.as_deref() == Some("failed")
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LogRef {
+    pub id: u32,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct TimelineIssue {
+    /// `error` or `warning`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

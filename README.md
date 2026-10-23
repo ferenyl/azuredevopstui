@@ -17,8 +17,11 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - **My pipelines**: the latest run per pipeline and branch that you triggered in the last 14 days, also for branches without a PR. Pull request runs are left out; they show up in the PR's checks.
 - **Sprint overview** in the detail panel when nothing is open: the sprint dates, the work days left and your items per board column. `esc` closes an open item and brings it back.
 - **Sprint picker**: press `i` to show another sprint than the current one. See [Sprint](#sprint).
+- **Sprint board**: press `b` to see all items of the sprint as lanes, one per board column. See [Sprint](#sprint).
 - **Detail panel** with tabs:
-  - **Pipeline run**: pipeline, run number, branch, status, reason, times and duration. `e` re-runs it, queues a new run on another branch or cancels it, after a `y` / `n` confirmation.
+  - **Pipeline run**:
+    - **Overview** shows pipeline, run number, branch, status, reason, times and duration. `e` re-runs it, queues a new run on another branch or cancels it, after a `y` / `n` confirmation.
+    - **Timeline** lists the stages, jobs and tasks of the run with their status; failed tasks show their error messages. With the detail panel focused, `j`/`k` select a task, `enter` shows its log (the last 5000 lines, `##[error]` in red) and `esc` goes back to the timeline. The failed task is selected first.
   - **Pull request**:
     - **Overview** shows status, branches, merge status, reviewers and their votes, the linked work items (with a warning when there are none), and the description.
     - **Comments** shows the comment threads with their status (active, resolved, won't fix, closed) and file path. Select a thread with `]` / `[`, reply with `m`, and change its status with `x`. `m` without a selected thread starts a new one.
@@ -27,7 +30,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - **Work item**:
     - **Overview** shows type, state, board column, priority, assignee, sprint, tags, linked pull requests, description, repro steps and acceptance criteria.
     - **Children** shows child items grouped by type (Task, Release Task, User Story, …), each with state and assignee.
-    - **Comments** shows the 10 newest comments.
+    - **Comments** shows the 10 newest comments. Scroll to the end to load older ones, 50 at a time.
   - **Images** in descriptions and comments are drawn inline when the terminal supports graphics. See [Images](#images).
 - **Actions**:
   - Open a PR or work item in the browser.
@@ -414,6 +417,8 @@ On a PR, `f` instead opens the filter for others' PRs: tick *Show approved* and 
 
 The work item lists and the sprint overview show the team's current sprint, or `default_sprint` when it is set. Press `i` to pick another sprint: the list shows all of the team's sprints with their dates, furthest in the future first, and marks the current one. Type to search by iteration path and press `enter` to show that sprint. The choice lasts until the app is restarted; set `default_sprint` to keep it.
 
+Press `b` to show the sprint board in the detail panel: every item of the sprint (except removed ones, and honoring the work item type filter) as cards in lanes, one lane per column of the team board, titled `Column (n)`. Split columns are one lane, and cards in their done half are marked `✓`. A card shows `#id`, the title and the initials of the assignee; your own cards are highlighted. On a terminal too narrow for the lanes (16 columns each) the cards are listed under a heading per column instead, and the panel scrolls. The board is read-only, and is loaded only while it is shown; `r` and sprint changes reload it. `b` or `esc` hides it again, and opening an item (`enter`) replaces it with the item.
+
 ### Colors
 
 `theme` picks the palette:
@@ -470,6 +475,7 @@ The table lists the Mocha values.
 | `/` | Search the focused list (case-insensitive, matches the number, title and more) or a setup list of organizations, projects, teams or columns. Type to filter, `enter` keeps the filter, `esc` clears it |
 | `space` | Tick or untick an item in the type list |
 | `i` | Pick the sprint to show: type to search, `enter` selects |
+| `b` | Show or hide the sprint board in the detail panel: all items of the sprint as lanes, one per board column. `esc` or `enter` on an item also closes it. See [Sprint](#sprint) |
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
@@ -538,6 +544,7 @@ A key is a character (`"q"`, `"G"`, `"?"`) or a name (`enter`, `esc`, `tab`, `sh
 | `prev_link` | `L` | `errors` | `E` |
 | `change_token` | `T` | `switch_project` | `P` |
 | `help` | `?` | `new_work_item` | `n` |
+| `board` | `b` | | |
 
 ## Mouse
 

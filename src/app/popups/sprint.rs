@@ -11,7 +11,11 @@ impl App {
         self.data.my_work_items = None;
         self.data.ready_work_items = None;
         self.data.sprint_name = None;
+        self.data.board_items = None;
         self.load_sprint();
+        if self.board_view {
+            self.load_sprint_board();
+        }
     }
 }
 

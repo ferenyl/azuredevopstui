@@ -1,7 +1,7 @@
 use super::{Action, App, Detail, Panel, Popup, Retry, Screen, SetupStep};
 
 /// Every action the toolbar can show, in display order.
-const TOOLBAR: [Action; 32] = [
+const TOOLBAR: [Action; 33] = [
     Action::Down,
     Action::Up,
     Action::Toggle,
@@ -29,6 +29,7 @@ const TOOLBAR: [Action; 32] = [
     Action::PrActions,
     Action::NewWorkItem,
     Action::Zoom,
+    Action::SprintBoard,
     Action::Reload,
     Action::ChangeToken,
     Action::SwitchProject,
@@ -124,6 +125,7 @@ impl App {
             | Action::Zoom
             | Action::Reload
             | Action::SwitchProject
+            | Action::SprintBoard
             | Action::Help
             | Action::NewWorkItem
             | Action::Quit => true,
@@ -396,6 +398,7 @@ mod tests {
                     PrActions,
                     NewWorkItem,
                     Zoom,
+                    SprintBoard,
                     Reload,
                     SwitchProject,
                     Help,
@@ -421,6 +424,7 @@ mod tests {
                     PrActions,
                     NewWorkItem,
                     Zoom,
+                    SprintBoard,
                     Reload,
                     SwitchProject,
                     Help,
@@ -446,6 +450,7 @@ mod tests {
                     PrActions,
                     NewWorkItem,
                     Zoom,
+                    SprintBoard,
                     Reload,
                     SwitchProject,
                     Help,
@@ -472,6 +477,7 @@ mod tests {
                     PrActions,
                     NewWorkItem,
                     Zoom,
+                    SprintBoard,
                     Reload,
                     SwitchProject,
                     Help,
@@ -498,6 +504,7 @@ mod tests {
                     PrActions,
                     NewWorkItem,
                     Zoom,
+                    SprintBoard,
                     Reload,
                     SwitchProject,
                     Help,
@@ -524,6 +531,7 @@ mod tests {
                     PrActions,
                     NewWorkItem,
                     Zoom,
+                    SprintBoard,
                     Reload,
                     SwitchProject,
                     Help,
@@ -542,6 +550,7 @@ mod tests {
                     PrActions,
                     NewWorkItem,
                     Zoom,
+                    SprintBoard,
                     Reload,
                     SwitchProject,
                     Help,
@@ -557,6 +566,7 @@ mod tests {
                     Search,
                     NewWorkItem,
                     Zoom,
+                    SprintBoard,
                     Reload,
                     SwitchProject,
                     Help,
@@ -572,6 +582,7 @@ mod tests {
                     Search,
                     NewWorkItem,
                     Zoom,
+                    SprintBoard,
                     Reload,
                     SwitchProject,
                     Help,

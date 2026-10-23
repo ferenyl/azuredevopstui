@@ -6,11 +6,14 @@ mod pull_requests;
 mod work_items;
 
 pub use boards::ColumnTarget;
+pub use builds::{TimelineRow, timeline_rows};
+#[cfg(test)]
+pub use models::DetailComment;
 pub use models::{
-    Board, Build, ChangeKind, ChangedFile, CurrentUser, FileContent, IdentityRef, Iteration, Link,
-    LinkTarget, Mention, Partial, Person, PullRequest, PullRequestChanges, PullRequestChecks,
-    PullRequestDetails, ReviewSignals, SprintWorkItems, THREAD_STATUSES, Thread, WorkItem,
-    WorkItemDetails, thread_status_label,
+    Board, Build, ChangeKind, ChangedFile, CommentsPage, CurrentUser, FileContent, IdentityRef,
+    Iteration, Link, LinkTarget, Mention, Partial, Person, PullRequest, PullRequestChanges,
+    PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems, THREAD_STATUSES, Thread,
+    TimelineRecord, WorkItem, WorkItemDetails, thread_status_label,
 };
 pub use pull_requests::{CompletionOptions, is_approved, is_reviewer_policy};
 
@@ -173,6 +176,21 @@ impl AdoClient {
         query: &[(&str, &str)],
     ) -> Result<T> {
         self.get_versioned(base, segments, query, API_VERSION).await
+    }
+
+    /// GET for plain text bodies such as build logs.
+    async fn get_text(
+        &self,
+        base: &str,
+        segments: &[&str],
+        query: &[(&str, &str)],
+    ) -> Result<String> {
+        let url = build_url(base, segments, query, API_VERSION)?;
+        let response = self.send_checked(Method::GET, &url, None, true).await?;
+        response
+            .text()
+            .await
+            .with_context(|| format!("invalid response: {}", url.path()))
     }
 
     async fn get_versioned<T: DeserializeOwned>(
@@ -351,8 +369,8 @@ pub struct ProjectApi {
     organization: Arc<str>,
     project: Arc<str>,
     team: Arc<str>,
-    /// State names in the Completed and Removed categories, fetched once per session.
-    closed_states: Arc<OnceCell<Vec<String>>>,
+    /// States in the Completed and Removed categories, fetched once per session.
+    closed_states: Arc<OnceCell<Vec<models::WorkItemState>>>,
     /// The team's default area path, fetched once per session.
     default_area: Arc<OnceCell<String>>,
     /// Identity ids of the names in the PR filter, resolved once per session.

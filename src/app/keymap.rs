@@ -312,6 +312,7 @@ fn defaults(action: Action) -> Vec<KeyBinding> {
         Action::Search => &["/"],
         Action::Errors => &["E"],
         Action::NewWorkItem => &["n"],
+        Action::SprintBoard => &["b"],
     };
     texts
         .iter()

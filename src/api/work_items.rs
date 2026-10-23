@@ -5,9 +5,10 @@ use futures::{StreamExt, TryStreamExt, stream};
 use serde_json::{Value, json};
 
 use super::models::{
-    CommentList, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention, Partial,
-    PullRequest, Relation, SprintWorkItems, TeamFieldValues, WiqlResult, WorkItem, WorkItemComment,
-    WorkItemDetails, WorkItemRef, WorkItemResponse, WorkItemState, WorkItemTypeCategory,
+    CommentList, CommentsPage, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention,
+    Partial, PullRequest, Relation, SprintWorkItems, TeamFieldValues, WiqlResult, WorkItem,
+    WorkItemComment, WorkItemDetails, WorkItemRef, WorkItemResponse, WorkItemState,
+    WorkItemTypeCategory,
 };
 use super::{API_VERSION, MAX_CONCURRENT_REQUESTS, ProjectApi, build_url, is_unauthorized};
 use crate::rich_text::RichText;
@@ -38,9 +39,12 @@ const PULL_REQUEST_ARTIFACT: &str = "vstfs:///Git/PullRequestId/";
 const HIDDEN_CATEGORY: &str = "Microsoft.HiddenCategory";
 const COMMENTS_API_VERSION: &str = "7.1-preview.4";
 const MAX_COMMENTS: &str = "10";
+const OLDER_COMMENTS_PAGE: &str = "50";
 const CLOSED_CATEGORIES: [&str; 2] = ["Completed", "Removed"];
+const REMOVED_CATEGORIES: [&str; 1] = ["Removed"];
 /// Used when the states cannot be loaded.
 const DEFAULT_CLOSED_STATES: [&str; 2] = ["Closed", "Removed"];
+const DEFAULT_REMOVED_STATES: [&str; 1] = ["Removed"];
 
 impl ProjectApi {
     pub async fn sprint_work_items(
@@ -49,17 +53,7 @@ impl ProjectApi {
         ready_column: &str,
         types: &[String],
     ) -> Result<SprintWorkItems> {
-        let iterations = self.iterations().await?;
-        let iteration = match sprint {
-            Some(sprint) => iterations
-                .into_iter()
-                .find(|iteration| iteration.path == sprint)
-                .with_context(|| format!("sprint not found: {sprint}"))?,
-            None => iterations
-                .into_iter()
-                .find(Iteration::is_current)
-                .context("team has no current sprint")?,
-        };
+        let iteration = self.sprint_iteration(sprint).await?;
         let path = quote(&iteration.path);
         let types = type_filter(types);
         let closed = self.closed_states_filter().await;
@@ -89,6 +83,41 @@ impl ProjectApi {
             mine,
             ready,
         })
+    }
+
+    /// Every item of the sprint except removed ones, in backlog order.
+    pub async fn sprint_board_items(
+        &self,
+        sprint: Option<&str>,
+        types: &[String],
+    ) -> Result<Vec<WorkItem>> {
+        let iteration = self.sprint_iteration(sprint).await?;
+        let removed = self.removed_states_filter().await;
+        let wiql = format!(
+            "SELECT [System.Id] FROM WorkItems \
+             WHERE [System.IterationPath] = {} \
+             {removed}\
+             {}\
+             ORDER BY [Microsoft.VSTS.Common.BacklogPriority], [System.Id]",
+            quote(&iteration.path),
+            type_filter(types),
+        );
+        self.query_work_items(&wiql).await
+    }
+
+    /// The sprint with this iteration path, or the team's current one.
+    async fn sprint_iteration(&self, sprint: Option<&str>) -> Result<Iteration> {
+        let iterations = self.iterations().await?;
+        match sprint {
+            Some(sprint) => iterations
+                .into_iter()
+                .find(|iteration| iteration.path == sprint)
+                .with_context(|| format!("sprint not found: {sprint}")),
+            None => iterations
+                .into_iter()
+                .find(Iteration::is_current)
+                .context("team has no current sprint"),
+        }
     }
 
     pub async fn work_item_details(&self, id: u32) -> Result<WorkItemDetails> {
@@ -143,15 +172,19 @@ impl ProjectApi {
             ),
             repro_steps: rich_text("Microsoft.VSTS.TCM.ReproSteps", fields.repro_steps),
             comment_count: comments.total_count,
-            comments: comments
-                .comments
-                .into_iter()
-                .map(|comment| DetailComment {
-                    author: comment.created_by.display_name,
-                    date: comment.created_date,
-                    text: to_rich_text(&comment.text, comment.format.as_deref()),
-                })
-                .collect(),
+            comments_continuation: comments.continuation_token,
+            comments: detail_comments(comments.comments),
+        })
+    }
+
+    /// The page of comments older than the one `token` came from.
+    pub async fn older_comments(&self, id: u32, token: &str) -> Result<CommentsPage> {
+        let list = self
+            .comments_page(id, OLDER_COMMENTS_PAGE, Some(token))
+            .await?;
+        Ok(CommentsPage {
+            comments: detail_comments(list.comments),
+            continuation_token: list.continuation_token,
         })
     }
 
@@ -258,6 +291,19 @@ impl ProjectApi {
 
     /// The newest comments first.
     async fn comments(&self, id: u32) -> Result<CommentList> {
+        self.comments_page(id, MAX_COMMENTS, None).await
+    }
+
+    async fn comments_page(
+        &self,
+        id: u32,
+        top: &str,
+        continuation_token: Option<&str>,
+    ) -> Result<CommentList> {
+        let mut query = vec![("$top", top), ("order", "desc"), ("$expand", "reactions")];
+        if let Some(token) = continuation_token {
+            query.push(("continuationToken", token));
+        }
         self.client
             .get_versioned(
                 &self.client.urls.dev_azure,
@@ -270,11 +316,7 @@ impl ProjectApi {
                     &id.to_string(),
                     "comments",
                 ],
-                &[
-                    ("$top", MAX_COMMENTS),
-                    ("order", "desc"),
-                    ("$expand", "reactions"),
-                ],
+                &query,
                 COMMENTS_API_VERSION,
             )
             .await
@@ -301,20 +343,35 @@ impl ProjectApi {
 
     /// `AND [System.State] NOT IN (...)` over the closed states, falling back to the defaults on error.
     async fn closed_states_filter(&self) -> String {
-        let states = match self.closed_states().await {
-            Ok(states) if !states.is_empty() => states.to_vec(),
-            Ok(_) => DEFAULT_CLOSED_STATES.map(String::from).to_vec(),
+        self.states_filter(&CLOSED_CATEGORIES, &DEFAULT_CLOSED_STATES)
+            .await
+    }
+
+    /// Like [`ProjectApi::closed_states_filter`], but only leaves out the removed states.
+    async fn removed_states_filter(&self) -> String {
+        self.states_filter(&REMOVED_CATEGORIES, &DEFAULT_REMOVED_STATES)
+            .await
+    }
+
+    async fn states_filter(&self, categories: &[&str], defaults: &[&str]) -> String {
+        let names = match self.closed_states().await {
+            Ok(states) => state_names(states, categories),
             Err(err) => {
                 tracing::warn!("failed to load work item states, using defaults: {err:#}");
-                DEFAULT_CLOSED_STATES.map(String::from).to_vec()
+                Vec::new()
             }
         };
-        let states: Vec<String> = states.iter().map(|state| quote(state)).collect();
-        format!("AND [System.State] NOT IN ({}) ", states.join(", "))
+        let names = if names.is_empty() {
+            defaults.iter().map(|name| (*name).to_string()).collect()
+        } else {
+            names
+        };
+        let names: Vec<String> = names.iter().map(|name| quote(name)).collect();
+        format!("AND [System.State] NOT IN ({}) ", names.join(", "))
     }
 
     /// States in the Completed and Removed categories of all visible types, cached per session.
-    async fn closed_states(&self) -> Result<&[String]> {
+    async fn closed_states(&self) -> Result<&[WorkItemState]> {
         let states = self
             .closed_states
             .get_or_try_init(|| async {
@@ -324,7 +381,9 @@ impl ProjectApi {
                     .buffered(MAX_CONCURRENT_REQUESTS)
                     .try_collect()
                     .await?;
-                Ok::<_, anyhow::Error>(closed_state_names(lists.into_iter().flatten().collect()))
+                let mut states: Vec<WorkItemState> = lists.into_iter().flatten().collect();
+                states.retain(|state| CLOSED_CATEGORIES.contains(&state.category.as_str()));
+                Ok::<_, anyhow::Error>(states)
             })
             .await?;
         Ok(states)
@@ -669,15 +728,26 @@ fn visible_types(categories: Vec<WorkItemTypeCategory>) -> Vec<String> {
 }
 
 /// Names of states in a closed category, sorted and deduplicated.
-fn closed_state_names(states: Vec<WorkItemState>) -> Vec<String> {
+fn state_names(states: &[WorkItemState], categories: &[&str]) -> Vec<String> {
     let mut names: Vec<String> = states
-        .into_iter()
-        .filter(|state| CLOSED_CATEGORIES.contains(&state.category.as_str()))
-        .map(|state| state.name)
+        .iter()
+        .filter(|state| categories.contains(&state.category.as_str()))
+        .map(|state| state.name.clone())
         .collect();
     names.sort();
     names.dedup();
     names
+}
+
+fn detail_comments(comments: Vec<WorkItemComment>) -> Vec<DetailComment> {
+    comments
+        .into_iter()
+        .map(|comment| DetailComment {
+            author: comment.created_by.display_name,
+            date: comment.created_date,
+            text: to_rich_text(&comment.text, comment.format.as_deref()),
+        })
+        .collect()
 }
 
 fn to_rich_text(value: &str, format: Option<&str>) -> RichText {
@@ -840,6 +910,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sprint_board_items_cover_the_sprint_except_removed_states() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/Team/_apis/work/teamsettings/iterations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "Sprint 1", "path": "MyProject\\Sprint 1", "attributes": { "timeFrame": "current" } }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemtypecategories"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "referenceName": "Microsoft.BugCategory", "workItemTypes": [{ "name": "Bug" }] }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/contoso/MyProject/_apis/wit/workitemtypes/Bug/states",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "Active", "category": "InProgress" },
+                { "name": "Closed", "category": "Completed" },
+                { "name": "Gone", "category": "Removed" }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/Team/_apis/wit/wiql"))
+            .and(body_string_contains(
+                r"[System.IterationPath] = 'MyProject\\Sprint 1' AND [System.State] NOT IN ('Gone') AND [System.WorkItemType] IN ('Bug') ORDER BY [Microsoft.VSTS.Common.BacklogPriority]",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "workItems": [{ "id": 3 }, { "id": 1 }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .and(body_partial_json(json!({ "ids": [3, 1] })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(1, "One", "Bug", "Closed"),
+                work_item_json(3, "Three", "Bug", "Active")
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let items = client
+            .sprint_board_items(None, &["Bug".into()])
+            .await
+            .unwrap();
+
+        assert_eq!(ids_of_items(&items), [3, 1]);
+    }
+
+    #[tokio::test]
+    async fn sprint_board_items_fail_for_an_unknown_sprint() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let err = client
+            .sprint_board_items(Some("MyProject\\Nope"), &[])
+            .await
+            .expect_err("unknown sprint");
+
+        assert!(err.to_string().contains("sprint not found"));
+    }
+
+    #[tokio::test]
     async fn sprint_work_items_fail_without_current_sprint() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -915,6 +1061,76 @@ mod tests {
         assert_eq!(details.comment_count, 3);
         assert_eq!(details.comments[0].author, "Bo");
         assert_eq!(details.comments[0].text.plain(), "Looks good");
+        assert_eq!(details.comments_continuation, None);
+    }
+
+    fn comments_page_json(text: &str, token: Option<&str>) -> Value {
+        let mut page = json!({
+            "totalCount": 3,
+            "comments": [{
+                "createdBy": { "id": "u", "displayName": "Bo" },
+                "createdDate": "2026-10-01T10:00:00Z",
+                "text": text
+            }]
+        });
+        if let Some(token) = token {
+            page["continuationToken"] = json!(token);
+        }
+        page
+    }
+
+    #[tokio::test]
+    async fn first_comment_page_keeps_the_continuation_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .and(query_param("$top", "10"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(comments_page_json("new", Some("page2"))),
+            )
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let list = client.comments(10).await.unwrap();
+
+        assert_eq!(list.continuation_token.as_deref(), Some("page2"));
+    }
+
+    #[tokio::test]
+    async fn older_comments_send_the_token_and_a_bigger_page() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .and(query_param("continuationToken", "page2"))
+            .and(query_param("$top", OLDER_COMMENTS_PAGE))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(comments_page_json("old", Some("page3"))),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let page = client.older_comments(10, "page2").await.unwrap();
+
+        assert_eq!(page.comments[0].text.plain(), "old");
+        assert_eq!(page.continuation_token.as_deref(), Some("page3"));
+    }
+
+    #[tokio::test]
+    async fn last_older_comment_page_has_no_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(comments_page_json("old", None)))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let page = client.older_comments(10, "page2").await.unwrap();
+
+        assert_eq!(page.continuation_token, None);
     }
 
     #[tokio::test]
@@ -1026,7 +1242,7 @@ mod tests {
     }
 
     #[test]
-    fn closed_state_names_keep_completed_and_removed_only() {
+    fn state_names_keep_the_wanted_categories_only() {
         let states = vec![
             state("Done", "Completed"),
             state("Resolved", "Resolved"),
@@ -1035,7 +1251,11 @@ mod tests {
             state("Done", "Completed"),
         ];
 
-        assert_eq!(closed_state_names(states), ["Done", "Removed"]);
+        assert_eq!(
+            state_names(&states, &CLOSED_CATEGORIES),
+            ["Done", "Removed"]
+        );
+        assert_eq!(state_names(&states, &REMOVED_CATEGORIES), ["Removed"]);
     }
 
     #[tokio::test]

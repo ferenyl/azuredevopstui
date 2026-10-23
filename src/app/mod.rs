@@ -1,6 +1,7 @@
 mod action;
 mod actions;
 mod activity;
+mod build_log;
 #[cfg(test)]
 mod e2e;
 mod editor;
@@ -24,6 +25,7 @@ mod wizard;
 
 pub use action::{Action, HELP};
 pub use activity::Activity;
+pub use build_log::BuildLog;
 pub use files::Files;
 pub use keymap::Keymap;
 pub use mouse::{HitAreas, PanelHit, PickerHit};
@@ -86,10 +88,16 @@ pub struct App {
     pub detail_max_scroll: std::cell::Cell<u16>,
     /// Visible content rows of the last drawn detail.
     pub detail_height: std::cell::Cell<u16>,
+    /// Loading older comments failed; scrolling retries, drawing does not.
+    older_comments_failed: bool,
     /// Visible rows of the focused left list in the last frame; ten before the first draw.
     pub list_height: std::cell::Cell<u16>,
     /// Changed files of the shown PR, once its Files tab was shown.
     pub files: Option<Files>,
+    /// Selected task of the shown run's timeline, among the rows with a log.
+    pub timeline_selection: usize,
+    /// The task log open in the detail pane.
+    pub log: Option<BuildLog>,
     /// Targets of the links drawn in the detail pane last frame, in reading order.
     pub detail_links: RefCell<Vec<String>>,
     /// Selected entry of `detail_links`.
@@ -107,6 +115,8 @@ pub struct App {
     /// Iteration path of the shown sprint; `None` is the team's current sprint.
     sprint: Option<String>,
     pub show_help: bool,
+    /// The detail pane shows the sprint's board lanes while nothing is open.
+    pub board_view: bool,
     pub last_updated: Option<Instant>,
     last_refresh: Instant,
     board: Option<Board>,
@@ -162,8 +172,11 @@ impl App {
             thread_row: std::cell::Cell::new(None),
             detail_max_scroll: std::cell::Cell::new(u16::MAX),
             detail_height: std::cell::Cell::new(0),
+            older_comments_failed: false,
             list_height: std::cell::Cell::new(10),
             files: None,
+            timeline_selection: 0,
+            log: None,
             detail_links: RefCell::default(),
             link_index: None,
             #[cfg(test)]
@@ -173,6 +186,7 @@ impl App {
             switching: false,
             edit_request: None,
             show_help: false,
+            board_view: false,
             last_updated: None,
             last_refresh: Instant::now(),
             board: None,
@@ -205,6 +219,7 @@ impl App {
         let mut ticker = tokio::time::interval(Duration::from_millis(200));
         while !self.should_quit {
             let frame = terminal.draw(|frame| crate::ui::render(frame, &self))?;
+            self.load_older_comments();
             let stale = stale_cells(frame.buffer, &self.images.stale_areas());
             if !stale.is_empty() {
                 let backend = terminal.backend_mut();
