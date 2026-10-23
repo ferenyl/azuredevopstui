@@ -20,8 +20,8 @@ use ratatui_image::StatefulImage;
 
 use crate::api::{PullRequest, ReviewSignals, WorkItem};
 use crate::app::{
-    App, Detail, DetailInfo, DetailTab, InboxEntry, Panel, Popup, Screen, Selection, Signals,
-    SortKind, TextTarget,
+    App, Detail, DetailInfo, DetailTab, HitAreas, InboxEntry, Panel, PanelHit, Popup, Screen,
+    Selection, Signals, SortKind, TextTarget,
 };
 use crate::images::{ImageState, file_name, image_marker};
 use crate::rich_text::{Marks, RichText};
@@ -30,6 +30,7 @@ const LABEL_WIDTH: usize = 13;
 
 pub fn render(frame: &mut Frame, app: &App) {
     let theme = &app.theme;
+    *app.areas.borrow_mut() = HitAreas::default();
     frame.render_widget(
         Block::new().style(Style::new().bg(theme.background).fg(theme.foreground)),
         frame.area(),
@@ -260,7 +261,15 @@ fn render_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
         .title_style(Style::new().fg(theme.title))
         .border_style(Style::new().fg(border));
 
+    let mut hit = PanelHit {
+        panel,
+        area,
+        rows: block.inner(area),
+        offset: 0,
+    };
     if panel == Panel::Detail {
+        hit.rows = area;
+        app.areas.borrow_mut().panels.push(hit);
         render_detail(frame, app, block, area);
         return;
     }
@@ -282,13 +291,18 @@ fn render_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
             let list = List::new(items).block(block).highlight_style(highlight);
             let mut state = ListState::default().with_selected(selected);
             frame.render_stateful_widget(list, area, &mut state);
+            hit.offset = state.offset();
+            app.areas.borrow_mut().panels.push(hit);
         }
-        None => frame.render_widget(
-            Paragraph::new("Loading…")
-                .style(Style::new().fg(theme.muted))
-                .block(block),
-            area,
-        ),
+        None => {
+            app.areas.borrow_mut().panels.push(hit);
+            frame.render_widget(
+                Paragraph::new("Loading…")
+                    .style(Style::new().fg(theme.muted))
+                    .block(block),
+                area,
+            );
+        }
     }
 }
 
@@ -310,7 +324,15 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
     ])
     .areas(inner);
     let tabs = detail.tabs();
-    let titles = tabs.iter().map(|tab| tab_title(app, *tab));
+    let titles: Vec<String> = tabs.iter().map(|tab| tab_title(app, *tab)).collect();
+    // Each tab is its title between one column of padding, with a one column divider in between.
+    let mut x = tabs_area.x;
+    for (tab, title) in tabs.iter().zip(&titles) {
+        let width = text_width(title) as u16 + 2;
+        let area = Rect::new(x, tabs_area.y, width, 1).intersection(tabs_area);
+        app.areas.borrow_mut().tabs.push((*tab, area));
+        x = x.saturating_add(width + 1);
+    }
     frame.render_widget(
         Tabs::new(titles)
             .select(tabs.iter().position(|tab| *tab == app.detail_tab))
