@@ -19,6 +19,7 @@ mod notifications;
 mod pipeline_actions;
 mod scroll;
 mod search;
+mod tags;
 mod theme;
 mod threads;
 mod vote;
