@@ -9,6 +9,7 @@ mod editor;
 mod feedback;
 mod flows;
 mod inbox;
+mod keymap;
 mod layout;
 mod lifecycle;
 mod links;

@@ -39,7 +39,7 @@ impl App {
     pub fn actions(&self) -> Vec<Action> {
         TOOLBAR
             .into_iter()
-            .filter(|action| self.can(*action))
+            .filter(|action| self.can(*action) && !self.keymap.label(*action).is_empty())
             .collect()
     }
 

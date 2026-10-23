@@ -7,6 +7,7 @@ mod editor;
 mod files;
 mod inbox;
 mod input;
+mod keymap;
 mod loads;
 mod message;
 mod messages;
@@ -24,6 +25,7 @@ mod wizard;
 pub use action::{Action, HELP};
 pub use activity::Activity;
 pub use files::Files;
+pub use keymap::Keymap;
 pub use mouse::{HitAreas, PanelHit, PickerHit};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
@@ -131,6 +133,7 @@ pub struct App {
     pub areas: RefCell<HitAreas>,
     /// Mutations in flight and the history of errors.
     pub activity: Activity,
+    pub keymap: Keymap,
 }
 
 impl App {
@@ -139,6 +142,11 @@ impl App {
         Self {
             theme: config.as_ref().map(Theme::from_config).unwrap_or_default(),
             sprint: config.as_ref().and_then(|c| c.default_sprint.clone()),
+            // `Config::load` already rejected invalid keys.
+            keymap: config
+                .as_ref()
+                .and_then(|c| Keymap::new(&c.keys).ok())
+                .unwrap_or_default(),
             config: config.map(Arc::new),
             screen: Screen::Setup(SetupStep::Loading("Signing in…")),
             focus: Panel::Inbox,

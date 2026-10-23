@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -5,6 +6,7 @@ use anyhow::{Context, Result};
 use chrono::NaiveTime;
 use serde::{Deserialize, Serialize};
 
+use crate::app::Keymap;
 use crate::theme::{ColorOverrides, ThemeName};
 
 const APP_NAME: &str = "azuredevopstui";
@@ -67,6 +69,9 @@ pub struct Config {
     /// Capture the mouse for clicks and the wheel; off leaves it to the terminal.
     #[serde(default = "default_true")]
     pub mouse: bool,
+    /// Action name → keys, replacing that action's default keys.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub keys: BTreeMap<String, Vec<String>>,
 }
 
 fn default_refresh_interval_secs() -> u64 {
@@ -300,6 +305,7 @@ impl Config {
             editor: None,
             layout: LayoutConfig::default(),
             mouse: true,
+            keys: BTreeMap::new(),
         }
     }
 
@@ -323,9 +329,16 @@ impl Config {
         }
         let content = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        serde_json::from_str(&content)
+        Self::parse(&content)
             .map(Some)
             .with_context(|| format!("failed to parse {}", path.display()))
+    }
+
+    /// Parses the JSON and checks the `keys`.
+    pub fn parse(content: &str) -> Result<Self> {
+        let config: Self = serde_json::from_str(content)?;
+        Keymap::new(&config.keys)?;
+        Ok(config)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -442,6 +455,21 @@ mod tests {
 
         assert!(json.get("ready_column").is_none());
         assert!(json["auth"].get("azure_config_dir").is_none());
+        assert!(json.get("keys").is_none());
+    }
+
+    #[test]
+    fn parse_reads_keys_and_rejects_unknown_actions() {
+        let ok = r#"{"organization":"o","project":"p","team":"t","keys":{"vote":["V"]}}"#;
+        let bad = r#"{"organization":"o","project":"p","team":"t","keys":{"vot":["V"]}}"#;
+
+        assert_eq!(Config::parse(ok).unwrap().keys["vote"], ["V"]);
+        assert!(
+            Config::parse(bad)
+                .unwrap_err()
+                .to_string()
+                .starts_with("unknown action \"vot\"")
+        );
     }
 
     #[test]

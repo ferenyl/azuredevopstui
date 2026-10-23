@@ -20,14 +20,17 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
             format!(" {heading}"),
             Style::new().fg(theme.title),
         ));
-        lines.extend(actions.iter().map(|action| {
-            Line::from(vec![
-                Span::styled(
-                    format!(" {:<KEY_WIDTH$}", action.key_label()),
-                    Style::new().fg(theme.toolbar_key),
-                ),
-                Span::raw(action.label()),
-            ])
+        lines.extend(actions.iter().filter_map(|action| {
+            let keys = app.keymap.label(*action);
+            (!keys.is_empty()).then(|| {
+                Line::from(vec![
+                    Span::styled(
+                        format!(" {keys:<KEY_WIDTH$}"),
+                        Style::new().fg(theme.toolbar_key),
+                    ),
+                    Span::raw(action.label()),
+                ])
+            })
         }));
     }
     let area = centered(area, 44, lines.len() as u16 + 2);
