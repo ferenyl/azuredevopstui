@@ -566,6 +566,36 @@ mod tests {
     }
 
     #[test]
+    fn set_error_keeps_every_error_in_the_history() {
+        let mut app = app();
+
+        app.set_error("first".into());
+        app.set_error("second".into());
+
+        assert_eq!(app.error.as_deref(), Some("second"));
+        assert_eq!(app.activity.error_count(), 2);
+    }
+
+    #[test]
+    fn errors_popup_scrolls_through_the_history_and_closes() {
+        let mut app = app();
+        for n in 0..3 {
+            app.set_error(format!("error {n}"));
+        }
+
+        press(&mut app, KeyCode::Char('E'));
+        assert!(matches!(app.popup, Some(Popup::Errors { first: 0 })));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        assert!(matches!(app.popup, Some(Popup::Errors { first: 2 })));
+        press(&mut app, KeyCode::Char('k'));
+        assert!(matches!(app.popup, Some(Popup::Errors { first: 1 })));
+        press(&mut app, KeyCode::Esc);
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
     fn toolbar_offers_unassign_only_for_my_items() {
         let mut app = app();
         app.user = Some(me());

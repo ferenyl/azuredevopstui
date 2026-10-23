@@ -25,10 +25,14 @@ impl App {
                 }
                 *message
             }
+            Message::ActionDone { id, message } => {
+                self.finish_action(id, *message);
+                return;
+            }
             message => message,
         };
         match message {
-            Message::Loaded { .. } => {}
+            Message::Loaded { .. } | Message::ActionDone { .. } => {}
             Message::Notified(url) => {
                 if let Some(url) = url {
                     self.open_url(&url);
@@ -273,6 +277,20 @@ impl App {
         self.sync_detail();
     }
 
+    /// Handles the result of a change as any message, and confirms it when it succeeded.
+    fn finish_action(&mut self, id: u64, message: Message) {
+        let label = self.activity.finish(id);
+        let succeeded = matches!(
+            message,
+            Message::WorkItemUpdated { result: Ok(()), .. }
+                | Message::PullRequestUpdated { result: Ok(()), .. }
+        );
+        self.handle_message(message);
+        if let (true, Some(label)) = (succeeded, label) {
+            self.notice = Some((format!("{label} ✓"), Instant::now()));
+        }
+    }
+
     /// The running config while switching project, if it is for `organization`.
     fn current_config(&self, organization: &str) -> Option<&Config> {
         self.config
@@ -294,7 +312,7 @@ impl App {
     pub(super) fn report_error(&mut self, err: anyhow::Error) {
         tracing::error!("{err:#}");
         if !self.handle_rejected_pat(&err) {
-            self.error = Some(format!("{err:#}"));
+            self.set_error(format!("{err:#}"));
         }
     }
 
@@ -326,6 +344,45 @@ mod tests {
     use crate::app::message::Message;
     use crate::app::test_helpers::{app, open_pull_request};
     use crate::test_support::{ids_of_prs, pull_request};
+
+    fn action_done(id: u64, result: anyhow::Result<()>) -> Message {
+        Message::ActionDone {
+            id,
+            message: Box::new(Message::WorkItemUpdated {
+                id: 1,
+                reload: &[],
+                result,
+            }),
+        }
+    }
+
+    #[test]
+    fn finished_action_is_confirmed_in_the_notice() {
+        let mut app = app();
+        let id = app.activity.start("assigning #1".into());
+        assert_eq!(app.activity.latest(), Some(("assigning #1", 0)));
+
+        app.handle_message(action_done(id, Ok(())));
+
+        assert_eq!(app.activity.latest(), None);
+        assert_eq!(app.notice(), Some("assigning #1 ✓"));
+        assert_eq!(app.error, None);
+    }
+
+    #[test]
+    fn failed_action_keeps_the_error_in_the_history() {
+        let mut app = app();
+        let id = app.activity.start("assigning #1".into());
+
+        app.handle_message(action_done(id, Err(anyhow::anyhow!("denied"))));
+
+        assert_eq!(app.activity.latest(), None);
+        assert_eq!(app.notice(), None);
+        assert_eq!(app.error.as_deref(), Some("denied"));
+        app.error = None;
+        let history: Vec<_> = app.activity.errors().map(|(_, e)| e.as_str()).collect();
+        assert_eq!(history, ["denied"]);
+    }
 
     #[test]
     fn loaded_lists_use_configured_sort() {

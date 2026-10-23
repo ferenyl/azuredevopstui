@@ -15,7 +15,7 @@ impl App {
         strategies: Vec<MergeStrategy>,
     ) {
         if strategies.is_empty() {
-            self.error = Some(format!(
+            self.set_error(format!(
                 "no merge strategy is allowed for !{}",
                 pr.pull_request_id
             ));
@@ -57,7 +57,7 @@ impl App {
             picker.strategy = index;
         }
         if !picker.ready && !picker.auto_complete && !picker.bypass_policy {
-            self.error = Some(format!(
+            self.set_error(format!(
                 "!{} is not ready to complete: set auto-complete or bypass branch policies",
                 picker.pr.pull_request_id
             ));
@@ -117,7 +117,12 @@ impl App {
             return;
         };
         let user_id = user.id.clone();
-        self.spawn(async move {
+        let label = if auto_complete {
+            format!("setting auto-complete on !{}", pr.pull_request_id)
+        } else {
+            format!("completing !{}", pr.pull_request_id)
+        };
+        self.spawn_action(label, async move {
             let (result, reload) = if auto_complete {
                 (
                     api.set_auto_complete(&pr, &user_id, &options).await,
@@ -141,7 +146,8 @@ impl App {
         let Some(api) = self.api() else {
             return;
         };
-        self.spawn(async move {
+        let label = format!("cancelling auto-complete on !{}", pr.pull_request_id);
+        self.spawn_action(label, async move {
             let result = api.cancel_auto_complete(&pr).await;
             Message::PullRequestUpdated {
                 id: pr.pull_request_id,

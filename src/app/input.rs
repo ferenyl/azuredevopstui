@@ -148,6 +148,7 @@ impl App {
             | Action::HalfPageDown
             | Action::HalfPageUp
             | Action::JumpToPanel(_)
+            | Action::Errors
                 if !matches!(self.screen, Screen::Main) => {}
             Action::SwitchProject => self.switch_project(),
             Action::Top => self.move_by(Move::Top),
@@ -201,6 +202,7 @@ impl App {
             Action::ThreadStatus => self.open_thread_status(),
             Action::PrActions => self.open_pr_actions(),
             Action::Zoom => self.zoomed = !self.zoomed,
+            Action::Errors => self.popup = Some(Popup::Errors { first: 0 }),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {
                     self.move_focus(action);

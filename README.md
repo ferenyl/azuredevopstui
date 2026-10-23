@@ -480,6 +480,7 @@ The table lists the Mocha values.
 | `Y` | Copy the link to the PR, work item or pipeline run |
 | `l` / `L` | Select the next / previous link in the description or comments. While one is selected, `o` opens it and `Y` copies it. Switching tab or item clears the selection |
 | `r` | Reload everything |
+| `E` | Show the last 50 errors, newest first, with the time. `j` / `k` scroll, `esc` closes. The toolbar shows `[E] errors (n)` once there are some. Changes (assign, move, tag, comment, vote and so on) show a spinner and `<action>…` in the toolbar while they run, and `<action> ✓` when done; a failure stays in the error list after a reload clears it from the toolbar |
 | `T` | Enter a new PAT |
 | `P` | Change organization, project or team: the setup opens with the current values preselected. `esc` goes back one step, and from the first step returns to the running view with nothing changed. The new config is saved after you pick the ready column; your other settings are kept |
 | `?` | Show all keys |

@@ -46,6 +46,7 @@ pub enum Action {
     HalfPageUp,
     /// Focuses the left box with this number, starting at 1.
     JumpToPanel(u8),
+    Errors,
 }
 
 /// Actions listed in the help popup, by where they apply.
@@ -69,6 +70,7 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::PrevLink,
             Action::Sprint,
             Action::Reload,
+            Action::Errors,
             Action::ChangeToken,
             Action::SwitchProject,
             Action::Help,
@@ -148,6 +150,7 @@ impl Action {
             (KeyCode::Char('e'), _) => Some(Self::PrActions),
             (KeyCode::Char('P'), _) => Some(Self::SwitchProject),
             (KeyCode::Char('z'), _) => Some(Self::Zoom),
+            (KeyCode::Char('E'), _) => Some(Self::Errors),
             _ => None,
         }
     }
@@ -197,6 +200,7 @@ impl Action {
             Self::HalfPageDown => "ctrl+d/u",
             Self::HalfPageUp => "ctrl+u",
             Self::JumpToPanel(_) => "1-6",
+            Self::Errors => "E",
         }
     }
 
@@ -245,6 +249,7 @@ impl Action {
             Self::HalfPageDown => "half page down/up",
             Self::HalfPageUp => "half page up",
             Self::JumpToPanel(_) => "go to box",
+            Self::Errors => "errors",
         }
     }
 }
@@ -321,6 +326,10 @@ mod tests {
         assert_eq!(plain(KeyCode::Char(' ')), Some(Action::Toggle));
         assert_eq!(plain(KeyCode::Char('f')), Some(Action::Filter));
         assert_eq!(plain(KeyCode::Char('z')), Some(Action::Zoom));
+        assert_eq!(
+            key(KeyCode::Char('E'), KeyModifiers::SHIFT),
+            Some(Action::Errors)
+        );
     }
 
     #[test]
