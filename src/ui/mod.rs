@@ -344,16 +344,23 @@ fn render_detail(frame: &mut Frame, app: &App, block: Block, area: Rect) {
     let (lines, slots) = place_images(app, lines, width);
     let thread_row = selected_thread_row(&lines, width);
     app.thread_row.set(thread_row);
+    let total: usize = lines.iter().map(|line| wrapped_rows(line, width)).sum();
+    let max = u16::try_from(total.saturating_sub(usize::from(content.height))).unwrap_or(u16::MAX);
+    app.detail_max_scroll.set(max);
+    app.detail_height.set(content.height);
     let scroll = match detail {
         Detail::PullRequest(_) if app.detail_tab == DetailTab::Files => {
             pr_files::list_scroll(app, content.height, content.width)
         }
         _ => None,
     }
-    .unwrap_or(match thread_row {
-        Some(row) if app.scroll_to_thread => row,
-        _ => app.detail_scroll,
-    });
+    .unwrap_or(
+        match thread_row {
+            Some(row) if app.scroll_to_thread => row,
+            _ => app.detail_scroll,
+        }
+        .min(max),
+    );
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -1130,6 +1137,34 @@ mod tests {
         assert!(screen.contains("● active"));
         assert!(screen.contains("feature/x → main"));
         assert!(screen.contains("Anna  approved  required"));
+    }
+
+    #[test]
+    fn detail_max_scroll_is_content_rows_beyond_the_viewport() {
+        let mut app = main_app();
+        app.detail = app.data.detail(Panel::MyPrs, 0);
+        app.detail_scroll = 500;
+
+        let first = screen(&app);
+
+        assert!(app.detail_height.get() > 0);
+        assert_eq!(app.detail_max_scroll.get(), 0);
+        assert!(first.contains("feature/x → main"));
+
+        let Some(Detail::PullRequest(pr)) = &mut app.detail else {
+            panic!("expected a pull request");
+        };
+        pr.description = Some(
+            (0..100)
+                .map(|n| format!("Row {n}"))
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        );
+        pr.render_description();
+        let _ = screen(&app);
+
+        assert!(app.detail_max_scroll.get() > 0);
+        assert!(app.detail_max_scroll.get() < 200);
     }
 
     #[test]

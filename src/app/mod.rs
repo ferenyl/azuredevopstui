@@ -74,6 +74,10 @@ pub struct App {
     pub scroll_to_thread: bool,
     /// Row of the selected thread in the last drawn detail.
     pub thread_row: std::cell::Cell<Option<u16>>,
+    /// Largest useful `detail_scroll` of the last drawn detail; unbounded before the first draw.
+    pub detail_max_scroll: std::cell::Cell<u16>,
+    /// Visible content rows of the last drawn detail.
+    pub detail_height: std::cell::Cell<u16>,
     /// Changed files of the shown PR, once its Files tab was shown.
     pub files: Option<Files>,
     /// Targets of the links drawn in the detail pane last frame, in reading order.
@@ -129,6 +133,8 @@ impl App {
             detail_thread: None,
             scroll_to_thread: false,
             thread_row: std::cell::Cell::new(None),
+            detail_max_scroll: std::cell::Cell::new(u16::MAX),
+            detail_height: std::cell::Cell::new(0),
             files: None,
             detail_links: RefCell::default(),
             link_index: None,
