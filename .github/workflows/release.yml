@@ -139,8 +139,9 @@ jobs:
   aur:
     name: Update AUR packages
     needs: build
-    # pkgver cannot contain "-", so pre-releases are not packaged
-    if: ${{ !github.event.release.prerelease && !contains(github.event.release.tag_name, '-') }}
+    # Off until the repository variable AUR_ENABLED is "true".
+    # pkgver cannot contain "-", so pre-releases are not packaged.
+    if: ${{ vars.AUR_ENABLED == 'true' && !github.event.release.prerelease && !contains(github.event.release.tag_name, '-') }}
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     permissions:
