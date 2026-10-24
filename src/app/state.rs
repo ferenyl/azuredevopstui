@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
-    Build, ColumnTarget, CompletionOptions, Iteration, Mention, Person, PullRequest,
-    PullRequestChecks, PullRequestDetails, TimelineRow, WorkItem, WorkItemDetails,
+    Build, ColumnTarget, CompletionOptions, Iteration, Mention, Person, PolicyEvaluation,
+    PullRequest, PullRequestChecks, PullRequestDetails, TimelineRow, WorkItem, WorkItemDetails,
     compare_timestamps, is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
@@ -161,6 +161,12 @@ pub enum Popup {
     /// The reviewers of `pr`, in order.
     RemoveReviewer {
         pr: Box<PullRequest>,
+        selection: Selection,
+    },
+    /// The build validations of `pr` as (evaluation id, label), in order.
+    Validations {
+        pr: Box<PullRequest>,
+        evaluations: Vec<(String, String)>,
         selection: Selection,
     },
     /// The recent errors, newest first, starting at the error with index `first`.
@@ -385,6 +391,8 @@ pub enum PrAction {
     AddReviewer,
     RemoveReviewer,
     LinkWorkItem,
+    RerunValidation,
+    RerunFailedValidations,
 }
 
 impl PrAction {
@@ -399,11 +407,13 @@ impl PrAction {
             Self::AddReviewer => "Add reviewer",
             Self::RemoveReviewer => "Remove reviewer",
             Self::LinkWorkItem => "Link work item",
+            Self::RerunValidation => "Re-run build validation…",
+            Self::RerunFailedValidations => "Re-run all failed/expired validations",
         }
     }
 
     /// The entries that make sense for `pr` as it is now.
-    pub fn of(pr: &PullRequest) -> Vec<Self> {
+    pub fn of(pr: &PullRequest, policies: &[PolicyEvaluation]) -> Vec<Self> {
         let active = pr.status == "active";
         let mut actions = Vec::new();
         if pr.status == "abandoned" {
@@ -416,6 +426,15 @@ impl PrAction {
             actions.push(Self::RemoveReviewer);
         }
         actions.push(Self::LinkWorkItem);
+        if active && policies.iter().any(PolicyEvaluation::is_build) {
+            actions.push(Self::RerunValidation);
+            if policies
+                .iter()
+                .any(|policy| policy.is_build() && policy.needs_rerun())
+            {
+                actions.push(Self::RerunFailedValidations);
+            }
+        }
         if active {
             if !pr.is_draft {
                 actions.push(Self::MarkAsDraft);
@@ -566,6 +585,11 @@ pub enum ConfirmAction {
     Abandon(Box<PullRequest>),
     Publish(Box<PullRequest>),
     MarkAsDraft(Box<PullRequest>),
+    /// Queues the build validations with these evaluation ids again.
+    Requeue {
+        pr: Box<PullRequest>,
+        evaluation_ids: Vec<String>,
+    },
     /// Queues a run of the same pipeline on the same branch and commit.
     Rerun(Box<Build>),
     /// Queues a run of the pipeline on `branch` (a full ref).

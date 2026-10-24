@@ -359,9 +359,44 @@ pub struct StatusContext {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PolicyEvaluation {
+    #[serde(default)]
+    pub evaluation_id: String,
     pub status: String,
     pub configuration: PolicyConfiguration,
+    pub context: Option<PolicyContext>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicyContext {
+    #[serde(default)]
+    pub is_expired: bool,
+}
+
+impl PolicyEvaluation {
+    /// A build validation, which can be queued again.
+    pub fn is_build(&self) -> bool {
+        self.configuration.kind.display_name == "Build" && !self.evaluation_id.is_empty()
+    }
+
+    /// Failed or expired, so worth another run.
+    pub fn needs_rerun(&self) -> bool {
+        matches!(self.status.as_str(), "rejected" | "broken")
+            || self
+                .context
+                .as_ref()
+                .is_some_and(|context| context.is_expired)
+    }
+
+    pub fn name(&self) -> &str {
+        self.configuration
+            .settings
+            .display_name
+            .as_deref()
+            .unwrap_or(&self.configuration.kind.display_name)
+    }
 }
 
 #[derive(Deserialize)]
