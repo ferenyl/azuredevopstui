@@ -375,24 +375,24 @@ impl PrAction {
 
     /// The entries that make sense for `pr` as it is now.
     pub fn of(pr: &PullRequest) -> Vec<Self> {
+        let active = pr.status == "active";
         let mut actions = Vec::new();
-        match pr.status.as_str() {
-            "active" => {
-                actions.push(Self::Abandon);
-                actions.push(if pr.is_draft {
-                    Self::Publish
-                } else {
-                    Self::MarkAsDraft
-                });
-            }
-            "abandoned" => actions.push(Self::Reactivate),
-            _ => {}
+        if pr.status == "abandoned" {
+            actions.push(Self::Reactivate);
+        } else if active && pr.is_draft {
+            actions.push(Self::Publish);
         }
         actions.extend([Self::EditTitle, Self::EditDescription, Self::AddReviewer]);
         if !pr.reviewers.is_empty() {
             actions.push(Self::RemoveReviewer);
         }
         actions.push(Self::LinkWorkItem);
+        if active {
+            if !pr.is_draft {
+                actions.push(Self::MarkAsDraft);
+            }
+            actions.push(Self::Abandon);
+        }
         actions
     }
 }
@@ -535,6 +535,8 @@ pub enum ConfirmAction {
         auto_complete: bool,
     },
     Abandon(Box<PullRequest>),
+    Publish(Box<PullRequest>),
+    MarkAsDraft(Box<PullRequest>),
     /// Queues a run of the same pipeline on the same branch and commit.
     Rerun(Box<Build>),
     /// Queues a run of the pipeline on `branch` (a full ref).
