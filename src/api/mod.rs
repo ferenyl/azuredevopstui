@@ -11,9 +11,9 @@ pub use builds::{TimelineRow, timeline_rows};
 pub use models::DetailComment;
 pub use models::{
     Board, Build, ChangeKind, ChangedFile, CommentsPage, CurrentUser, FileContent, IdentityRef,
-    Iteration, Link, LinkTarget, Mention, Partial, Person, PullRequest, PullRequestChanges,
-    PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems, THREAD_STATUSES, Thread,
-    TimelineRecord, WorkItem, WorkItemDetails, thread_status_label,
+    Iteration, Link, LinkTarget, Mention, Partial, Person, PolicyEvaluation, PullRequest,
+    PullRequestChanges, PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems,
+    THREAD_STATUSES, Thread, TimelineRecord, WorkItem, WorkItemDetails, thread_status_label,
 };
 pub use pull_requests::{CompletionOptions, is_approved, is_reviewer_policy};
 
@@ -236,6 +236,17 @@ impl AdoClient {
     ) -> Result<T> {
         let url = build_url(base, segments, &[], API_VERSION)?;
         self.request(Method::PATCH, url, Some(body), false).await
+    }
+
+    /// PATCH without a body, for the preview APIs.
+    async fn patch_versioned<T: DeserializeOwned>(
+        &self,
+        base: &str,
+        segments: &[&str],
+        api_version: &str,
+    ) -> Result<T> {
+        let url = build_url(base, segments, &[], api_version)?;
+        self.request(Method::PATCH, url, None, false).await
     }
 
     async fn put<T: DeserializeOwned>(

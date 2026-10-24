@@ -48,6 +48,11 @@ impl App {
                 actions,
                 selection,
             }) => self.confirm_build_action(build, &actions, selection.selected),
+            Some(Popup::Validations {
+                pr,
+                evaluations,
+                selection,
+            }) => self.confirm_validation(pr, &evaluations, selection.selected),
             Some(Popup::RemoveReviewer { pr, selection }) => {
                 self.confirm_remove_reviewer(pr, selection.selected)
             }
@@ -140,6 +145,7 @@ impl App {
             | Popup::WorkItemField { selection, .. }
             | Popup::NewWorkItem { selection }
             | Popup::RemoveReviewer { selection, .. }
+            | Popup::Validations { selection, .. }
             | Popup::Types { selection, .. }
             | Popup::PrFilter { selection, .. } => selection,
         };
