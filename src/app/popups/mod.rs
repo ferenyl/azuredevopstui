@@ -20,6 +20,14 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::{Action, App, CompleteRow, Popup};
 
 impl App {
+    /// `label` followed by the keys of `action`, when it has any.
+    pub(in crate::app) fn with_key_hint(&self, label: &str, action: Option<Action>) -> String {
+        match action.map(|action| self.keymap.label(action)) {
+            Some(keys) if !keys.is_empty() => format!("{label}  ({keys})"),
+            _ => label.to_string(),
+        }
+    }
+
     pub(super) fn confirm_popup(&mut self) {
         match self.popup.take() {
             Some(Popup::Column(picker)) => self.confirm_column(picker),

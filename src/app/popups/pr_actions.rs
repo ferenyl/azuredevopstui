@@ -27,8 +27,21 @@ impl App {
             Some(DetailInfo::PullRequest(info)) => info.policies.as_slice(),
             _ => &[],
         };
-        let actions = PrAction::of(&pr, policies);
-        let selection = Selection::new(actions.iter().map(|a| a.label().into()).collect());
+        let mut actions = PrAction::of(&pr, policies);
+        let at = actions
+            .iter()
+            .position(|a| matches!(a, PrAction::MarkAsDraft | PrAction::Abandon))
+            .unwrap_or(actions.len());
+        let forwarded = PrAction::FORWARDED
+            .into_iter()
+            .filter(|a| a.action().is_some_and(|action| self.can_in_main(action)));
+        actions.splice(at..at, forwarded);
+        let selection = Selection::new(
+            actions
+                .iter()
+                .map(|a| self.with_key_hint(a.label(), a.action()))
+                .collect(),
+        );
         self.popup = Some(Popup::PrActions {
             pr,
             actions,
@@ -45,7 +58,17 @@ impl App {
         let Some(action) = actions.get(index).copied() else {
             return;
         };
+        if let Some(key_action) = action.action() {
+            self.apply(key_action);
+            return;
+        }
         match action {
+            PrAction::Complete
+            | PrAction::Vote
+            | PrAction::Comment
+            | PrAction::ThreadStatus
+            | PrAction::OpenInBrowser
+            | PrAction::CopyLink => {}
             PrAction::Abandon => {
                 let prompt = format!("Abandon !{} {}?", pr.pull_request_id, pr.title);
                 self.popup = Some(Popup::Confirm {
@@ -315,7 +338,10 @@ mod tests {
     fn abandoning_asks_for_confirmation_first() {
         let mut app = app();
         press(&mut app, KeyCode::Char('e'));
-        for _ in 0..6 {
+        while !matches!(
+            &app.popup,
+            Some(Popup::PrActions { selection, .. }) if selection.current() == Some("Abandon")
+        ) {
             press(&mut app, KeyCode::Char('j'));
         }
 
@@ -334,7 +360,10 @@ mod tests {
     fn declining_the_confirmation_closes_it() {
         let mut app = app();
         press(&mut app, KeyCode::Char('e'));
-        for _ in 0..6 {
+        while !matches!(
+            &app.popup,
+            Some(Popup::PrActions { selection, .. }) if selection.current() == Some("Abandon")
+        ) {
             press(&mut app, KeyCode::Char('j'));
         }
         press(&mut app, KeyCode::Enter);

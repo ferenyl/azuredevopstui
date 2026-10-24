@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use super::action::Action;
 use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
@@ -208,9 +209,42 @@ pub enum WorkItemAction {
     Priority,
     Iteration,
     NewChild,
+    /// Entries that run the action of the same name, which also has a key.
+    ChangeColumn,
+    AssignToMe,
+    Unassign,
+    Tag,
+    Comment,
+    OpenInBrowser,
+    CopyLink,
 }
 
 impl WorkItemAction {
+    /// The key action an entry runs, for the entries that only forward to one.
+    pub fn action(self) -> Option<Action> {
+        match self {
+            Self::ChangeColumn => Some(Action::ChangeColumn),
+            Self::AssignToMe => Some(Action::AssignToMe),
+            Self::Unassign => Some(Action::Unassign),
+            Self::Tag => Some(Action::Tag),
+            Self::Comment => Some(Action::Comment),
+            Self::OpenInBrowser => Some(Action::OpenInBrowser),
+            Self::CopyLink => Some(Action::CopyLink),
+            _ => None,
+        }
+    }
+
+    /// The forwarding entries, in menu order.
+    pub const FORWARDED: [Self; 7] = [
+        Self::ChangeColumn,
+        Self::AssignToMe,
+        Self::Unassign,
+        Self::Tag,
+        Self::Comment,
+        Self::OpenInBrowser,
+        Self::CopyLink,
+    ];
+
     pub const ALL: [Self; 6] = [
         Self::ChangeState,
         Self::EditTitle,
@@ -228,6 +262,13 @@ impl WorkItemAction {
             Self::Priority => "Set priority",
             Self::Iteration => "Move to sprint",
             Self::NewChild => "New child…",
+            Self::ChangeColumn => "Change column",
+            Self::AssignToMe => "Assign to me",
+            Self::Unassign => "Unassign",
+            Self::Tag => "Tag",
+            Self::Comment => "Comment",
+            Self::OpenInBrowser => "Open in browser",
+            Self::CopyLink => "Copy link",
         }
     }
 }
@@ -393,11 +434,47 @@ pub enum PrAction {
     LinkWorkItem,
     RerunValidation,
     RerunFailedValidations,
+    /// Entries that run the action of the same name, which also has a key.
+    Complete,
+    Vote,
+    Comment,
+    ThreadStatus,
+    OpenInBrowser,
+    CopyLink,
 }
 
 impl PrAction {
+    /// The key action an entry runs, for the entries that only forward to one.
+    pub fn action(self) -> Option<Action> {
+        match self {
+            Self::Complete => Some(Action::Complete),
+            Self::Vote => Some(Action::Vote),
+            Self::Comment => Some(Action::Comment),
+            Self::ThreadStatus => Some(Action::ThreadStatus),
+            Self::OpenInBrowser => Some(Action::OpenInBrowser),
+            Self::CopyLink => Some(Action::CopyLink),
+            _ => None,
+        }
+    }
+
+    /// The forwarding entries, in menu order.
+    pub const FORWARDED: [Self; 6] = [
+        Self::Complete,
+        Self::Vote,
+        Self::Comment,
+        Self::ThreadStatus,
+        Self::OpenInBrowser,
+        Self::CopyLink,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
+            Self::Complete => "Complete",
+            Self::Vote => "Vote",
+            Self::Comment => "Comment",
+            Self::ThreadStatus => "Thread status",
+            Self::OpenInBrowser => "Open in browser",
+            Self::CopyLink => "Copy link",
             Self::Abandon => "Abandon",
             Self::Reactivate => "Reactivate",
             Self::Publish => "Publish (mark as ready)",

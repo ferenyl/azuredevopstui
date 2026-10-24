@@ -38,11 +38,14 @@ fn anna_has_an_id(pr: &mut Value) {
 }
 
 /// Opens the menu of PR 101 and picks the entry `downs` rows down.
-async fn pick_action(harness: &mut Harness, downs: usize) {
+async fn pick_action(harness: &mut Harness, label: &str) {
     select(harness, Panel::MyPrs, 101);
     harness.press(KeyCode::Char('e'));
     wait_for_popup(harness, |p| matches!(p, Popup::PrActions { .. })).await;
-    for _ in 0..downs {
+    while !matches!(
+        &harness.app.popup,
+        Some(Popup::PrActions { selection, .. }) if selection.current() == Some(label)
+    ) {
         harness.press(KeyCode::Char('j'));
     }
     harness.press(KeyCode::Enter);
@@ -83,7 +86,7 @@ async fn the_menu_lists_the_actions_of_an_active_pull_request() {
 async fn abandoning_needs_a_confirmation_and_patches_the_status() {
     let mut harness = connected().await;
     expect_patch(&harness, PR_101, r#""status":"abandoned""#).await;
-    pick_action(&mut harness, 6).await;
+    pick_action(&mut harness, "Abandon").await;
     wait_for_popup(&mut harness, |p| matches!(p, Popup::Confirm { .. })).await;
     assert!(harness.screen().contains("Abandon !101"));
     harness.settle().await;
@@ -106,7 +109,7 @@ async fn abandoning_needs_a_confirmation_and_patches_the_status() {
 async fn abandoning_without_confirming_sends_nothing() {
     for key in [KeyCode::Char('n'), KeyCode::Esc] {
         let mut harness = connected().await;
-        pick_action(&mut harness, 6).await;
+        pick_action(&mut harness, "Abandon").await;
         wait_for_popup(&mut harness, |p| matches!(p, Popup::Confirm { .. })).await;
         harness.settle().await;
         let before = harness.ado.requests().await.len();
@@ -142,7 +145,7 @@ async fn reactivating_patches_the_status_back_to_active() {
 async fn marking_as_draft_patches_is_draft() {
     let mut harness = connected().await;
     expect_patch(&harness, PR_101, r#""isDraft":true"#).await;
-    pick_action(&mut harness, 5).await;
+    pick_action(&mut harness, "Mark as draft").await;
     wait_for_popup(&mut harness, |p| matches!(p, Popup::Confirm { .. })).await;
     assert!(harness.screen().contains("as draft?"));
     harness.press(KeyCode::Char('y'));
@@ -188,7 +191,7 @@ async fn publishing_a_draft_patches_is_draft_off() {
 async fn editing_the_title_patches_the_new_title() {
     let mut harness = connected().await;
     expect_patch(&harness, PR_101, r#""title":"Add order filter v2""#).await;
-    pick_action(&mut harness, 0).await;
+    pick_action(&mut harness, "Edit title").await;
     wait_for_popup(&mut harness, |p| matches!(p, Popup::Text { .. })).await;
     assert!(harness.screen().contains("Add order filter"));
     harness.type_text(" v2");
@@ -212,7 +215,7 @@ async fn editing_the_description_starts_from_the_full_text() {
         r#""description":"Adds a status filter to the order list. Done.""#,
     )
     .await;
-    pick_action(&mut harness, 1).await;
+    pick_action(&mut harness, "Edit description").await;
     wait_for_popup(&mut harness, |p| matches!(p, Popup::Text { .. })).await;
     assert!(
         harness
@@ -254,7 +257,7 @@ async fn adding_a_reviewer_looks_up_the_identity_and_puts_it() {
             1,
         )
         .await;
-    pick_action(&mut harness, 2).await;
+    pick_action(&mut harness, "Add reviewer").await;
     wait_for_popup(&mut harness, |p| matches!(p, Popup::Text { .. })).await;
     harness.type_text("anna@example.com");
 
@@ -279,7 +282,7 @@ async fn removing_a_reviewer_deletes_it() {
             1,
         )
         .await;
-    pick_action(&mut harness, 3).await;
+    pick_action(&mut harness, "Remove reviewer").await;
     wait_for_popup(&mut harness, |p| matches!(p, Popup::RemoveReviewer { .. })).await;
     assert!(harness.screen().contains("Anna Reviewer"));
 
@@ -309,7 +312,7 @@ async fn linking_a_work_item_adds_an_artifact_link_and_reloads_only_the_pull_req
             1,
         )
         .await;
-    pick_action(&mut harness, 4).await;
+    pick_action(&mut harness, "Link work item").await;
     wait_for_popup(&mut harness, |p| matches!(p, Popup::Text { .. })).await;
     harness.type_text("#301");
 
@@ -331,7 +334,7 @@ async fn linking_a_work_item_adds_an_artifact_link_and_reloads_only_the_pull_req
 async fn a_failed_change_shows_the_error_without_reloading() {
     let mut harness = connected().await;
     harness.ado.fail("PATCH", PR_101, 409).await;
-    pick_action(&mut harness, 0).await;
+    pick_action(&mut harness, "Edit title").await;
     wait_for_popup(&mut harness, |p| matches!(p, Popup::Text { .. })).await;
     harness.type_text("!");
 
