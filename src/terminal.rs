@@ -46,6 +46,17 @@ impl TerminalModes {
         *self = Self::enable(self.mouse);
     }
 
+    /// Wraps the panic hook so a panic also switches the modes off again. Run it after
+    /// `ratatui::init`, whose hook still restores raw mode and the alternate screen.
+    pub fn restore_on_panic(&self) {
+        let (enhanced, mouse) = (self.enhanced, self.mouse);
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            Self { enhanced, mouse }.disable();
+            hook(info);
+        }));
+    }
+
     pub fn disable(&self) {
         if self.mouse {
             let _ = execute!(stdout(), DisableMouseCapture);
