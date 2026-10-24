@@ -1,17 +1,37 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use chrono::NaiveTime;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::app::Keymap;
 use crate::theme::{ColorOverrides, ThemeName};
 
 const APP_NAME: &str = "azuredevopstui";
 const CONFIG_FILE: &str = "config.json";
+const COLORS_FILE: &str = "colors.json";
+const ORGANIZATIONS_DIR: &str = "organizations";
+
+/// Keys stored per organization in `organizations/<organization>.json`.
+const ORGANIZATION_KEYS: [&str; 11] = [
+    "organization",
+    "project",
+    "team",
+    "auth",
+    "ready_column",
+    "default_sprint",
+    "work_item_types",
+    "other_prs_filter",
+    "recent_tags",
+    "merge_strategy",
+    "completion",
+];
+/// Keys stored in `colors.json`.
+const COLOR_KEYS: [&str; 2] = ["theme", "colors"];
 
 const DEFAULT_REFRESH_INTERVAL_SECS: u64 = 120;
 
@@ -337,33 +357,133 @@ impl Config {
         Ok(dir.join(CONFIG_FILE))
     }
 
-    pub fn load() -> Result<Option<Self>> {
-        let path = Self::path()?;
+    /// `colors.json` next to the config file.
+    fn colors_path(config_path: &Path) -> PathBuf {
+        config_path.with_file_name(COLORS_FILE)
+    }
+
+    /// `organizations/<organization>.json` next to the config file. The name is lowercased and
+    /// percent-encoded, so different organizations never share a file. `None` for an empty name.
+    fn organization_path(config_path: &Path, organization: &str) -> Option<PathBuf> {
+        let organization = organization.trim().to_lowercase();
+        if organization.is_empty() {
+            return None;
+        }
+        let mut name = String::new();
+        for byte in organization.bytes() {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') {
+                name.push(byte as char);
+            } else {
+                name.push_str(&format!("%{byte:02x}"));
+            }
+        }
+        Some(
+            config_path
+                .with_file_name(ORGANIZATIONS_DIR)
+                .join(format!("{name}.json")),
+        )
+    }
+
+    fn read_object(path: &Path) -> Result<Option<Map<String, Value>>> {
         if !path.exists() {
             return Ok(None);
         }
-        let content = fs::read_to_string(&path)
+        let content = fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        Self::parse(&content)
+        match serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse {}", path.display()))?
+        {
+            Value::Object(map) => Ok(Some(map)),
+            _ => anyhow::bail!("failed to parse {}: not a JSON object", path.display()),
+        }
+    }
+
+    /// Reads `config.json`, `colors.json` and the file of the configured organization. A legacy
+    /// `config.json` that holds everything still loads; the next save splits it. When the
+    /// organization's file is missing, `None` makes the setup run again.
+    pub fn load() -> Result<Option<Self>> {
+        Self::load_from(&Self::path()?)
+    }
+
+    fn load_from(path: &Path) -> Result<Option<Self>> {
+        let Some(mut map) = Self::read_object(path)? else {
+            return Ok(None);
+        };
+        if let Some(colors) = Self::read_object(&Self::colors_path(path))? {
+            map.extend(colors);
+        }
+        let organization = map.get("organization").cloned();
+        if let Some(file) = organization
+            .as_ref()
+            .and_then(Value::as_str)
+            .and_then(|name| Self::organization_path(path, name))
+        {
+            match Self::read_object(&file)? {
+                Some(file) => map.extend(file),
+                None if !map.contains_key("project") => return Ok(None),
+                None => {}
+            }
+            // The organization named in `config.json` wins over a copied file.
+            if let Some(organization) = organization {
+                map.insert("organization".into(), organization);
+            }
+        }
+        Self::from_value(Value::Object(map))
             .map(Some)
             .with_context(|| format!("failed to parse {}", path.display()))
     }
 
     /// Parses the JSON and checks the `keys`.
+    #[cfg(test)]
     pub fn parse(content: &str) -> Result<Self> {
-        let config: Self = serde_json::from_str(content)?;
+        Self::from_value(serde_json::from_str(content)?)
+    }
+
+    fn from_value(value: Value) -> Result<Self> {
+        let config: Self = serde_json::from_value(value)?;
         Keymap::new(&config.keys)?;
         Ok(config)
     }
 
+    /// Writes the organization's settings, the colors and then the general settings, each through
+    /// a temporary file.
     pub fn save(&self) -> Result<()> {
-        let path = Self::path()?;
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir)
-                .with_context(|| format!("failed to create {}", dir.display()))?;
+        self.save_to(&Self::path()?)
+    }
+
+    fn save_to(&self, path: &Path) -> Result<()> {
+        let Value::Object(mut general) = serde_json::to_value(self)? else {
+            unreachable!("Config serializes to an object");
+        };
+        let take = |general: &mut Map<String, Value>, keys: &[&str]| -> Map<String, Value> {
+            keys.iter()
+                .filter_map(|key| Some((key.to_string(), general.remove(*key)?)))
+                .collect()
+        };
+        let colors = take(&mut general, &COLOR_KEYS);
+        let organization = take(&mut general, &ORGANIZATION_KEYS);
+        let mut files = Vec::new();
+        match Self::organization_path(path, &self.organization) {
+            Some(file) => {
+                // Selects the organization file on load.
+                general.insert("organization".into(), self.organization.clone().into());
+                files.push((file, organization));
+            }
+            None => general.extend(organization),
         }
-        let content = serde_json::to_string_pretty(self)?;
-        fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))
+        files.push((Self::colors_path(path), colors));
+        files.push((path.to_path_buf(), general));
+        for (file, map) in files {
+            if let Some(dir) = file.parent() {
+                fs::create_dir_all(dir)
+                    .with_context(|| format!("failed to create {}", dir.display()))?;
+            }
+            let temp = file.with_extension("json.tmp");
+            fs::write(&temp, serde_json::to_string_pretty(&map)?)
+                .and_then(|()| fs::rename(&temp, &file))
+                .with_context(|| format!("failed to write {}", file.display()))?;
+        }
+        Ok(())
     }
 }
 
@@ -388,6 +508,49 @@ mod tests {
                 .unwrap()
                 .ends_with(PathBuf::from(APP_NAME).join(CONFIG_FILE))
         );
+    }
+
+    #[test]
+    fn legacy_config_is_split_on_save_without_losing_values() {
+        let dir = std::env::temp_dir().join(format!("{APP_NAME}-split-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(CONFIG_FILE);
+        let legacy = r##"{"organization":"Contoso","project":"p","team":"t","ready_column":"Ready",
+            "work_item_types":["Bug"],"theme":"light","colors":{"title":"#8839EF"},
+            "mouse":false,"keys":{"vote":["V"]}}"##;
+        fs::write(&path, legacy).unwrap();
+
+        let loaded = Config::load_from(&path).unwrap().unwrap();
+        loaded.save_to(&path).unwrap();
+
+        let general: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(general["organization"], "Contoso");
+        assert_eq!(general["mouse"], false);
+        assert!(general.get("project").is_none() && general.get("theme").is_none());
+        assert!(dir.join(COLORS_FILE).exists());
+        assert!(dir.join(ORGANIZATIONS_DIR).join("contoso.json").exists());
+        let reloaded = Config::load_from(&path).unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(&reloaded).unwrap(),
+            serde_json::to_value(&loaded).unwrap()
+        );
+        assert_eq!(reloaded.ready_column.as_deref(), Some("Ready"));
+        assert_eq!(reloaded.colors, loaded.colors);
+
+        fs::remove_file(dir.join(ORGANIZATIONS_DIR).join("contoso.json")).unwrap();
+        assert!(Config::load_from(&path).unwrap().is_none());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn organization_files_never_collide() {
+        let path = Path::new("c/config.json");
+        let file = |org| Config::organization_path(path, org).unwrap();
+
+        assert_ne!(file("my org"), file("my_org"));
+        assert_eq!(file("Contoso"), file("contoso"));
+        assert!(Config::organization_path(path, " ").is_none());
     }
 
     #[test]

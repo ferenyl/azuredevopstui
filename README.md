@@ -267,8 +267,8 @@ Options:
   -V, --version            Print version
 ```
 
-- `--config <PATH>`: reads and writes this file instead of the [default config](#configuration). If it does not exist, the setup runs and saves to it. Works with `doctor` too.
-- `--org <NAME>` and `--project <NAME>`: start in another organization or project. The setup opens at the project step (`--org` only) or the team step, and what you pick is saved to the config, like switching with `P`; your other settings are kept. `esc` on that first step opens the configured project instead. `--project` alone stays in the configured organization; without a config it needs `--org`. To keep a separate setup, add `--config other.json`.
+- `--config <PATH>`: reads and writes this `config.json` instead of the [default config](#configuration); `colors.json` and `organizations/` sit next to it. If it does not exist, the setup runs and saves to it. Works with `doctor` too.
+- `--org <NAME>` and `--project <NAME>`: start in another organization or project. The setup opens at the project step (`--org` only) or the team step, and what you pick is saved to the config, like switching with `P`; your other settings are kept. `esc` on that first step opens the configured project instead. `--project` alone stays in the configured organization; without a config it needs `--org`. To keep a separate setup, add `--config other/config.json`.
 - `--test-notification`: sends a desktop notification and prints `opened` or `closed`. See `notifications` under [Configuration](#configuration).
 - `-V`, `--version`: prints `azuredevopstui <version>`.
 - `azuredevopstui doctor`: checks the setup without opening the TUI and never prompts. It prints one line per check and exits with 1 if one fails. Checks, in order: the version, the config file, the credentials (Azure CLI or the saved PAT), signing in to the organization and finding the team in the project.
@@ -276,7 +276,7 @@ Options:
   ```text
   $ azuredevopstui doctor
   ✓ azuredevopstui 0.1.15
-  ✓ config /home/me/.config/azuredevopstui/config.json
+  ✓ config /home/me/.config/azuredevopstui/config.json (colors.json and organizations/ next to it)
   ✓ credentials: Azure CLI
   ✓ signed in as Anna Andersson to contoso
   ✗ team Web not found in Fabrikam
@@ -373,7 +373,13 @@ The token is stored in the OS keyring under the service `azuredevopstui`. If Azu
 
 ## Configuration
 
-The config file is `$XDG_CONFIG_HOME/azuredevopstui/config.json`, which is usually `~/.config/azuredevopstui/config.json`. On Windows it is `%APPDATA%\azuredevopstui\config.json`. Use `--config <PATH>` to use another file.
+The config is split over three kinds of files in `$XDG_CONFIG_HOME/azuredevopstui/`, which is usually `~/.config/azuredevopstui/`. On Windows it is `%APPDATA%\azuredevopstui\`. Use `--config <PATH>` to use another `config.json`; `colors.json` and `organizations/` are then read from and written to the same directory as that file. Two config files in one directory therefore share `colors.json` and `organizations/`; use one directory per setup.
+
+- `config.json`: the general settings, and `organization`, which selects the organization file.
+- `colors.json`: `theme` and `colors`.
+- `organizations/<organization>.json`: one file per organization with `organization`, `project`, `team`, `auth`, `ready_column`, `default_sprint`, `work_item_types`, `other_prs_filter`, `recent_tags`, `merge_strategy` and `completion`.
+
+An older single `config.json` that holds everything still loads. The next save splits it into the files above without losing values. The table below lists all keys, whichever file they live in; the example shows them as one object.
 
 ```json
 {
