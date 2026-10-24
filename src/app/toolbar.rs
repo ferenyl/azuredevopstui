@@ -115,7 +115,7 @@ impl App {
         }
     }
 
-    fn can_in_main(&self, action: Action) -> bool {
+    pub(in crate::app) fn can_in_main(&self, action: Action) -> bool {
         let item = self.current_item();
         let is_build = matches!(item, Some(Detail::Build(_)));
         let work_item_assigned_to_me = |assigned: bool| matches!(&item, Some(Detail::WorkItem(w)) if self.is_assigned_to_me(w) == assigned);

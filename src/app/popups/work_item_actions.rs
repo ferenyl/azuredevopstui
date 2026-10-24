@@ -42,8 +42,18 @@ impl App {
         let Some(item) = self.current_work_item() else {
             return;
         };
-        let actions = WorkItemAction::ALL.to_vec();
-        let selection = Selection::new(actions.iter().map(|a| a.label().into()).collect());
+        let mut actions = WorkItemAction::ALL.to_vec();
+        actions.extend(
+            WorkItemAction::FORWARDED
+                .into_iter()
+                .filter(|a| a.action().is_some_and(|action| self.can_in_main(action))),
+        );
+        let selection = Selection::new(
+            actions
+                .iter()
+                .map(|a| self.with_key_hint(a.label(), a.action()))
+                .collect(),
+        );
         self.popup = Some(Popup::WorkItemActions {
             item: Box::new(item),
             actions,
@@ -60,7 +70,18 @@ impl App {
         let Some(action) = actions.get(index).copied() else {
             return;
         };
+        if let Some(key_action) = action.action() {
+            self.apply(key_action);
+            return;
+        }
         match action {
+            WorkItemAction::ChangeColumn
+            | WorkItemAction::AssignToMe
+            | WorkItemAction::Unassign
+            | WorkItemAction::Tag
+            | WorkItemAction::Comment
+            | WorkItemAction::OpenInBrowser
+            | WorkItemAction::CopyLink => {}
             WorkItemAction::ChangeState => {
                 let Some(api) = self.api() else {
                     return;
@@ -352,7 +373,13 @@ mod tests {
                 "Assign to…",
                 "Set priority",
                 "Move to sprint",
-                "New child…"
+                "New child…",
+                "Change column  (s)",
+                "Assign to me  (a)",
+                "Tag  (t)",
+                "Comment  (m)",
+                "Open in browser  (o)",
+                "Copy link  (Y)"
             ]
         );
     }
