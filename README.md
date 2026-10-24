@@ -418,8 +418,8 @@ An older single `config.json` that holds everything still loads. The next save s
 | `project` | set by setup | Project name. |
 | `team` | set by setup | Team. Used for the current sprint and the board. |
 | `refresh_interval_secs` | `120` | Auto refresh interval in seconds. Set it to `0` to turn auto refresh off. Auto refresh pauses while a popup is open. |
-| `browser_command` | `null` | Command used to open URLs, with the URL appended as the last argument, for example `"wslview"` or `"firefox --new-tab"`. The command is split on spaces, so it must be on `PATH` (use `"chrome"`, not `"C:\\Program Files\\…"`). When `null`, the system default is used. |
-| `editor` | `null` | Command that `ctrl+e` opens in a text popup, with a temporary file as the last argument, for example `"nvim"` or `"code --wait"`. Split on spaces. When `null`, `$VISUAL`, then `$EDITOR`, then `vi` (`notepad` on Windows). |
+| `browser_command` | `null` | Command used to open URLs, for example `"wslview"` or `"firefox --new-tab"`. Split like a shell: `"…"`, `'…'` and `\` quote or escape spaces, for example `"\"C:/Program Files/Mozilla Firefox/firefox.exe\" --new-tab {url}"`. `{url}` in an argument is replaced by the URL; without it the URL is appended as the last argument. The program must be on `PATH` or given as a path. When `null`, the system default is used. |
+| `editor` | `null` | Command that `ctrl+e` opens in a text popup, with a temporary file as the last argument, for example `"nvim"` or `"code --wait"`. Split like `browser_command`, so quotes work. When `null`, `$VISUAL`, then `$EDITOR`, then `vi` (`notepad` on Windows). |
 | `auth.method` | `"auto"` | `auto`, `azcli` or `pat`. See [Authentication](#authentication). |
 | `auth.azure_config_dir` | not set | Azure CLI config directory for the DevOps login, for example `"~/.azure-devops"`. Use it when the DevOps account differs from your Azure portal account. When not set, the default `~/.azure` is used. See [Separate account for Azure DevOps](#separate-account-for-azure-devops-azure_config_dir). |
 | `other_prs_filter.reviewers` | `[]` | Show PRs where any of these users or groups is a reviewer. |

@@ -6,6 +6,7 @@ use crossterm::clipboard::CopyToClipboard;
 use crate::api;
 use crate::api::{PullRequest, WorkItem};
 
+use super::editor::split_command;
 use super::loads::Load;
 use super::message::Message;
 use super::{App, Detail};
@@ -70,17 +71,28 @@ impl App {
         };
         let result = match &config.browser_command {
             Some(command) => {
-                let mut parts = command.split_whitespace();
-                match parts.next() {
-                    Some(program) => Command::new(program)
-                        .args(parts)
-                        .arg(url)
+                let mut parts = split_command(command);
+                if parts.is_empty() {
+                    parts.push(String::new());
+                }
+                let program = parts.remove(0);
+                let has_placeholder = parts.iter().any(|part| part.contains("{url}"));
+                let mut args: Vec<String> = parts
+                    .iter()
+                    .map(|part| part.replace("{url}", url))
+                    .collect();
+                if !has_placeholder {
+                    args.push(url.to_string());
+                }
+                match program.as_str() {
+                    "" => Ok(()),
+                    program => Command::new(program)
+                        .args(args)
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
                         .spawn()
                         .map(|_| ()),
-                    None => Ok(()),
                 }
             }
             None => open::that_detached(url),
