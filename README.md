@@ -458,7 +458,7 @@ Press `f` with My pipelines focused, or with a pipeline run open, to type a filt
 
 ### Sorting
 
-Press `S` on a list to choose the order. PR lists and work item lists each have their own setting, which is shared by the two lists of that kind and saved to the config straight away.
+Press `S` on a list to choose the order. PR lists and work item lists each have their own setting, which is shared by the two lists of that kind and saved to the config straight away. Saves re-read `config.json` first, so keys you edited by hand while the app runs are kept.
 
 | `sort.pull_requests` | Order |
 |---|---|
