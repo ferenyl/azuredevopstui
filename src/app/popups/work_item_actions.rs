@@ -43,11 +43,10 @@ impl App {
             return;
         };
         let mut actions = WorkItemAction::ALL.to_vec();
-        actions.extend(
-            WorkItemAction::FORWARDED
-                .into_iter()
-                .filter(|a| a.action().is_some_and(|action| self.can_in_main(action))),
-        );
+        actions.extend(WorkItemAction::FORWARDED.into_iter().filter(|a| {
+            a.action()
+                .is_some_and(|action| self.allowed_in_main(action))
+        }));
         let selection = Selection::new(
             actions
                 .iter()
