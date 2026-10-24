@@ -373,7 +373,7 @@ The token is stored in the OS keyring under the service `azuredevopstui`. If Azu
 
 ## Configuration
 
-The config is split over three kinds of files in `$XDG_CONFIG_HOME/azuredevopstui/`, which is usually `~/.config/azuredevopstui/`. On Windows it is `%APPDATA%\azuredevopstui\`. Use `--config <PATH>` to use another `config.json`; `colors.json` and `organizations/` are then read from and written to the same directory as that file.
+The config is split over three kinds of files in `$XDG_CONFIG_HOME/azuredevopstui/`, which is usually `~/.config/azuredevopstui/`. On Windows it is `%APPDATA%\azuredevopstui\`. Use `--config <PATH>` to use another `config.json`; `colors.json` and `organizations/` are then read from and written to the same directory as that file. Two config files in one directory therefore share `colors.json` and `organizations/`; use one directory per setup.
 
 - `config.json`: the general settings, and `organization`, which selects the organization file.
 - `colors.json`: `theme` and `colors`.
