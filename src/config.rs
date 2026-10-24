@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::NaiveTime;
@@ -35,6 +36,7 @@ const COLOR_KEYS: [&str; 2] = ["theme", "colors"];
 
 const DEFAULT_REFRESH_INTERVAL_SECS: u64 = 120;
 
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 static PATH_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -478,7 +480,11 @@ impl Config {
                 fs::create_dir_all(dir)
                     .with_context(|| format!("failed to create {}", dir.display()))?;
             }
-            let temp = file.with_extension("json.tmp");
+            let temp = file.with_extension(format!(
+                "json.{}.{}.tmp",
+                std::process::id(),
+                TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
             fs::write(&temp, serde_json::to_string_pretty(&map)?)
                 .and_then(|()| fs::rename(&temp, &file))
                 .with_context(|| format!("failed to write {}", file.display()))?;
