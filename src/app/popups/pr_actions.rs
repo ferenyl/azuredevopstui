@@ -1,7 +1,9 @@
-use crate::api::PullRequest;
+use crate::api::{PolicyEvaluation, PullRequest};
 use crate::app::loads::Load;
 use crate::app::message::Message;
-use crate::app::{App, ConfirmAction, Detail, Popup, PrAction, Selection, TextInput, TextTarget};
+use crate::app::{
+    App, ConfirmAction, Detail, DetailInfo, Popup, PrAction, Selection, TextInput, TextTarget,
+};
 
 /// A change to a pull request, sent to Azure DevOps.
 pub(in crate::app) enum PrChange {
@@ -13,6 +15,7 @@ pub(in crate::app) enum PrChange {
     AddReviewer(String),
     RemoveReviewer(String),
     LinkWorkItem(u32),
+    Requeue(Vec<String>),
 }
 
 impl App {
@@ -20,7 +23,11 @@ impl App {
         let Some(Detail::PullRequest(pr)) = self.current_item() else {
             return;
         };
-        let actions = PrAction::of(&pr);
+        let policies = match &self.detail_info {
+            Some(DetailInfo::PullRequest(info)) => info.policies.as_slice(),
+            _ => &[],
+        };
+        let actions = PrAction::of(&pr, policies);
         let selection = Selection::new(actions.iter().map(|a| a.label().into()).collect());
         self.popup = Some(Popup::PrActions {
             pr,
@@ -90,7 +97,70 @@ impl App {
                     text: TextInput::default(),
                 });
             }
+            PrAction::RerunValidation => {
+                let evaluations = self.build_evaluations(|_| true);
+                if let [(id, name)] = evaluations.as_slice() {
+                    let (id, name) = (id.clone(), name.clone());
+                    self.confirm_requeue(pr, vec![id], &name);
+                } else {
+                    let selection =
+                        Selection::new(evaluations.iter().map(|(_, name)| name.clone()).collect());
+                    self.popup = Some(Popup::Validations {
+                        pr,
+                        evaluations,
+                        selection,
+                    });
+                }
+            }
+            PrAction::RerunFailedValidations => {
+                let ids: Vec<String> = self
+                    .build_evaluations(PolicyEvaluation::needs_rerun)
+                    .into_iter()
+                    .map(|(id, _)| id)
+                    .collect();
+                let what = format!("{} failed/expired validations", ids.len());
+                self.confirm_requeue(pr, ids, &what);
+            }
         }
+    }
+
+    /// (evaluation id, label) of the shown PR's build validations that satisfy `keep`.
+    fn build_evaluations(&self, keep: impl Fn(&PolicyEvaluation) -> bool) -> Vec<(String, String)> {
+        let Some(DetailInfo::PullRequest(info)) = &self.detail_info else {
+            return Vec::new();
+        };
+        info.policies
+            .iter()
+            .filter(|policy| policy.is_build() && keep(policy))
+            .map(|policy| {
+                (
+                    policy.evaluation_id.clone(),
+                    format!("{} ({})", policy.name(), policy.status),
+                )
+            })
+            .collect()
+    }
+
+    pub(in crate::app) fn confirm_validation(
+        &mut self,
+        pr: Box<PullRequest>,
+        evaluations: &[(String, String)],
+        index: usize,
+    ) {
+        if let Some((id, name)) = evaluations.get(index) {
+            self.confirm_requeue(pr, vec![id.clone()], name);
+        }
+    }
+
+    fn confirm_requeue(&mut self, pr: Box<PullRequest>, evaluation_ids: Vec<String>, what: &str) {
+        if evaluation_ids.is_empty() {
+            return;
+        }
+        let prompt = format!("Re-run {what} of !{}?", pr.pull_request_id);
+        self.popup = Some(Popup::Confirm {
+            prompt,
+            action: ConfirmAction::Requeue { pr, evaluation_ids },
+        });
     }
 
     pub(in crate::app) fn confirm_remove_reviewer(&mut self, pr: Box<PullRequest>, index: usize) {
@@ -164,6 +234,7 @@ impl App {
             PrChange::AddReviewer(_) => format!("adding a reviewer to !{number}"),
             PrChange::RemoveReviewer(_) => format!("removing a reviewer from !{number}"),
             PrChange::LinkWorkItem(id) => format!("linking #{id} to !{number}"),
+            PrChange::Requeue(_) => format!("re-running the validations of !{number}"),
         };
         self.spawn_action(label, async move {
             let result = match change {
@@ -175,6 +246,7 @@ impl App {
                 PrChange::AddReviewer(name) => api.add_reviewer(&pr, &name).await,
                 PrChange::RemoveReviewer(id) => api.remove_reviewer(&pr, &id).await,
                 PrChange::LinkWorkItem(id) => api.link_work_item(&pr, id).await,
+                PrChange::Requeue(ids) => api.requeue_policy_evaluations(&pr, &ids).await,
             };
             Message::PullRequestUpdated {
                 id: pr.pull_request_id,
@@ -205,7 +277,7 @@ mod tests {
         let mut pr = pull_request(1, "PR", "me", "2026-10-01T10:00:00Z");
         pr.status = "active".into();
         assert_eq!(
-            PrAction::of(&pr),
+            PrAction::of(&pr, &[]),
             [
                 PrAction::EditTitle,
                 PrAction::EditDescription,
@@ -219,11 +291,11 @@ mod tests {
 
         pr.is_draft = true;
         pr.reviewers.clear();
-        assert_eq!(PrAction::of(&pr)[0], PrAction::Publish);
-        assert!(!PrAction::of(&pr).contains(&PrAction::RemoveReviewer));
+        assert_eq!(PrAction::of(&pr, &[])[0], PrAction::Publish);
+        assert!(!PrAction::of(&pr, &[]).contains(&PrAction::RemoveReviewer));
 
         pr.status = "abandoned".into();
-        let actions = PrAction::of(&pr);
+        let actions = PrAction::of(&pr, &[]);
         assert_eq!(actions[0], PrAction::Reactivate);
         assert!(!actions.contains(&PrAction::Abandon));
         assert!(!actions.contains(&PrAction::Publish));

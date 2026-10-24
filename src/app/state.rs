@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use super::setup::Selection;
 use super::text_input::TextInput;
 use crate::api::{
-    Build, ColumnTarget, CompletionOptions, Iteration, Mention, Person, PullRequest,
-    PullRequestChecks, PullRequestDetails, TimelineRow, WorkItem, WorkItemDetails,
+    Build, ColumnTarget, CompletionOptions, Iteration, Mention, Person, PolicyEvaluation,
+    PullRequest, PullRequestChecks, PullRequestDetails, TimelineRow, WorkItem, WorkItemDetails,
     compare_timestamps, is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
@@ -163,6 +163,12 @@ pub enum Popup {
         pr: Box<PullRequest>,
         selection: Selection,
     },
+    /// The build validations of `pr` as (evaluation id, label), in order.
+    Validations {
+        pr: Box<PullRequest>,
+        evaluations: Vec<(String, String)>,
+        selection: Selection,
+    },
     /// The recent errors, newest first, starting at the error with index `first`.
     Errors {
         first: usize,
@@ -280,6 +286,35 @@ impl AssigneePicker {
         picker
     }
 
+    /// Adds people not yet listed, keeping Unassigned first and the highlighted person.
+    pub fn add_people(&mut self, people: Vec<Person>) {
+        let selected = self.person().map(|person| person.unique_name.clone());
+        let mut seen: HashSet<String> = self
+            .people
+            .iter()
+            .map(|person| person.unique_name.to_lowercase())
+            .collect();
+        let before = self.people.len();
+        self.people.extend(
+            people
+                .into_iter()
+                .filter(|person| !person.unique_name.starts_with("vstfs:"))
+                .filter(|person| seen.insert(person.unique_name.to_lowercase())),
+        );
+        if self.people.len() == before {
+            return;
+        }
+        self.people[1..].sort_by_key(|person| person.display_name.to_lowercase());
+        self.filter();
+        if let Some(index) = self
+            .matches
+            .iter()
+            .position(|index| Some(&self.people[*index].unique_name) == selected.as_ref())
+        {
+            self.selection.selected = index;
+        }
+    }
+
     pub fn filter(&mut self) {
         let query = self.query.as_str().trim().to_lowercase();
         self.matches = (0..self.people.len())
@@ -356,6 +391,8 @@ pub enum PrAction {
     AddReviewer,
     RemoveReviewer,
     LinkWorkItem,
+    RerunValidation,
+    RerunFailedValidations,
 }
 
 impl PrAction {
@@ -370,11 +407,13 @@ impl PrAction {
             Self::AddReviewer => "Add reviewer",
             Self::RemoveReviewer => "Remove reviewer",
             Self::LinkWorkItem => "Link work item",
+            Self::RerunValidation => "Re-run build validation…",
+            Self::RerunFailedValidations => "Re-run all failed/expired validations",
         }
     }
 
     /// The entries that make sense for `pr` as it is now.
-    pub fn of(pr: &PullRequest) -> Vec<Self> {
+    pub fn of(pr: &PullRequest, policies: &[PolicyEvaluation]) -> Vec<Self> {
         let active = pr.status == "active";
         let mut actions = Vec::new();
         if pr.status == "abandoned" {
@@ -387,6 +426,15 @@ impl PrAction {
             actions.push(Self::RemoveReviewer);
         }
         actions.push(Self::LinkWorkItem);
+        if active && policies.iter().any(PolicyEvaluation::is_build) {
+            actions.push(Self::RerunValidation);
+            if policies
+                .iter()
+                .any(|policy| policy.is_build() && policy.needs_rerun())
+            {
+                actions.push(Self::RerunFailedValidations);
+            }
+        }
         if active {
             if !pr.is_draft {
                 actions.push(Self::MarkAsDraft);
@@ -537,6 +585,11 @@ pub enum ConfirmAction {
     Abandon(Box<PullRequest>),
     Publish(Box<PullRequest>),
     MarkAsDraft(Box<PullRequest>),
+    /// Queues the build validations with these evaluation ids again.
+    Requeue {
+        pr: Box<PullRequest>,
+        evaluation_ids: Vec<String>,
+    },
     /// Queues a run of the same pipeline on the same branch and commit.
     Rerun(Box<Build>),
     /// Queues a run of the pipeline on `branch` (a full ref).

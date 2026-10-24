@@ -127,6 +127,11 @@ pub enum Message {
         query: String,
         result: Result<Vec<Person>>,
     },
+    /// The team's members, to add to the open assignee picker for `item`.
+    TeamMembers {
+        item: u32,
+        result: Result<Vec<Person>>,
+    },
     /// The types of the project, loaded once connected.
     ProjectWorkItemTypes(Result<Vec<String>>),
     /// The types of a child of `parent`.

@@ -546,6 +546,32 @@ impl ProjectApi {
         Ok(response.value)
     }
 
+    /// Queues the build validations `evaluation_ids` of `pr` again.
+    pub async fn requeue_policy_evaluations(
+        &self,
+        pr: &PullRequest,
+        evaluation_ids: &[String],
+    ) -> Result<()> {
+        for id in evaluation_ids {
+            let _: Value = self
+                .client
+                .patch_versioned(
+                    &self.client.urls.dev_azure,
+                    &[
+                        &self.organization,
+                        &pr.repository.project.id,
+                        "_apis",
+                        "policy",
+                        "evaluations",
+                        id,
+                    ],
+                    POLICY_API_VERSION,
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn active_pull_requests(&self, criteria: &[(&str, &str)]) -> Result<Vec<PullRequest>> {
         let mut query = vec![("searchCriteria.status", "active"), ("$top", "500")];
         query.extend_from_slice(criteria);

@@ -11,9 +11,9 @@ pub use builds::{TimelineRow, timeline_rows};
 pub use models::DetailComment;
 pub use models::{
     Board, Build, ChangeKind, ChangedFile, CommentsPage, CurrentUser, FileContent, IdentityRef,
-    Iteration, Link, LinkTarget, Mention, Partial, Person, PullRequest, PullRequestChanges,
-    PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems, THREAD_STATUSES, Thread,
-    TimelineRecord, WorkItem, WorkItemDetails, thread_status_label,
+    Iteration, Link, LinkTarget, Mention, Partial, Person, PolicyEvaluation, PullRequest,
+    PullRequestChanges, PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems,
+    THREAD_STATUSES, Thread, TimelineRecord, WorkItem, WorkItemDetails, thread_status_label,
 };
 pub use pull_requests::{CompletionOptions, is_approved, is_reviewer_policy};
 
@@ -238,6 +238,17 @@ impl AdoClient {
         self.request(Method::PATCH, url, Some(body), false).await
     }
 
+    /// PATCH without a body, for the preview APIs.
+    async fn patch_versioned<T: DeserializeOwned>(
+        &self,
+        base: &str,
+        segments: &[&str],
+        api_version: &str,
+    ) -> Result<T> {
+        let url = build_url(base, segments, &[], api_version)?;
+        self.request(Method::PATCH, url, None, false).await
+    }
+
     async fn put<T: DeserializeOwned>(
         &self,
         base: &str,
@@ -373,6 +384,8 @@ pub struct ProjectApi {
     closed_states: Arc<OnceCell<Vec<models::WorkItemState>>>,
     /// The team's default area path, fetched once per session.
     default_area: Arc<OnceCell<String>>,
+    /// The team's members, fetched once per session.
+    team_members: Arc<OnceCell<Vec<Person>>>,
     /// Identity ids of the names in the PR filter, resolved once per session.
     identities: Arc<Mutex<HashMap<String, String>>>,
     /// Review signals of others' PRs by id, reused while a PR is unchanged.
@@ -406,6 +419,7 @@ impl ProjectApi {
             team: team.into(),
             closed_states: Arc::default(),
             default_area: Arc::default(),
+            team_members: Arc::default(),
             identities: Arc::default(),
             reviews: Arc::default(),
             answered_mentions: Arc::default(),

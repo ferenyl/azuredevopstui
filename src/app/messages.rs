@@ -208,6 +208,16 @@ impl App {
                 Ok(people) => self.popup = Some(Popup::Assignee(AssigneePicker::new(item, people))),
                 Err(err) => self.report_error(err),
             },
+            Message::TeamMembers { item, result } => match result {
+                Ok(people) => {
+                    if let Some(Popup::Assignee(picker)) = &mut self.popup
+                        && picker.item.id == item
+                    {
+                        picker.add_people(people);
+                    }
+                }
+                Err(err) => tracing::warn!("failed to load team members: {err:#}"),
+            },
             Message::ProjectWorkItemTypes(result) => match result {
                 Ok(types) => {
                     self.work_item_types = types;
