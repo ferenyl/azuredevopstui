@@ -127,8 +127,13 @@ pub enum Message {
         query: String,
         result: Result<Vec<Person>>,
     },
-    /// The types a new work item can have.
-    NewWorkItemTypes(Result<Vec<String>>),
+    /// The types of the project, loaded once connected.
+    ProjectWorkItemTypes(Result<Vec<String>>),
+    /// The types of a child of `parent`.
+    ChildWorkItemTypes {
+        parent: Box<WorkItem>,
+        types: Vec<String>,
+    },
     /// A work item was created, as a child of `parent` when given.
     WorkItemCreated {
         parent: Option<u32>,

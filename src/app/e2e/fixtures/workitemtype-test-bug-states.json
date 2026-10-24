@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/wit/workitemtypes/Test%20Bug/states",
+  "body": {
+    "value": [
+      { "name": "New", "category": "Proposed" },
+      { "name": "Closed", "category": "Completed" },
+      { "name": "Removed", "category": "Removed" }
+    ]
+  }
+}
