@@ -66,9 +66,9 @@ async fn o_opens_the_selected_link_and_y_copies_it() {
     harness.press(KeyCode::Char('Y'));
     harness
         .wait_for(|app| {
-            app.notice
-                .as_ref()
-                .is_some_and(|(text, _)| text == &format!("copied {DOCS}"))
+            app.notice.as_ref().is_some_and(|(text, _)| {
+                text == &format!("sent {DOCS} to the terminal clipboard (OSC 52)")
+            })
         })
         .await;
 

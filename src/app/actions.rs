@@ -119,10 +119,23 @@ impl App {
     }
 
     pub(super) fn copy(&mut self, text: String) {
-        let copy = CopyToClipboard::to_clipboard_from(text.as_str());
-        match crossterm::execute!(std::io::stdout(), copy) {
-            Ok(()) => self.notice = Some((format!("copied {text}"), Instant::now())),
-            Err(err) => self.set_error(format!("failed to copy: {err}")),
+        let configured = self
+            .config
+            .as_ref()
+            .and_then(|c| c.clipboard_command.clone());
+        let native = native_copy(configured.as_deref(), &text);
+        let osc = crossterm::execute!(
+            std::io::stdout(),
+            CopyToClipboard::to_clipboard_from(text.as_str())
+        );
+        match (native, osc) {
+            (Some(Ok(())), _) => self.notice = Some((format!("copied {text}"), Instant::now())),
+            (Some(Err(err)), _) => self.set_error(format!("failed to copy: {err}")),
+            (None, Ok(())) => {
+                let notice = format!("sent {text} to the terminal clipboard (OSC 52)");
+                self.notice = Some((notice, Instant::now()));
+            }
+            (None, Err(err)) => self.set_error(format!("failed to copy: {err}")),
         }
     }
 
@@ -237,8 +250,79 @@ impl App {
     }
 }
 
+/// The command to pipe text to: the configured one, else the first native tool found.
+fn clipboard_command(configured: Option<&str>) -> Option<Vec<String>> {
+    if let Some(command) = configured.map(split_command).filter(|c| !c.is_empty()) {
+        return Some(command);
+    }
+    let set = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
+    let command: &[&str] = if cfg!(target_os = "macos") {
+        &["pbcopy"]
+    } else if cfg!(windows) || std::env::var_os("WSL_DISTRO_NAME").is_some() {
+        &["clip.exe"]
+    } else if set("WAYLAND_DISPLAY") {
+        &["wl-copy"]
+    } else if set("DISPLAY") {
+        if on_path("xclip") {
+            &["xclip", "-selection", "clipboard"]
+        } else {
+            &["xsel", "-bi"]
+        }
+    } else {
+        return None;
+    };
+    Some(command.iter().map(|part| part.to_string()).collect())
+}
+
+fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
+}
+
+/// Pipes `text` to the clipboard command; `None` when there is no command to run.
+#[cfg(not(test))]
+fn native_copy(configured: Option<&str>, text: &str) -> Option<anyhow::Result<()>> {
+    let command = clipboard_command(configured)?;
+    let explicit = configured.is_some_and(|c| !c.trim().is_empty());
+    let result = run_clipboard_command(&command, text);
+    match result {
+        Err(_) if !explicit => None,
+        result => Some(result),
+    }
+}
+
+#[cfg(test)]
+fn native_copy(_configured: Option<&str>, _text: &str) -> Option<anyhow::Result<()>> {
+    None
+}
+
+#[cfg(not(test))]
+fn run_clipboard_command(command: &[String], text: &str) -> anyhow::Result<()> {
+    use std::io::Write;
+
+    let mut child = Command::new(&command[0])
+        .args(&command[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(text.as_bytes())?;
+    }
+    let status = child.wait()?;
+    anyhow::ensure!(status.success(), "{} exited with {status}", command[0]);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_configured_clipboard_command_is_split_like_a_shell() {
+        let command = super::clipboard_command(Some("'my copy' -x"));
+
+        assert_eq!(command, Some(vec!["my copy".to_string(), "-x".to_string()]));
+    }
+
     use crossterm::event::KeyCode;
 
     use crate::app::Popup;

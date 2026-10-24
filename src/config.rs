@@ -89,6 +89,9 @@ pub struct Config {
     /// Editor opened by `ctrl+e` in text popups; falls back to `$VISUAL`, then `$EDITOR`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editor: Option<String>,
+    /// Command that receives the text on stdin when copying; auto-detected when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipboard_command: Option<String>,
     #[serde(default)]
     pub layout: LayoutConfig,
     /// Capture the mouse for clicks and the wheel; off leaves it to the terminal.
@@ -328,6 +331,7 @@ impl Config {
             colors: ColorOverrides::default(),
             recent_tags: Vec::new(),
             editor: None,
+            clipboard_command: None,
             layout: LayoutConfig::default(),
             mouse: true,
             keys: BTreeMap::new(),
@@ -587,6 +591,7 @@ mod tests {
         assert_eq!(config.auth.method, AuthMethod::Auto);
         assert!(config.auth.azure_config_dir.is_none());
         assert!(config.browser_command.is_none());
+        assert!(config.clipboard_command.is_none());
         assert!(config.other_prs_filter.reviewers.is_empty());
         assert!(config.other_prs_filter.creators.is_empty());
         assert!(config.ready_column.is_none());
