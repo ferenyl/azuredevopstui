@@ -53,7 +53,10 @@ pub async fn run() -> Vec<Check> {
             return checks;
         }
     };
-    checks.push(Check::ok(format!("config {}", path.display())));
+    checks.push(Check::ok(format!(
+        "config {} (colors.json and organizations/ next to it)",
+        path.display()
+    )));
     let auth = match Auth::resolve(config.auth.clone()).await {
         Ok(Some(auth)) => auth,
         Ok(None) => {
