@@ -26,9 +26,8 @@ impl App {
         let Some(config) = &mut self.config else {
             return;
         };
-        let config = Arc::make_mut(config);
-        config.work_item_types = checked_types(selection.items, &checked);
-        if let Err(err) = config.save() {
+        let types = checked_types(selection.items, &checked);
+        if let Err(err) = Arc::make_mut(config).update(|config| config.work_item_types = types) {
             self.report_error(err);
             return;
         }

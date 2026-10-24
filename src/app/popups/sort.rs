@@ -31,8 +31,7 @@ impl App {
         let Some(config) = &mut self.config else {
             return;
         };
-        let config = Arc::make_mut(config);
-        match kind {
+        let result = Arc::make_mut(config).update(|config| match kind {
             SortKind::PullRequests => {
                 if let Some(sort) = PrSort::ALL.get(index) {
                     config.sort.pull_requests = *sort;
@@ -43,9 +42,8 @@ impl App {
                     config.sort.work_items = *sort;
                 }
             }
-        }
+        });
         self.data.sort(&config.sort);
-        let result = config.save();
         self.clamp_selections();
         if let Err(err) = result {
             self.report_error(err);

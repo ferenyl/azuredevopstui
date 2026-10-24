@@ -18,13 +18,14 @@ impl App {
         let Some(config) = &mut self.config else {
             return;
         };
-        let config = Arc::make_mut(config);
-        let filter = &mut config.other_prs_filter;
-        filter.show_approved = checked[0];
-        filter.show_drafts = checked[1];
+        let result = Arc::make_mut(config).update(|config| {
+            let filter = &mut config.other_prs_filter;
+            filter.show_approved = checked[0];
+            filter.show_drafts = checked[1];
+        });
+        let filter = &config.other_prs_filter;
         self.data.show_approved = filter.show_approved;
         self.data.show_drafts = filter.show_drafts;
-        let result = config.save();
         self.clamp_selections();
         if let Err(err) = result {
             self.report_error(err);

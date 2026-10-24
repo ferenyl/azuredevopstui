@@ -453,6 +453,25 @@ impl Config {
         self.save_to(&Self::path()?)
     }
 
+    /// Applies `change` to the config on disk and saves it, so hand edits made while the app runs
+    /// are kept. Falls back to `self` when the file is missing, unreadable or names another
+    /// organization.
+    pub fn update(&mut self, change: impl FnOnce(&mut Config)) -> Result<()> {
+        let path = Self::path()?;
+        match Self::load_from(&path) {
+            Ok(Some(mut disk)) if disk.organization == self.organization => {
+                change(&mut disk);
+                disk.save_to(&path)?;
+                *self = disk;
+            }
+            _ => {
+                change(self);
+                self.save_to(&path)?;
+            }
+        }
+        Ok(())
+    }
+
     fn save_to(&self, path: &Path) -> Result<()> {
         let Value::Object(mut general) = serde_json::to_value(self)? else {
             unreachable!("Config serializes to an object");

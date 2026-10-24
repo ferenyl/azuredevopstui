@@ -48,15 +48,15 @@ impl App {
         let (Some(api), Some(config)) = (self.api(), &mut self.config) else {
             return;
         };
-        let config = Arc::make_mut(config);
         let id = picker.work_item_id;
         if !added.is_empty() {
-            for tag in added.into_iter().rev() {
-                config.recent_tags.retain(|r| !r.eq_ignore_ascii_case(tag));
-                config.recent_tags.insert(0, tag.clone());
-            }
-            config.recent_tags.truncate(MAX_RECENT_TAGS);
-            let result = config.save();
+            let result = Arc::make_mut(config).update(|config| {
+                for tag in added.into_iter().rev() {
+                    config.recent_tags.retain(|r| !r.eq_ignore_ascii_case(tag));
+                    config.recent_tags.insert(0, tag.clone());
+                }
+                config.recent_tags.truncate(MAX_RECENT_TAGS);
+            });
             if let Err(err) = result {
                 self.report_error(err);
             }
