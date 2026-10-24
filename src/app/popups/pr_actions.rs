@@ -47,8 +47,20 @@ impl App {
                 });
             }
             PrAction::Reactivate => self.send_pr_update(pr, PrChange::Reactivate),
-            PrAction::Publish => self.send_pr_update(pr, PrChange::Draft(false)),
-            PrAction::MarkAsDraft => self.send_pr_update(pr, PrChange::Draft(true)),
+            PrAction::Publish => {
+                let prompt = format!("Publish !{} {}?", pr.pull_request_id, pr.title);
+                self.popup = Some(Popup::Confirm {
+                    prompt,
+                    action: ConfirmAction::Publish(pr),
+                });
+            }
+            PrAction::MarkAsDraft => {
+                let prompt = format!("Mark !{} {} as draft?", pr.pull_request_id, pr.title);
+                self.popup = Some(Popup::Confirm {
+                    prompt,
+                    action: ConfirmAction::MarkAsDraft(pr),
+                });
+            }
             PrAction::EditTitle => {
                 let text = TextInput::new(pr.title.clone());
                 self.popup = Some(Popup::Text {
@@ -195,19 +207,19 @@ mod tests {
         assert_eq!(
             PrAction::of(&pr),
             [
-                PrAction::Abandon,
-                PrAction::MarkAsDraft,
                 PrAction::EditTitle,
                 PrAction::EditDescription,
                 PrAction::AddReviewer,
                 PrAction::RemoveReviewer,
                 PrAction::LinkWorkItem,
+                PrAction::MarkAsDraft,
+                PrAction::Abandon,
             ]
         );
 
         pr.is_draft = true;
         pr.reviewers.clear();
-        assert_eq!(PrAction::of(&pr)[1], PrAction::Publish);
+        assert_eq!(PrAction::of(&pr)[0], PrAction::Publish);
         assert!(!PrAction::of(&pr).contains(&PrAction::RemoveReviewer));
 
         pr.status = "abandoned".into();
@@ -224,13 +236,16 @@ mod tests {
 
         press(&mut app, KeyCode::Char('e'));
 
-        assert_eq!(labels(&app)[0], "Abandon");
+        assert_eq!(labels(&app).last().unwrap(), "Abandon");
     }
 
     #[test]
     fn abandoning_asks_for_confirmation_first() {
         let mut app = app();
         press(&mut app, KeyCode::Char('e'));
+        for _ in 0..6 {
+            press(&mut app, KeyCode::Char('j'));
+        }
 
         press(&mut app, KeyCode::Enter);
 
@@ -247,6 +262,9 @@ mod tests {
     fn declining_the_confirmation_closes_it() {
         let mut app = app();
         press(&mut app, KeyCode::Char('e'));
+        for _ in 0..6 {
+            press(&mut app, KeyCode::Char('j'));
+        }
         press(&mut app, KeyCode::Enter);
 
         press(&mut app, KeyCode::Char('n'));
@@ -259,8 +277,6 @@ mod tests {
     fn edit_title_prefills_the_title() {
         let mut app = app();
         press(&mut app, KeyCode::Char('e'));
-        press(&mut app, KeyCode::Char('j'));
-        press(&mut app, KeyCode::Char('j'));
 
         press(&mut app, KeyCode::Enter);
 
@@ -274,7 +290,7 @@ mod tests {
     fn remove_reviewer_lists_the_reviewers() {
         let mut app = app();
         press(&mut app, KeyCode::Char('e'));
-        for _ in 0..5 {
+        for _ in 0..3 {
             press(&mut app, KeyCode::Char('j'));
         }
 
@@ -290,7 +306,7 @@ mod tests {
     fn a_work_item_id_must_be_a_number() {
         let mut app = app();
         press(&mut app, KeyCode::Char('e'));
-        for _ in 0..6 {
+        for _ in 0..4 {
             press(&mut app, KeyCode::Char('j'));
         }
         press(&mut app, KeyCode::Enter);
