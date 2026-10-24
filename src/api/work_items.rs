@@ -6,9 +6,9 @@ use serde_json::{Value, json};
 
 use super::models::{
     BacklogConfiguration, CommentList, CommentsPage, DetailComment, Iteration, Link, LinkTarget,
-    ListResponse, Mention, Partial, PullRequest, Relation, SprintWorkItems, TeamFieldValues,
-    WiqlResult, WorkItem, WorkItemComment, WorkItemDetails, WorkItemRef, WorkItemResponse,
-    WorkItemState, WorkItemTypeCategory, WorkItemTypeInfo,
+    ListResponse, Mention, Partial, Person, PullRequest, Relation, SprintWorkItems,
+    TeamFieldValues, TeamMember, WiqlResult, WorkItem, WorkItemComment, WorkItemDetails,
+    WorkItemRef, WorkItemResponse, WorkItemState, WorkItemTypeCategory, WorkItemTypeInfo,
 };
 use super::{API_VERSION, MAX_CONCURRENT_REQUESTS, ProjectApi, build_url, is_unauthorized};
 use crate::rich_text::RichText;
@@ -526,6 +526,45 @@ impl ProjectApi {
             )
             .await?;
         Ok(created.id)
+    }
+
+    /// The members of the team, cached per session.
+    pub async fn team_members(&self) -> Result<Vec<Person>> {
+        let members = self
+            .team_members
+            .get_or_try_init(|| async {
+                let members: ListResponse<TeamMember> = self
+                    .client
+                    .get(
+                        &self.client.urls.dev_azure,
+                        &[
+                            &self.organization,
+                            "_apis",
+                            "projects",
+                            &self.project,
+                            "teams",
+                            &self.team,
+                            "members",
+                        ],
+                        &[("$top", "500")],
+                    )
+                    .await?;
+                Ok::<_, anyhow::Error>(
+                    members
+                        .value
+                        .into_iter()
+                        .map(|member| Person {
+                            unique_name: member
+                                .identity
+                                .unique_name
+                                .unwrap_or_else(|| member.identity.display_name.clone()),
+                            display_name: member.identity.display_name,
+                        })
+                        .collect(),
+                )
+            })
+            .await?;
+        Ok(members.clone())
     }
 
     /// The team's default area path, cached per session.
