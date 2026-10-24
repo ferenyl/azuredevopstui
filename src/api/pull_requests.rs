@@ -715,6 +715,7 @@ impl ProjectApi {
                     ("versionDescriptor.version", commit),
                     ("versionDescriptor.versionType", "commit"),
                     ("includeContent", "true"),
+                    ("$format", "json"),
                 ],
             )
             .await?;
