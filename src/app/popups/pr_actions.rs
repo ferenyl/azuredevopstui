@@ -32,9 +32,10 @@ impl App {
             .iter()
             .position(|a| matches!(a, PrAction::MarkAsDraft | PrAction::Abandon))
             .unwrap_or(actions.len());
-        let forwarded = PrAction::FORWARDED
-            .into_iter()
-            .filter(|a| a.action().is_some_and(|action| self.can_in_main(action)));
+        let forwarded = PrAction::FORWARDED.into_iter().filter(|a| {
+            a.action()
+                .is_some_and(|action| self.allowed_in_main(action))
+        });
         actions.splice(at..at, forwarded);
         let selection = Selection::new(
             actions

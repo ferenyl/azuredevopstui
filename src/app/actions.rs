@@ -157,8 +157,6 @@ impl App {
         };
         if self.is_assigned_to_me(&item) {
             self.change_column(true);
-        } else {
-            self.set_error(format!("#{} is not assigned to you", item.id));
         }
     }
 
@@ -218,7 +216,6 @@ impl App {
             return;
         };
         if !self.can_complete(&pr) {
-            self.set_error(format!("!{} is not your pull request", pr.pull_request_id));
             return;
         }
         let Some(api) = self.api() else {
@@ -331,7 +328,7 @@ mod tests {
         press(&mut app, KeyCode::Char('u'));
 
         assert!(app.popup.is_none());
-        assert_eq!(app.error.as_deref(), Some("#10 is not assigned to you"));
+        assert!(app.error.is_none());
     }
 
     #[test]

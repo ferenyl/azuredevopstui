@@ -129,6 +129,13 @@ impl App {
         if self.apply_popup(action) {
             return;
         }
+        if matches!(self.screen, Screen::Main)
+            && self.popup.is_none()
+            && self.search.is_none()
+            && !self.allowed_in_main(action)
+        {
+            return;
+        }
         match action {
             Action::Quit => self.should_quit = true,
             Action::Cancel if self.clear_setup_query() => {}

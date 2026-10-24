@@ -37,6 +37,9 @@ const TOOLBAR: [Action; 33] = [
     Action::Quit,
 ];
 
+/// Actions `apply` runs in Main that the main toolbar leaves out.
+const HIDDEN_IN_MAIN_TOOLBAR: [Action; 3] = [Action::Up, Action::Cancel, Action::ChangeToken];
+
 impl App {
     pub fn actions(&self) -> Vec<Action> {
         TOOLBAR
@@ -66,7 +69,7 @@ impl App {
             }
             Screen::Main => match &self.popup {
                 Some(popup) => Self::can_in_popup(popup, action),
-                None => self.can_in_main(action),
+                None => self.allowed_in_main(action) && !HIDDEN_IN_MAIN_TOOLBAR.contains(&action),
             },
         }
     }
@@ -115,13 +118,29 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn can_in_main(&self, action: Action) -> bool {
+    /// Whether `apply` runs `action` in Main with no popup or search open.
+    pub(in crate::app) fn allowed_in_main(&self, action: Action) -> bool {
         let item = self.current_item();
         let is_build = matches!(item, Some(Detail::Build(_)));
         let work_item_assigned_to_me = |assigned: bool| matches!(&item, Some(Detail::WorkItem(w)) if self.is_assigned_to_me(w) == assigned);
         match action {
             Action::Down
+            | Action::Up
+            | Action::Top
+            | Action::Bottom
+            | Action::PageDown
+            | Action::PageUp
+            | Action::HalfPageDown
+            | Action::HalfPageUp
+            | Action::JumpToPanel(_)
+            | Action::FocusLeft
             | Action::FocusRight
+            | Action::FocusUp
+            | Action::FocusDown
+            | Action::Cancel
+            | Action::Errors
+            | Action::Sprint
+            | Action::ChangeToken
             | Action::Zoom
             | Action::Reload
             | Action::SwitchProject
@@ -129,8 +148,10 @@ impl App {
             | Action::Help
             | Action::NewWorkItem
             | Action::Quit => true,
-            Action::NextTab | Action::Copy => {
-                matches!(item, Some(Detail::PullRequest(_) | Detail::WorkItem(_)))
+            Action::Copy => matches!(item, Some(Detail::PullRequest(_) | Detail::WorkItem(_))),
+            Action::NextTab | Action::PrevTab => {
+                self.detail.is_some()
+                    || matches!(item, Some(Detail::PullRequest(_) | Detail::WorkItem(_)))
             }
             Action::Complete => {
                 matches!(&item, Some(Detail::PullRequest(pr)) if self.can_complete(pr))
@@ -149,7 +170,7 @@ impl App {
             Action::Tag => matches!(item, Some(Detail::WorkItem(_))),
             Action::AssignToMe => work_item_assigned_to_me(false),
             Action::Confirm | Action::OpenInBrowser | Action::CopyLink => item.is_some(),
-            Action::NextLink => !self.detail_links.borrow().is_empty(),
+            Action::NextLink | Action::PrevLink => !self.detail_links.borrow().is_empty(),
             Action::Sort => !is_build && self.focus != Panel::Builds,
             Action::Filter => item.is_some() || self.focus == Panel::Builds,
             Action::Search => self.focus.index().is_some(),
@@ -352,6 +373,79 @@ mod tests {
         }
     }
 
+    /// What a denied action could have changed.
+    fn state(app: &App) -> String {
+        format!(
+            "{:?} {:?} {:?} {:?} {} {} {} {} {:?} {:?}",
+            app.focus,
+            app.selections,
+            app.link_index,
+            app.popup.is_some(),
+            app.zoomed,
+            app.board_view,
+            app.show_help,
+            app.should_quit,
+            app.error,
+            app.activity.latest(),
+        )
+    }
+
+    #[test]
+    fn apply_ignores_what_the_main_gate_denies() {
+        let every = super::TOOLBAR.into_iter().chain([
+            Action::FocusLeft,
+            Action::FocusUp,
+            Action::FocusDown,
+            Action::Sprint,
+            Action::PrevTab,
+            Action::PrevLink,
+            Action::Top,
+            Action::Bottom,
+            Action::PageDown,
+            Action::PageUp,
+            Action::HalfPageDown,
+            Action::HalfPageUp,
+            Action::JumpToPanel(1),
+            Action::Errors,
+        ]);
+        for action in every {
+            for (name, mut app) in fixtures() {
+                let in_main =
+                    matches!(app.screen, Screen::Main) && app.popup.is_none() && !app.show_help;
+                if !in_main || app.allowed_in_main(action) {
+                    continue;
+                }
+                let before = state(&app);
+                app.apply(action);
+                assert!(app.popup.is_none(), "{name}: {action:?} opened a popup");
+                assert_eq!(state(&app), before, "{name}: {action:?} changed the state");
+            }
+        }
+    }
+
+    #[test]
+    fn unassign_on_an_unassigned_item_does_nothing() {
+        let mut app = app();
+        app.focus = Panel::MyWorkItems;
+
+        press(&mut app, KeyCode::Char('u'));
+
+        assert!(app.popup.is_none());
+        assert_eq!(app.error, None);
+    }
+
+    #[test]
+    fn copy_on_a_build_does_nothing() {
+        let mut app = app();
+        app.focus = Panel::Detail;
+        app.detail = Some(build());
+
+        press(&mut app, KeyCode::Char('y'));
+
+        assert_eq!(app.error, None);
+        assert_eq!(app.activity.latest(), None);
+    }
+
     #[test]
     fn toolbar_is_the_allowed_subset_in_display_order() {
         for (name, app) in fixtures() {
@@ -543,6 +637,7 @@ mod tests {
                 vec![
                     Down,
                     FocusRight,
+                    NextTab,
                     Confirm,
                     OpenInBrowser,
                     CopyLink,
