@@ -431,7 +431,7 @@ impl App {
             tokio::spawn(Auth::forget_pat());
             self.set_step(SetupStep::EnterPat {
                 input: TextInput::default(),
-                error: Some("The saved token was rejected. Enter a new one.".into()),
+                error: Some("The saved token was rejected. Check its scopes (README: PAT scopes) and enter a new one.".into()),
                 cancelable: false,
             });
         }
