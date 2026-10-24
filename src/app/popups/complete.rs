@@ -104,11 +104,11 @@ impl App {
         auto_complete: bool,
     ) {
         let saved = self.config.as_mut().map(|config| {
-            let config = Arc::make_mut(config);
-            config.merge_strategy = Some(options.merge_strategy);
-            config.completion.delete_source_branch = options.delete_source_branch;
-            config.completion.transition_work_items = options.transition_work_items;
-            config.save()
+            Arc::make_mut(config).update(|config| {
+                config.merge_strategy = Some(options.merge_strategy);
+                config.completion.delete_source_branch = options.delete_source_branch;
+                config.completion.transition_work_items = options.transition_work_items;
+            })
         });
         if let Some(Err(err)) = saved {
             self.report_error(err);

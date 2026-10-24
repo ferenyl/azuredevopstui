@@ -21,9 +21,52 @@ fn editor_command(configured: Option<&str>, visual: Option<&str>, editor: Option
         )
 }
 
-/// Lets `command` (split on spaces) edit `text` in a temporary file and returns the result.
+/// Splits `command` into arguments, honouring `"…"`, `'…'` and backslash escapes.
+/// Inside double quotes a backslash only escapes `"` and `\`, so Windows paths survive.
+pub(super) fn split_command(command: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut started = false;
+    let mut quote: Option<char> = None;
+    let mut chars = command.chars().peekable();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some('"'), '\\') if matches!(chars.peek(), Some('"' | '\\')) => {
+                current.extend(chars.next());
+            }
+            (Some(_), c) => current.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(c);
+                started = true;
+            }
+            (None, '\\') => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                    started = true;
+                }
+            }
+            (None, c) if c.is_whitespace() => {
+                if started {
+                    args.push(std::mem::take(&mut current));
+                    started = false;
+                }
+            }
+            (None, c) => {
+                current.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        args.push(current);
+    }
+    args
+}
+
+/// Lets `command` (see [`split_command`]) edit `text` in a temporary file and returns the result.
 pub(super) fn edit_externally(command: &str, text: &str) -> Result<String> {
-    let mut parts = command.split_whitespace();
+    let mut parts = split_command(command).into_iter();
     let program = parts.next().context("no editor configured")?;
     let name = format!(
         "azuredevopstui-{}-{}.md",
@@ -32,7 +75,7 @@ pub(super) fn edit_externally(command: &str, text: &str) -> Result<String> {
     );
     let path = std::env::temp_dir().join(name);
     fs::write(&path, text).with_context(|| format!("failed to write {}", path.display()))?;
-    let result = Command::new(program)
+    let result = Command::new(&program)
         .args(parts)
         .arg(&path)
         .status()
@@ -70,6 +113,23 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use super::split_command;
+
+    #[test]
+    fn split_command_handles_quotes_and_escapes() {
+        assert_eq!(split_command("  a  b "), ["a", "b"]);
+        assert_eq!(
+            split_command(r#""/opt/My Browser/bin" --new-tab {url}"#),
+            ["/opt/My Browser/bin", "--new-tab", "{url}"]
+        );
+        assert_eq!(split_command(r"a\ b 'c \d' \'"), ["a b", r"c \d", "'"]);
+        assert_eq!(
+            split_command(r#"x "" "a\"b" "C:\dir""#),
+            ["x", "", "a\"b", r"C:\dir"]
+        );
+        assert!(split_command("   ").is_empty());
+    }
+
     use super::*;
 
     #[test]

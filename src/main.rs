@@ -96,6 +96,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 .ok()
         });
     let mut modes = TerminalModes::enable(config.as_ref().is_none_or(|config| config.mouse));
+    modes.restore_on_panic();
     let mut app = app::App::new(config, picker);
     if let Some(organization) = organization {
         app.start_in(organization, cli.project);

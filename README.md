@@ -362,14 +362,36 @@ AZURE_CONFIG_DIR=~/.azure-devops az account show
 
 ### Personal Access Token
 
-Create a PAT in Azure DevOps (*User settings → Personal access tokens*) with these scopes:
+Create a PAT in Azure DevOps (*User settings → Personal access tokens*). Use *Custom defined* and tick the scopes below. Without a PAT scope the matching feature fails with an authorization error and the app asks for a new token. The token is stored in the OS keyring under the service `azuredevopstui`. If Azure DevOps rejects it, the app removes it and asks for a new one. Press `T` to replace it at any time.
 
-- **Code**: Read
-- **Work Items**: Read & Write
-- **Project and Team**: Read
-- **Identity**: Read, needed only if you use `other_prs_filter`
+#### PAT scopes
 
-The token is stored in the OS keyring under the service `azuredevopstui`. If Azure DevOps rejects it, the app removes it and asks for a new one. Press `T` to replace it at any time.
+| Feature | Endpoints (`_apis/…`) | Access | Scope |
+| --- | --- | --- | --- |
+| List, open and filter pull requests, statuses, linked work items, changes and file contents | `git/pullrequests`, `git/repositories/{repo}/pullRequests/{id}` (+ `statuses`, `workitems`, `iterations`, `threads`), `git/repositories/{repo}/items` | read | Code: Read (`vso.code`) |
+| Policy and check status of a pull request | `policy/evaluations` | read | Code: Read |
+| Vote, comment, reply, change a thread status, complete, auto-complete, abandon, reactivate, draft, title, description, reviewers | `git/repositories/{repo}/pullRequests/{id}` (PATCH), `…/reviewers`, `…/threads` | write | Code: Read & Write (`vso.code_write`) |
+| Requeue a policy (re-run the build validation of a pull request) | `policy/evaluations/{id}` (PATCH) | write | Code: Read & Write |
+| Link a work item to a pull request | `wit/workitems/{id}` (PATCH) | write | Work Items: Read & Write (`vso.work_write`) |
+| Branches of a build repository (live branches) | `git/repositories/{repo}/refs` | read | Code: Read |
+| Builds, timeline and logs | `build/builds`, `build/builds/{id}/timeline`, `build/builds/{id}/logs/{log}` | read | Build: Read (`vso.build`) |
+| Run again, queue and cancel a build | `build/builds` (POST), `build/builds/{id}` (PATCH) | write | Build: Read & Execute (`vso.build_execute`) |
+| Work items, queries, comments, attachments and images | `wit/workitems`, `wit/wiql`, `wit/workitemsbatch`, `wit/workItems/{id}/comments`, `wit/attachments` | read | Work Items: Read (`vso.work`) |
+| Work item types, categories, states and tags | `wit/workitemtypes`, `wit/workitemtypecategories`, `wit/workitemtypes/{type}/states`, `wit/tags` | read | Work Items: Read |
+| Sprints, backlogs, boards and the team's area | `work/teamsettings/iterations`, `work/teamsettings/teamfieldvalues`, `work/backlogs`, `work/backlogconfiguration`, `work/boards` | read | Work Items: Read |
+| Create, edit, assign, move, tag and comment on work items | `wit/workitems` (POST, PATCH), `wit/workItems/{id}/comments` (POST) | write | Work Items: Read & Write (`vso.work_write`) |
+| Projects, teams and team members | `projects`, `projects/{project}/teams`, `projects/{project}/teams/{team}/members` | read | Project and Team: Read (`vso.project`) |
+| Current user | `connectionData` | read | Project and Team: Read (any valid token works) |
+| Find people for reviewers, assignees and `other_prs_filter` | `vssps…/_apis/identities` | read | Identity: Read (`vso.identity`) |
+| List your organizations in the setup (optional, type the name instead) | `vssps…/_apis/profile/profiles/me`, `vssps…/_apis/accounts` | read | User Profile: Read (`vso.profile`) |
+
+Write scopes include the read scope of the same area.
+
+**Read-only set** (browse, nothing can be changed): Code: Read, Work Items: Read, Build: Read, Project and Team: Read, Identity: Read and, optionally, User Profile: Read.
+
+**Full set** (every feature): Code: Read & Write, Work Items: Read & Write, Build: Read & Execute, Project and Team: Read, Identity: Read and User Profile: Read.
+
+When a PR adds or changes an Azure DevOps API call, update this section in the same PR.
 
 ## Configuration
 
@@ -418,8 +440,8 @@ An older single `config.json` that holds everything still loads. The next save s
 | `project` | set by setup | Project name. |
 | `team` | set by setup | Team. Used for the current sprint and the board. |
 | `refresh_interval_secs` | `120` | Auto refresh interval in seconds. Set it to `0` to turn auto refresh off. Auto refresh pauses while a popup is open. |
-| `browser_command` | `null` | Command used to open URLs, with the URL appended as the last argument, for example `"wslview"` or `"firefox --new-tab"`. The command is split on spaces, so it must be on `PATH` (use `"chrome"`, not `"C:\\Program Files\\…"`). When `null`, the system default is used. |
-| `editor` | `null` | Command that `ctrl+e` opens in a text popup, with a temporary file as the last argument, for example `"nvim"` or `"code --wait"`. Split on spaces. When `null`, `$VISUAL`, then `$EDITOR`, then `vi` (`notepad` on Windows). |
+| `browser_command` | `null` | Command used to open URLs, for example `"wslview"` or `"firefox --new-tab"`. Split like a shell: `"…"`, `'…'` and `\` quote or escape spaces, for example `"\"C:/Program Files/Mozilla Firefox/firefox.exe\" --new-tab {url}"`. `{url}` in an argument is replaced by the URL; without it the URL is appended as the last argument. The program must be on `PATH` or given as a path. When `null`, the system default is used. |
+| `editor` | `null` | Command that `ctrl+e` opens in a text popup, with a temporary file as the last argument, for example `"nvim"` or `"code --wait"`. Split like `browser_command`, so quotes work. When `null`, `$VISUAL`, then `$EDITOR`, then `vi` (`notepad` on Windows). |
 | `auth.method` | `"auto"` | `auto`, `azcli` or `pat`. See [Authentication](#authentication). |
 | `auth.azure_config_dir` | not set | Azure CLI config directory for the DevOps login, for example `"~/.azure-devops"`. Use it when the DevOps account differs from your Azure portal account. When not set, the default `~/.azure` is used. See [Separate account for Azure DevOps](#separate-account-for-azure-devops-azure_config_dir). |
 | `other_prs_filter.reviewers` | `[]` | Show PRs where any of these users or groups is a reviewer. |
@@ -458,7 +480,7 @@ Press `f` with My pipelines focused, or with a pipeline run open, to type a filt
 
 ### Sorting
 
-Press `S` on a list to choose the order. PR lists and work item lists each have their own setting, which is shared by the two lists of that kind and saved to the config straight away.
+Press `S` on a list to choose the order. PR lists and work item lists each have their own setting, which is shared by the two lists of that kind and saved to the config straight away. Saves re-read `config.json` first, so keys you edited by hand while the app runs are kept.
 
 | `sort.pull_requests` | Order |
 |---|---|
