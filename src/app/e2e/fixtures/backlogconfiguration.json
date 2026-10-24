@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/Web/_apis/work/backlogconfiguration",
+  "body": {
+    "taskBacklog": {
+      "workItemTypes": [{ "name": "Task" }, { "name": "Test Bug" }]
+    }
+  }
+}

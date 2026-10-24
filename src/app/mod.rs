@@ -124,6 +124,10 @@ pub struct App {
     pub last_updated: Option<Instant>,
     last_refresh: Instant,
     board: Option<Board>,
+    /// The project's work item types, empty until loaded.
+    work_item_types: Vec<String>,
+    /// `n` was pressed before `work_item_types` arrived.
+    awaiting_work_item_types: bool,
     last_left: Panel,
     pub error: Option<String>,
     /// Short confirmation shown in the toolbar until it expires.
@@ -196,6 +200,8 @@ impl App {
             last_updated: None,
             last_refresh: Instant::now(),
             board: None,
+            work_item_types: Vec::new(),
+            awaiting_work_item_types: false,
             last_left: Panel::Inbox,
             error: None,
             notice: None,

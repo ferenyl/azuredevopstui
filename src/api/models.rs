@@ -567,6 +567,26 @@ pub struct WorkItemTypeCategory {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkItemTypeInfo {
+    pub name: String,
+    #[serde(default)]
+    pub is_disabled: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BacklogConfiguration {
+    pub task_backlog: TaskBacklog,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskBacklog {
+    pub work_item_types: Vec<Named>,
+}
+
+#[derive(Deserialize)]
 pub struct WorkItemState {
     pub name: String,
     pub category: String,

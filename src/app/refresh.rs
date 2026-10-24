@@ -170,6 +170,13 @@ impl App {
         self.spawn(async move { Message::TeamBoard(api.board().await) });
     }
 
+    pub(super) fn load_project_work_item_types(&self) {
+        let Some(api) = self.api() else {
+            return;
+        };
+        self.spawn(async move { Message::ProjectWorkItemTypes(api.work_item_types().await) });
+    }
+
     pub(super) fn load_work_item_types(&mut self) {
         let Some(api) = self.api() else {
             return;

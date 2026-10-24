@@ -5,14 +5,20 @@ use crate::app::{App, Popup, Selection, TextInput, TextTarget};
 impl App {
     /// Asks for the type first, then the title.
     pub(in crate::app) fn new_work_item(&mut self) {
-        let Some(api) = self.api() else {
+        if !self.work_item_types.is_empty() {
+            self.open_new_work_item_picker(None, self.work_item_types.clone());
             return;
-        };
-        self.spawn(async move { Message::NewWorkItemTypes(api.work_item_types().await) });
+        }
+        self.awaiting_work_item_types = true;
+        self.load_project_work_item_types();
     }
 
     /// The configured work item types first, then the others.
-    pub(in crate::app) fn open_new_work_item_picker(&mut self, mut types: Vec<String>) {
+    pub(in crate::app) fn open_new_work_item_picker(
+        &mut self,
+        parent: Option<Box<WorkItem>>,
+        mut types: Vec<String>,
+    ) {
         let configured = self
             .config
             .as_ref()
@@ -25,18 +31,23 @@ impl App {
                 .unwrap_or(usize::MAX)
         });
         self.popup = Some(Popup::NewWorkItem {
+            parent,
             selection: Selection::new(types),
         });
     }
 
-    pub(in crate::app) fn confirm_new_work_item_type(&mut self, selection: &Selection) {
+    pub(in crate::app) fn confirm_new_work_item_type(
+        &mut self,
+        parent: Option<Box<WorkItem>>,
+        selection: &Selection,
+    ) {
         let Some(kind) = selection.current() else {
             return;
         };
         self.popup = Some(Popup::Text {
             target: TextTarget::NewWorkItem {
                 kind: kind.into(),
-                parent: None,
+                parent,
             },
             text: TextInput::default(),
         });
@@ -67,7 +78,7 @@ impl App {
             None => (self.sprint.clone(), None, None),
         };
         let label = match parent {
-            Some(id) => format!("creating a task under #{id}"),
+            Some(id) => format!("creating a {kind} under #{id}"),
             None => format!("creating a {kind}"),
         };
         self.spawn_action(label, async move {
@@ -101,14 +112,15 @@ mod tests {
         config.work_item_types = vec!["User Story".into(), "Bug".into()];
         app.config = Some(config.into());
 
-        app.handle_message(Message::NewWorkItemTypes(Ok(vec![
+        app.handle_message(Message::ProjectWorkItemTypes(Ok(vec![
             "Bug".into(),
             "Epic".into(),
             "Task".into(),
             "User Story".into(),
         ])));
+        press(&mut app, KeyCode::Char('n'));
 
-        let Some(Popup::NewWorkItem { selection }) = &app.popup else {
+        let Some(Popup::NewWorkItem { selection, .. }) = &app.popup else {
             panic!("type picker not open");
         };
         assert_eq!(selection.items, ["User Story", "Bug", "Epic", "Task"]);
@@ -138,7 +150,8 @@ mod tests {
     #[test]
     fn esc_on_the_type_picker_closes_it() {
         let mut app = app();
-        app.handle_message(Message::NewWorkItemTypes(Ok(vec!["Bug".into()])));
+        app.handle_message(Message::ProjectWorkItemTypes(Ok(vec!["Bug".into()])));
+        press(&mut app, KeyCode::Char('n'));
 
         press(&mut app, KeyCode::Esc);
 
