@@ -13,6 +13,8 @@ impl App {
                 auto_complete,
             } => self.send_completion(pr, options, auto_complete),
             ConfirmAction::Abandon(pr) => self.send_pr_update(pr, PrChange::Abandon),
+            ConfirmAction::Publish(pr) => self.send_pr_update(pr, PrChange::Draft(false)),
+            ConfirmAction::MarkAsDraft(pr) => self.send_pr_update(pr, PrChange::Draft(true)),
             ConfirmAction::Rerun(build) => self.send_build_update(build, BuildChange::Rerun),
             ConfirmAction::Queue { build, branch } => {
                 self.send_build_update(build, BuildChange::Queue(branch))
