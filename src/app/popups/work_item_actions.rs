@@ -79,6 +79,13 @@ impl App {
             }
             WorkItemAction::AssignTo => {
                 let people = self.known_people();
+                if let Some(api) = self.api() {
+                    let id = item.id;
+                    self.spawn(async move {
+                        let result = api.team_members().await;
+                        Message::TeamMembers { item: id, result }
+                    });
+                }
                 self.popup = Some(Popup::Assignee(AssigneePicker::new(item, people)));
             }
             WorkItemAction::Priority => {

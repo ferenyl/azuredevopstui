@@ -280,6 +280,35 @@ impl AssigneePicker {
         picker
     }
 
+    /// Adds people not yet listed, keeping Unassigned first and the highlighted person.
+    pub fn add_people(&mut self, people: Vec<Person>) {
+        let selected = self.person().map(|person| person.unique_name.clone());
+        let mut seen: HashSet<String> = self
+            .people
+            .iter()
+            .map(|person| person.unique_name.to_lowercase())
+            .collect();
+        let before = self.people.len();
+        self.people.extend(
+            people
+                .into_iter()
+                .filter(|person| !person.unique_name.starts_with("vstfs:"))
+                .filter(|person| seen.insert(person.unique_name.to_lowercase())),
+        );
+        if self.people.len() == before {
+            return;
+        }
+        self.people[1..].sort_by_key(|person| person.display_name.to_lowercase());
+        self.filter();
+        if let Some(index) = self
+            .matches
+            .iter()
+            .position(|index| Some(&self.people[*index].unique_name) == selected.as_ref())
+        {
+            self.selection.selected = index;
+        }
+    }
+
     pub fn filter(&mut self) {
         let query = self.query.as_str().trim().to_lowercase();
         self.matches = (0..self.people.len())

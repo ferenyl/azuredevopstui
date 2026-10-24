@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/contoso/_apis/projects/Fabrikam/teams/Web/members",
+  "body": {
+    "value": [
+      {
+        "identity": {
+          "id": "ann-id",
+          "displayName": "Ann Berg",
+          "uniqueName": "ann@contoso.com"
+        }
+      }
+    ]
+  }
+}

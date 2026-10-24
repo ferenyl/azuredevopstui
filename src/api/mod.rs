@@ -373,6 +373,8 @@ pub struct ProjectApi {
     closed_states: Arc<OnceCell<Vec<models::WorkItemState>>>,
     /// The team's default area path, fetched once per session.
     default_area: Arc<OnceCell<String>>,
+    /// The team's members, fetched once per session.
+    team_members: Arc<OnceCell<Vec<Person>>>,
     /// Identity ids of the names in the PR filter, resolved once per session.
     identities: Arc<Mutex<HashMap<String, String>>>,
     /// Review signals of others' PRs by id, reused while a PR is unchanged.
@@ -406,6 +408,7 @@ impl ProjectApi {
             team: team.into(),
             closed_states: Arc::default(),
             default_area: Arc::default(),
+            team_members: Arc::default(),
             identities: Arc::default(),
             reviews: Arc::default(),
             answered_mentions: Arc::default(),

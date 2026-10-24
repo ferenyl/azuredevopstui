@@ -137,6 +137,11 @@ pub struct IdentityRef {
 }
 
 #[derive(Deserialize)]
+pub struct TeamMember {
+    pub identity: IdentityRef,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamFieldValues {
     pub default_value: String,
