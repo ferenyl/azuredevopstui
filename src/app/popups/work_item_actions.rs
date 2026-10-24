@@ -94,13 +94,16 @@ impl App {
                     Message::WorkItemSprints { item, result }
                 });
             }
-            WorkItemAction::NewChildTask => {
-                self.popup = Some(Popup::Text {
-                    target: TextTarget::NewWorkItem {
-                        kind: "Task".into(),
-                        parent: Some(item),
-                    },
-                    text: TextInput::default(),
+            WorkItemAction::NewChild => {
+                let Some(api) = self.api() else {
+                    return;
+                };
+                self.spawn(async move {
+                    let types = api.child_work_item_types().await;
+                    Message::ChildWorkItemTypes {
+                        parent: item,
+                        types,
+                    }
                 });
             }
         }
@@ -342,7 +345,7 @@ mod tests {
                 "Assign to…",
                 "Set priority",
                 "Move to sprint",
-                "New child task"
+                "New child…"
             ]
         );
     }
@@ -565,17 +568,23 @@ mod tests {
     }
 
     #[test]
-    fn new_child_task_asks_for_the_title() {
+    fn new_child_picks_the_type_then_asks_for_the_title() {
         let mut app = app();
+        let parent = Box::new(work_item(10, "Story", "User Story", "Active"));
 
-        choose(&mut app, 5);
+        app.handle_message(Message::ChildWorkItemTypes {
+            parent,
+            types: vec!["Task".into(), "Test Bug".into()],
+        });
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Enter);
 
         assert!(matches!(
             &app.popup,
             Some(Popup::Text {
                 target: TextTarget::NewWorkItem { kind, parent: Some(parent) },
                 ..
-            }) if kind == "Task" && parent.id == 10
+            }) if kind == "Test Bug" && parent.id == 10
         ));
     }
 }

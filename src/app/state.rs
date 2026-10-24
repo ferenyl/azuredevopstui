@@ -186,8 +186,9 @@ pub enum Popup {
         selection: Selection,
     },
     Assignee(AssigneePicker),
-    /// The type of the work item to create.
+    /// The type of the work item to create, a child of `parent` when given.
     NewWorkItem {
+        parent: Option<Box<WorkItem>>,
         selection: Selection,
     },
 }
@@ -200,7 +201,7 @@ pub enum WorkItemAction {
     AssignTo,
     Priority,
     Iteration,
-    NewChildTask,
+    NewChild,
 }
 
 impl WorkItemAction {
@@ -210,7 +211,7 @@ impl WorkItemAction {
         Self::AssignTo,
         Self::Priority,
         Self::Iteration,
-        Self::NewChildTask,
+        Self::NewChild,
     ];
 
     pub fn label(self) -> &'static str {
@@ -220,7 +221,7 @@ impl WorkItemAction {
             Self::AssignTo => "Assign to…",
             Self::Priority => "Set priority",
             Self::Iteration => "Move to sprint",
-            Self::NewChildTask => "New child task",
+            Self::NewChild => "New child…",
         }
     }
 }

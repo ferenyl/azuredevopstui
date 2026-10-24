@@ -110,6 +110,8 @@ impl App {
                 self.user = Some(user);
                 self.screen = Screen::Main;
                 self.load_board();
+                self.work_item_types.clear();
+                self.load_project_work_item_types();
                 self.refresh();
             }
             Message::MyPullRequests(result) => match result {
@@ -206,10 +208,22 @@ impl App {
                 Ok(people) => self.popup = Some(Popup::Assignee(AssigneePicker::new(item, people))),
                 Err(err) => self.report_error(err),
             },
-            Message::NewWorkItemTypes(result) => match result {
-                Ok(types) => self.open_new_work_item_picker(types),
-                Err(err) => self.report_error(err),
+            Message::ProjectWorkItemTypes(result) => match result {
+                Ok(types) => {
+                    self.work_item_types = types;
+                    if self.awaiting_work_item_types {
+                        self.awaiting_work_item_types = false;
+                        self.open_new_work_item_picker(None, self.work_item_types.clone());
+                    }
+                }
+                Err(err) => {
+                    self.awaiting_work_item_types = false;
+                    self.report_error(err);
+                }
             },
+            Message::ChildWorkItemTypes { parent, types } => {
+                self.open_new_work_item_picker(Some(parent), types)
+            }
             Message::WorkItemCreated { parent, result } => match result {
                 Ok(id) => {
                     tracing::info!(id, "work item created");

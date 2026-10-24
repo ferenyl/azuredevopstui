@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "path": "/contoso/Fabrikam/_apis/wit/workitemtypes",
+  "body": {
+    "value": [
+      { "name": "User Story" },
+      { "name": "Bug" },
+      { "name": "Test Bug" },
+      { "name": "Epic", "isDisabled": true }
+    ]
+  }
+}

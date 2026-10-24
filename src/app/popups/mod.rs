@@ -62,7 +62,9 @@ impl App {
                 selection,
             }) => self.confirm_work_item_field(item, field, &selection),
             Some(Popup::Assignee(picker)) => self.confirm_assignee(picker),
-            Some(Popup::NewWorkItem { selection }) => self.confirm_new_work_item_type(&selection),
+            Some(Popup::NewWorkItem { parent, selection }) => {
+                self.confirm_new_work_item_type(parent, &selection)
+            }
             Some(Popup::Errors { .. }) | None => {}
         }
     }
@@ -138,7 +140,7 @@ impl App {
             | Popup::BuildActions { selection, .. }
             | Popup::WorkItemActions { selection, .. }
             | Popup::WorkItemField { selection, .. }
-            | Popup::NewWorkItem { selection }
+            | Popup::NewWorkItem { selection, .. }
             | Popup::RemoveReviewer { selection, .. }
             | Popup::Types { selection, .. }
             | Popup::PrFilter { selection, .. } => selection,

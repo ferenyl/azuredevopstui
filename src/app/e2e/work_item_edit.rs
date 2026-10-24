@@ -251,7 +251,8 @@ async fn n_creates_an_item_assigned_to_me_in_the_sprint_and_team_area() {
 
     harness.press(KeyCode::Char('n'));
     wait_for_popup(&mut harness, |p| matches!(p, Popup::NewWorkItem { .. })).await;
-    harness.wait_for_text("User Story").await;
+    harness.wait_for_text("Test Bug").await;
+    harness.press(KeyCode::Char('j'));
     harness.press(KeyCode::Char('j'));
     harness.press(KeyCode::Enter);
     harness.wait_for_text("Title of the new User Story").await;
@@ -269,8 +270,11 @@ async fn n_creates_an_item_assigned_to_me_in_the_sprint_and_team_area() {
 #[tokio::test]
 async fn a_child_task_is_linked_to_its_parent() {
     let mut harness = choose(5).await;
+    wait_for_popup(&mut harness, |p| matches!(p, Popup::NewWorkItem { .. })).await;
+    harness.wait_for_text("Test Bug").await;
+    harness.press(KeyCode::Enter);
     harness
-        .wait_for_text("Title of the new task under #301")
+        .wait_for_text("Title of the new Task under #301")
         .await;
 
     harness.type_text("Write paging tests");

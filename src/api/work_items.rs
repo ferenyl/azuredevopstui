@@ -5,10 +5,10 @@ use futures::{StreamExt, TryStreamExt, stream};
 use serde_json::{Value, json};
 
 use super::models::{
-    CommentList, CommentsPage, DetailComment, Iteration, Link, LinkTarget, ListResponse, Mention,
-    Partial, PullRequest, Relation, SprintWorkItems, TeamFieldValues, WiqlResult, WorkItem,
-    WorkItemComment, WorkItemDetails, WorkItemRef, WorkItemResponse, WorkItemState,
-    WorkItemTypeCategory,
+    BacklogConfiguration, CommentList, CommentsPage, DetailComment, Iteration, Link, LinkTarget,
+    ListResponse, Mention, Partial, PullRequest, Relation, SprintWorkItems, TeamFieldValues,
+    WiqlResult, WorkItem, WorkItemComment, WorkItemDetails, WorkItemRef, WorkItemResponse,
+    WorkItemState, WorkItemTypeCategory, WorkItemTypeInfo,
 };
 use super::{API_VERSION, MAX_CONCURRENT_REQUESTS, ProjectApi, build_url, is_unauthorized};
 use crate::rich_text::RichText;
@@ -322,8 +322,23 @@ impl ProjectApi {
             .await
     }
 
-    /// Work item types in the project, without hidden ones like test plans and code reviews.
+    /// Enabled work item types in the project, without hidden ones like test plans and code
+    /// reviews.
     pub async fn work_item_types(&self) -> Result<Vec<String>> {
+        let all: ListResponse<WorkItemTypeInfo> = self
+            .client
+            .get(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "wit",
+                    "workitemtypes",
+                ],
+                &[],
+            )
+            .await?;
         let categories: ListResponse<WorkItemTypeCategory> = self
             .client
             .get(
@@ -338,7 +353,49 @@ impl ProjectApi {
                 &[],
             )
             .await?;
-        Ok(visible_types(categories.value))
+        let hidden = hidden_types(categories.value);
+        let mut types: Vec<String> = all
+            .value
+            .into_iter()
+            .filter(|kind| !kind.is_disabled)
+            .map(|kind| kind.name)
+            .filter(|name| !hidden.contains(name))
+            .collect();
+        types.sort();
+        types.dedup();
+        Ok(types)
+    }
+
+    /// The types of the team's task backlog level, which children are created as; `Task` on error.
+    pub async fn child_work_item_types(&self) -> Vec<String> {
+        let config: Result<BacklogConfiguration> = self
+            .client
+            .get(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    &self.team,
+                    "_apis",
+                    "work",
+                    "backlogconfiguration",
+                ],
+                &[],
+            )
+            .await;
+        match config {
+            Ok(config) if !config.task_backlog.work_item_types.is_empty() => config
+                .task_backlog
+                .work_item_types
+                .into_iter()
+                .map(|kind| kind.name)
+                .collect(),
+            Ok(_) => vec!["Task".into()],
+            Err(err) => {
+                tracing::warn!("failed to load the task backlog types, using Task: {err:#}");
+                vec!["Task".into()]
+            }
+        }
     }
 
     /// `AND [System.State] NOT IN (...)` over the closed states, falling back to the defaults on error.
@@ -706,25 +763,14 @@ fn child_ids(relations: &[Relation]) -> Vec<u32> {
         .collect()
 }
 
-/// Type names from all categories except hidden ones, sorted and deduplicated.
-fn visible_types(categories: Vec<WorkItemTypeCategory>) -> Vec<String> {
-    let (hidden, visible): (Vec<_>, Vec<_>) = categories
+/// Names of the types in the hidden category, like test plans and code reviews.
+fn hidden_types(categories: Vec<WorkItemTypeCategory>) -> Vec<String> {
+    categories
         .into_iter()
-        .partition(|category| category.reference_name == HIDDEN_CATEGORY);
-    let hidden: Vec<String> = hidden
-        .into_iter()
+        .filter(|category| category.reference_name == HIDDEN_CATEGORY)
         .flat_map(|category| category.work_item_types)
         .map(|kind| kind.name)
-        .collect();
-    let mut types: Vec<String> = visible
-        .into_iter()
-        .flat_map(|category| category.work_item_types)
-        .map(|kind| kind.name)
-        .filter(|name| !hidden.contains(name))
-        .collect();
-    types.sort();
-    types.dedup();
-    types
+        .collect()
 }
 
 /// Names of states in a closed category, sorted and deduplicated.
@@ -841,18 +887,13 @@ mod tests {
     }
 
     #[test]
-    fn visible_types_drop_hidden_types_everywhere() {
+    fn hidden_types_are_the_hidden_category_only() {
         let categories = vec![
             category("Microsoft.RequirementCategory", &["User Story", "Issue"]),
-            category(
-                "Microsoft.CodeReviewRequestCategory",
-                &["Code Review Request"],
-            ),
-            category("Microsoft.TaskCategory", &["Task", "User Story"]),
             category(HIDDEN_CATEGORY, &["Code Review Request"]),
         ];
 
-        assert_eq!(visible_types(categories), ["Issue", "Task", "User Story"]);
+        assert_eq!(hidden_types(categories), ["Code Review Request"]);
     }
 
     #[tokio::test]
@@ -917,6 +958,13 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
                 { "name": "Sprint 1", "path": "MyProject\\Sprint 1", "attributes": { "timeFrame": "current" } }
             ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemtypes"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "value": [{ "name": "Bug" }] })),
+            )
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -1216,8 +1264,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn work_item_types_come_from_visible_categories() {
+    async fn work_item_types_are_the_enabled_ones_outside_the_hidden_category() {
         let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemtypes"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                { "name": "Bug" },
+                { "name": "Test Bug" },
+                { "name": "Test Plan" },
+                { "name": "Epic", "isDisabled": true }
+            ]})))
+            .mount(&server)
+            .await;
         Mock::given(method("GET"))
             .and(path("/contoso/MyProject/_apis/wit/workitemtypecategories"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
@@ -1231,7 +1289,7 @@ mod tests {
 
         let types = client.work_item_types().await.unwrap();
 
-        assert_eq!(types, ["Bug"]);
+        assert_eq!(types, ["Bug", "Test Bug"]);
     }
 
     fn state(name: &str, category: &str) -> WorkItemState {
@@ -1261,6 +1319,13 @@ mod tests {
     #[tokio::test]
     async fn closed_states_are_fetched_once() {
         let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemtypes"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "value": [{ "name": "Bug" }] })),
+            )
+            .mount(&server)
+            .await;
         Mock::given(method("GET"))
             .and(path("/contoso/MyProject/_apis/wit/workitemtypecategories"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [

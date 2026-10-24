@@ -161,9 +161,9 @@ pub fn render(frame: &mut Frame, app: &App) {
                 }
                 TextTarget::WorkItemTitle(item) => format!(" Title of #{}", item.id),
                 TextTarget::NewWorkItem {
+                    kind,
                     parent: Some(parent),
-                    ..
-                } => format!(" Title of the new task under #{}", parent.id),
+                } => format!(" Title of the new {kind} under #{}", parent.id),
                 TextTarget::NewWorkItem { kind, parent: None } => {
                     format!(" Title of the new {kind}")
                 }
@@ -249,7 +249,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             );
             popup::render_picker(frame, app, &title, &picker.selection, main);
         }
-        Some(Popup::NewWorkItem { selection }) => {
+        Some(Popup::NewWorkItem { selection, .. }) => {
             popup::render_picker(frame, app, " New work item type ", selection, main);
         }
         None => {}
