@@ -163,7 +163,7 @@ jobs:
       - name: Lint PKGBUILDs
         run: namcap aur/*/PKGBUILD || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: aur-${{ github.event.release.tag_name }}
           path: |
