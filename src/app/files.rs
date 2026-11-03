@@ -123,6 +123,13 @@ impl App {
 
     /// Switches between the changed hunks and the full file, and remembers the choice.
     pub(super) fn toggle_diff_mode(&mut self) {
+        if !self
+            .files
+            .as_ref()
+            .is_some_and(|files| files.diff.is_some())
+        {
+            return;
+        }
         let Some(config) = &mut self.config else {
             return;
         };
