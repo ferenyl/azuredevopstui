@@ -782,8 +782,10 @@ pub struct IterationChanges {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeEntry {
-    pub change_type: String,
-    pub item: ChangedItem,
+    #[serde(default)]
+    pub change_type: Option<String>,
+    #[serde(default)]
+    pub item: Option<ChangedItem>,
     pub original_path: Option<String>,
     pub source_server_item: Option<String>,
 }
@@ -791,7 +793,7 @@ pub struct ChangeEntry {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangedItem {
-    pub path: String,
+    pub path: Option<String>,
     pub git_object_type: Option<String>,
 }
 
@@ -860,19 +862,21 @@ impl ChangeKind {
 }
 
 impl ChangedFile {
-    /// `None` for folders.
+    /// `None` for folders and entries without a path.
     pub fn from_entry(entry: ChangeEntry) -> Option<Self> {
-        if entry.item.git_object_type.as_deref() == Some("tree") {
+        let item = entry.item?;
+        if item.git_object_type.as_deref() == Some("tree") {
             return None;
         }
-        let kind = ChangeKind::from_change_type(&entry.change_type);
+        let path = item.path?;
+        let kind = ChangeKind::from_change_type(entry.change_type.as_deref().unwrap_or_default());
         let original_path = entry
             .original_path
             .or(entry.source_server_item)
-            .filter(|path| *path != entry.item.path);
+            .filter(|original| *original != path);
         Some(Self {
             kind,
-            path: entry.item.path,
+            path,
             original_path,
         })
     }
@@ -1031,7 +1035,10 @@ mod tests {
                     "item": { "path": "/src/new.rs", "gitObjectType": "blob" },
                     "sourceServerItem": "/src/old.rs"
                 },
-                { "changeType": "add", "item": { "path": "/README.md" }, "originalPath": "/README.md" }
+                { "changeType": "add", "item": { "path": "/README.md" }, "originalPath": "/README.md" },
+                { "changeType": null, "item": { "path": null } },
+                { "changeType": "edit", "item": null },
+                { "changeType": "edit" }
             ]
         }))
         .unwrap();
