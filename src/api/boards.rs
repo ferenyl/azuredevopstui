@@ -69,18 +69,6 @@ impl ProjectApi {
             .await
     }
 
-    /// Clears the assignee and moves the item in one update.
-    pub async fn unassign_work_item(
-        &self,
-        id: u32,
-        board: &Board,
-        target: &ColumnTarget,
-    ) -> Result<()> {
-        let mut fields = vec![("System.AssignedTo", json!(""))];
-        fields.extend(column_fields(board, target));
-        self.update_work_item(id, &fields).await
-    }
-
     pub async fn assign_work_item(&self, id: u32, assignee: &str) -> Result<()> {
         self.update_work_item(id, &[("System.AssignedTo", json!(assignee))])
             .await
@@ -178,6 +166,30 @@ impl Board {
         }
         Some(targets)
     }
+
+    /// Fields that put an item in `state` and on the matching board position: its current
+    /// column and doing/done half when that maps to the state, else the first column that does.
+    /// Only the state when the type is not on the board or no column maps to it.
+    pub fn state_fields(
+        &self,
+        work_item_type: &str,
+        state: &str,
+        current: (Option<&str>, bool),
+    ) -> Vec<(&str, Value)> {
+        let targets: Vec<ColumnTarget> = self
+            .targets(work_item_type)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|target| target.state == state)
+            .collect();
+        let kept = targets
+            .iter()
+            .position(|t| Some(t.column.as_str()) == current.0 && t.done == current.1);
+        match targets.get(kept.unwrap_or(0)) {
+            Some(target) => column_fields(self, target).into(),
+            None => vec![("System.State", json!(state))],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -220,6 +232,47 @@ mod tests {
         assert_eq!(targets[0].label, "New");
         assert!(!targets[0].done);
         assert_eq!(targets[0].state, "New");
+    }
+
+    #[test]
+    fn state_fields_keep_the_current_split_half() {
+        let board = board(vec![
+            column("New", false, &[("User Story", "New")]),
+            column("Active", true, &[("User Story", "Active")]),
+        ]);
+
+        let fields = board.state_fields("User Story", "Active", (Some("Active"), true));
+
+        assert_eq!(
+            fields,
+            vec![
+                ("System.State", json!("Active")),
+                ("WEF_X_Kanban.Column", json!("Active")),
+                ("WEF_X_Kanban.Column.Done", json!(true)),
+            ]
+        );
+    }
+
+    #[test]
+    fn state_fields_pick_the_doing_half_of_the_first_matching_column() {
+        let board = board(vec![
+            column("New", false, &[("User Story", "New")]),
+            column("Active", true, &[("User Story", "Active")]),
+        ]);
+
+        let fields = board.state_fields("User Story", "Active", (Some("New"), false));
+
+        assert_eq!(fields[1], ("WEF_X_Kanban.Column", json!("Active")));
+        assert_eq!(fields[2], ("WEF_X_Kanban.Column.Done", json!(false)));
+    }
+
+    #[test]
+    fn state_fields_are_only_the_state_when_no_column_maps_to_it() {
+        let board = board(vec![column("New", false, &[("User Story", "New")])]);
+
+        let fields = board.state_fields("User Story", "Resolved", (None, false));
+
+        assert_eq!(fields, vec![("System.State", json!("Resolved"))]);
     }
 
     #[test]
@@ -355,25 +408,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unassign_clears_assignee_and_moves_in_one_patch() {
+    async fn unassign_clears_assignee_and_sets_state_in_one_patch() {
         let server = MockServer::start().await;
         Mock::given(method("PATCH"))
             .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
             .and(body_json(json!([
                 { "op": "add", "path": "/fields/System.AssignedTo", "value": "" },
-                { "op": "add", "path": "/fields/System.State", "value": "New" },
-                { "op": "add", "path": "/fields/WEF_X_Kanban.Column", "value": "Ready" },
-                { "op": "add", "path": "/fields/WEF_X_Kanban.Column.Done", "value": false }
+                { "op": "add", "path": "/fields/System.State", "value": "New" }
             ])))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
             .expect(1)
             .mount(&server)
             .await;
         let client = ProjectApi::with_base_url(&server.uri());
-        let board = board(vec![column("Ready", false, &[("User Story", "New")])]);
-        let target = board.targets("User Story").unwrap().remove(0);
 
-        client.unassign_work_item(5, &board, &target).await.unwrap();
+        client
+            .update_work_item(
+                5,
+                &[
+                    ("System.AssignedTo", json!("")),
+                    ("System.State", json!("New")),
+                ],
+            )
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

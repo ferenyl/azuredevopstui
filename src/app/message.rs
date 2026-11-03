@@ -9,6 +9,7 @@ use crate::auth::Auth;
 use crate::config::{Config, MergeStrategy};
 use crate::diff::FileDiff;
 
+use super::WorkItemField;
 use super::loads::Load;
 
 pub enum Message {
@@ -51,7 +52,6 @@ pub enum Message {
     },
     Board {
         item: WorkItem,
-        unassign: bool,
         result: Result<Board>,
     },
     PullRequestSignals {
@@ -114,6 +114,7 @@ pub enum Message {
     /// The states of the type of `item`, to pick its new state from.
     WorkItemStates {
         item: Box<WorkItem>,
+        field: WorkItemField,
         result: Result<Vec<String>>,
     },
     /// The team's sprints, to move `item` to.

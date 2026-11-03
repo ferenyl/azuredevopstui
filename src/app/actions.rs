@@ -9,7 +9,7 @@ use crate::api::{PullRequest, WorkItem};
 use super::editor::split_command;
 use super::loads::Load;
 use super::message::Message;
-use super::{App, Detail};
+use super::{App, Detail, WorkItemField};
 
 impl App {
     pub(super) fn current_url(&self) -> Option<String> {
@@ -163,14 +163,28 @@ impl App {
             .is_some_and(|user| assignee == Some(user.id.as_str()))
     }
 
-    /// Asks for the new column first; nothing changes until it is confirmed.
+    /// Asks for the new state first; nothing changes until it is confirmed.
     pub(super) fn unassign(&mut self) {
         let Some(item) = self.current_work_item() else {
             return;
         };
         if self.is_assigned_to_me(&item) {
-            self.change_column(true);
+            self.change_state(Box::new(item), WorkItemField::UnassignState);
         }
+    }
+
+    pub(in crate::app) fn change_state(&mut self, item: Box<WorkItem>, field: WorkItemField) {
+        let Some(api) = self.api() else {
+            return;
+        };
+        self.spawn(async move {
+            let result = api.work_item_states(&item.fields.work_item_type).await;
+            Message::WorkItemStates {
+                item,
+                field,
+                result,
+            }
+        });
     }
 
     pub(super) fn tag(&mut self) {
@@ -186,13 +200,13 @@ impl App {
         });
     }
 
-    pub(super) fn change_column(&mut self, unassign: bool) {
+    pub(super) fn change_column(&mut self) {
         let Some(item) = self.current_work_item() else {
             return;
         };
         if let Some(board) = &self.board {
             let board = board.clone();
-            self.open_column_picker(item, &board, unassign);
+            self.open_column_picker(item, &board);
             return;
         }
         let Some(api) = self.api() else {
@@ -200,11 +214,7 @@ impl App {
         };
         self.spawn(async move {
             let result = api.board().await;
-            Message::Board {
-                item,
-                unassign,
-                result,
-            }
+            Message::Board { item, result }
         });
     }
 
@@ -325,8 +335,9 @@ mod tests {
 
     use crossterm::event::KeyCode;
 
-    use crate::app::Popup;
+    use crate::app::message::Message;
     use crate::app::test_helpers::{app, assign_first_item_to, board, ctrl, me, press};
+    use crate::app::{Popup, WorkItemField};
 
     fn with_links(count: usize) -> crate::app::App {
         let app = app();
@@ -369,31 +380,43 @@ mod tests {
     }
 
     #[test]
-    fn unassign_asks_for_new_status_first() {
+    fn unassign_asks_for_new_state_first() {
         let mut app = app();
         app.user = Some(me());
-        app.board = Some(board());
         assign_first_item_to(&mut app, "me-id");
         ctrl(&mut app, 'j');
-
         press(&mut app, KeyCode::Char('u'));
 
-        let Some(Popup::Column(picker)) = &app.popup else {
-            panic!("column picker not open");
+        app.handle_message(Message::WorkItemStates {
+            item: Box::new(app.current_work_item().unwrap()),
+            field: WorkItemField::UnassignState,
+            result: Ok(vec!["New".into(), "Active".into()]),
+        });
+
+        let Some(Popup::WorkItemField {
+            item,
+            field,
+            selection,
+        }) = &app.popup
+        else {
+            panic!("state picker not open");
         };
-        assert!(picker.unassign);
-        assert_eq!(picker.work_item_id, 10);
-        assert_eq!(picker.selection.current(), Some("Active (Doing)"));
+        assert_eq!(*field, WorkItemField::UnassignState);
+        assert_eq!(item.id, 10);
+        assert_eq!(selection.current(), Some("Active"));
     }
 
     #[test]
     fn esc_cancels_unassign() {
         let mut app = app();
         app.user = Some(me());
-        app.board = Some(board());
         assign_first_item_to(&mut app, "me-id");
         ctrl(&mut app, 'j');
-        press(&mut app, KeyCode::Char('u'));
+        app.handle_message(Message::WorkItemStates {
+            item: Box::new(app.current_work_item().unwrap()),
+            field: WorkItemField::UnassignState,
+            result: Ok(vec!["Active".into()]),
+        });
 
         press(&mut app, KeyCode::Esc);
 
@@ -423,6 +446,6 @@ mod tests {
 
         press(&mut app, KeyCode::Char('s'));
 
-        assert!(matches!(&app.popup, Some(Popup::Column(picker)) if !picker.unassign));
+        assert!(matches!(&app.popup, Some(Popup::Column(_))));
     }
 }

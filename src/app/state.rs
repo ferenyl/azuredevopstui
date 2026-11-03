@@ -277,6 +277,8 @@ impl WorkItemAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkItemField {
     State,
+    /// The new state when unassigning; confirming always unassigns.
+    UnassignState,
     Priority,
     Iteration,
 }
@@ -285,7 +287,7 @@ impl WorkItemField {
     /// The value of the field on `item`, as listed in the picker.
     pub fn value(self, item: &WorkItem) -> Option<String> {
         match self {
-            Self::State => Some(item.fields.state.clone()),
+            Self::State | Self::UnassignState => Some(item.fields.state.clone()),
             Self::Priority => item.fields.priority.map(|priority| priority.to_string()),
             Self::Iteration => item.fields.iteration_path.clone(),
         }
@@ -550,8 +552,6 @@ pub struct ColumnPicker {
     pub work_item_id: u32,
     pub targets: Vec<ColumnTarget>,
     pub selection: Selection,
-    /// Also clear the assignee when the column is confirmed.
-    pub unassign: bool,
 }
 
 /// What a row of the completion popup stands for.

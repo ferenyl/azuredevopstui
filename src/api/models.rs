@@ -591,7 +591,7 @@ pub struct TaskBacklog {
     pub work_item_types: Vec<Named>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct WorkItemState {
     pub name: String,
     pub category: String,
