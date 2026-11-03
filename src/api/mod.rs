@@ -381,7 +381,7 @@ pub struct ProjectApi {
     project: Arc<str>,
     team: Arc<str>,
     /// States in the Completed and Removed categories, fetched once per session.
-    closed_states: Arc<OnceCell<Vec<models::WorkItemState>>>,
+    type_states: Arc<OnceCell<HashMap<String, Vec<models::WorkItemState>>>>,
     /// The team's default area path, fetched once per session.
     default_area: Arc<OnceCell<String>>,
     /// The team's members, fetched once per session.
@@ -417,7 +417,7 @@ impl ProjectApi {
             organization: organization.into(),
             project: project.into(),
             team: team.into(),
-            closed_states: Arc::default(),
+            type_states: Arc::default(),
             default_area: Arc::default(),
             team_members: Arc::default(),
             identities: Arc::default(),

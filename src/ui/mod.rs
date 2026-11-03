@@ -54,11 +54,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     match &app.popup {
         Some(Popup::Column(picker)) => {
-            let title = if picker.unassign {
-                format!(" Unassign #{} – new status ", picker.work_item_id)
-            } else {
-                format!(" Move #{} ", picker.work_item_id)
-            };
+            let title = format!(" Move #{} ", picker.work_item_id);
             popup::render_picker(frame, app, &title, &picker.selection, main);
         }
         Some(Popup::Complete(picker)) => {
@@ -239,6 +235,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         }) => {
             let name = match field {
                 WorkItemField::State => "State",
+                WorkItemField::UnassignState => "State (unassigning)",
                 WorkItemField::Priority => "Priority",
                 WorkItemField::Iteration => "Sprint",
             };

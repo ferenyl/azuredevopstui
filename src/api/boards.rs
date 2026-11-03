@@ -69,18 +69,6 @@ impl ProjectApi {
             .await
     }
 
-    /// Clears the assignee and moves the item in one update.
-    pub async fn unassign_work_item(
-        &self,
-        id: u32,
-        board: &Board,
-        target: &ColumnTarget,
-    ) -> Result<()> {
-        let mut fields = vec![("System.AssignedTo", json!(""))];
-        fields.extend(column_fields(board, target));
-        self.update_work_item(id, &fields).await
-    }
-
     pub async fn assign_work_item(&self, id: u32, assignee: &str) -> Result<()> {
         self.update_work_item(id, &[("System.AssignedTo", json!(assignee))])
             .await
@@ -352,28 +340,6 @@ mod tests {
             )
             .await
             .unwrap();
-    }
-
-    #[tokio::test]
-    async fn unassign_clears_assignee_and_moves_in_one_patch() {
-        let server = MockServer::start().await;
-        Mock::given(method("PATCH"))
-            .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
-            .and(body_json(json!([
-                { "op": "add", "path": "/fields/System.AssignedTo", "value": "" },
-                { "op": "add", "path": "/fields/System.State", "value": "New" },
-                { "op": "add", "path": "/fields/WEF_X_Kanban.Column", "value": "Ready" },
-                { "op": "add", "path": "/fields/WEF_X_Kanban.Column.Done", "value": false }
-            ])))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
-            .expect(1)
-            .mount(&server)
-            .await;
-        let client = ProjectApi::with_base_url(&server.uri());
-        let board = board(vec![column("Ready", false, &[("User Story", "New")])]);
-        let target = board.targets("User Story").unwrap().remove(0);
-
-        client.unassign_work_item(5, &board, &target).await.unwrap();
     }
 
     #[tokio::test]

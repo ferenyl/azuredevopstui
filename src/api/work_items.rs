@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt, stream};
@@ -411,8 +411,11 @@ impl ProjectApi {
     }
 
     async fn states_filter(&self, categories: &[&str], defaults: &[&str]) -> String {
-        let names = match self.closed_states().await {
-            Ok(states) => state_names(states, categories),
+        let names = match self.all_type_states().await {
+            Ok(by_type) => {
+                let states: Vec<WorkItemState> = by_type.values().flatten().cloned().collect();
+                state_names(&states, categories)
+            }
             Err(err) => {
                 tracing::warn!("failed to load work item states, using defaults: {err:#}");
                 Vec::new()
@@ -427,10 +430,9 @@ impl ProjectApi {
         format!("AND [System.State] NOT IN ({}) ", names.join(", "))
     }
 
-    /// States in the Completed and Removed categories of all visible types, cached per session.
-    async fn closed_states(&self) -> Result<&[WorkItemState]> {
-        let states = self
-            .closed_states
+    /// The states of all visible types, by type name, cached per session.
+    async fn all_type_states(&self) -> Result<&HashMap<String, Vec<WorkItemState>>> {
+        self.type_states
             .get_or_try_init(|| async {
                 let types = self.work_item_types().await?;
                 let lists: Vec<Vec<WorkItemState>> = stream::iter(types.iter().cloned())
@@ -438,17 +440,22 @@ impl ProjectApi {
                     .buffered(MAX_CONCURRENT_REQUESTS)
                     .try_collect()
                     .await?;
-                let mut states: Vec<WorkItemState> = lists.into_iter().flatten().collect();
-                states.retain(|state| CLOSED_CATEGORIES.contains(&state.category.as_str()));
-                Ok::<_, anyhow::Error>(states)
+                Ok::<_, anyhow::Error>(types.into_iter().zip(lists).collect())
             })
-            .await?;
-        Ok(states)
+            .await
     }
 
     /// State names of a work item type, in workflow order.
     pub async fn work_item_states(&self, kind: &str) -> Result<Vec<String>> {
-        let states = self.type_states(kind).await?;
+        let cached = self
+            .all_type_states()
+            .await
+            .ok()
+            .and_then(|by_type| by_type.get(kind).cloned());
+        let states = match cached {
+            Some(states) => states,
+            None => self.type_states(kind).await?,
+        };
         Ok(states.into_iter().map(|state| state.name).collect())
     }
 

@@ -4,12 +4,7 @@ use crate::app::message::Message;
 use crate::app::{App, ColumnPicker, Popup, Selection};
 
 impl App {
-    pub(in crate::app) fn open_column_picker(
-        &mut self,
-        item: WorkItem,
-        board: &Board,
-        unassign: bool,
-    ) {
+    pub(in crate::app) fn open_column_picker(&mut self, item: WorkItem, board: &Board) {
         let Some(targets) = board.targets(&item.fields.work_item_type) else {
             self.set_error(format!(
                 "{} items are not on the board",
@@ -34,7 +29,6 @@ impl App {
             work_item_id: item.id,
             targets,
             selection,
-            unassign,
         }));
     }
 
@@ -45,18 +39,9 @@ impl App {
         let Some(target) = picker.targets.get(picker.selection.selected).cloned() else {
             return;
         };
-        let (id, unassign) = (picker.work_item_id, picker.unassign);
-        let label = if unassign {
-            format!("unassigning #{id}")
-        } else {
-            format!("moving #{id}")
-        };
-        self.spawn_action(label, async move {
-            let result = if unassign {
-                api.unassign_work_item(id, &board, &target).await
-            } else {
-                api.move_work_item(id, &board, &target).await
-            };
+        let id = picker.work_item_id;
+        self.spawn_action(format!("moving #{id}"), async move {
+            let result = api.move_work_item(id, &board, &target).await;
             Message::WorkItemUpdated {
                 id,
                 reload: &[Load::Sprint, Load::Mentions, Load::Detail],
@@ -79,12 +64,11 @@ mod tests {
         item.fields.board_column = Some("Active".into());
         item.fields.board_column_done = Some(false);
 
-        app.open_column_picker(item, &board(), false);
+        app.open_column_picker(item, &board());
 
         let Some(Popup::Column(picker)) = &app.popup else {
             panic!("column picker not open");
         };
-        assert!(!picker.unassign);
         assert_eq!(picker.selection.current(), Some("Active (Doing)"));
     }
 
@@ -93,7 +77,7 @@ mod tests {
         let mut app = app();
         let item = work_item(10, "Epic", "Epic", "New");
 
-        app.open_column_picker(item, &board(), false);
+        app.open_column_picker(item, &board());
 
         assert!(app.popup.is_none());
         assert_eq!(

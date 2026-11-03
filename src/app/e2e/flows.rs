@@ -928,7 +928,7 @@ async fn unassigning_clears_the_assignee_and_reloads_only_the_sprint() {
     .await;
     select(&mut harness, Panel::MyWorkItems, 301);
     harness.press(KeyCode::Char('u'));
-    wait_for_popup(&mut harness, |p| matches!(p, Popup::Column(_))).await;
+    wait_for_popup(&mut harness, |p| matches!(p, Popup::WorkItemField { .. })).await;
 
     let requests = requests_after_confirming(&mut harness).await;
 
@@ -963,7 +963,7 @@ async fn failed_mutations_show_the_error_without_reloading() {
         harness.ado.fail("PATCH", WORK_ITEM_301, status).await;
         select(&mut harness, Panel::MyWorkItems, 301);
         harness.press(KeyCode::Char('u'));
-        wait_for_popup(&mut harness, |p| matches!(p, Popup::Column(_))).await;
+        wait_for_popup(&mut harness, |p| matches!(p, Popup::WorkItemField { .. })).await;
 
         let requests = requests_after_confirming(&mut harness).await;
 
