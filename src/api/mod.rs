@@ -380,7 +380,7 @@ pub struct ProjectApi {
     organization: Arc<str>,
     project: Arc<str>,
     team: Arc<str>,
-    /// States in the Completed and Removed categories, fetched once per session.
+    /// States of each visible work item type, by type name, fetched once per session.
     type_states: Arc<OnceCell<HashMap<String, Vec<models::WorkItemState>>>>,
     /// The team's default area path, fetched once per session.
     default_area: Arc<OnceCell<String>>,

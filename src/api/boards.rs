@@ -343,6 +343,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unassign_clears_assignee_and_sets_state_in_one_patch() {
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/contoso/MyProject/_apis/wit/workitems/5"))
+            .and(body_json(json!([
+                { "op": "add", "path": "/fields/System.AssignedTo", "value": "" },
+                { "op": "add", "path": "/fields/System.State", "value": "New" }
+            ])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 5 })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        client
+            .update_work_item(
+                5,
+                &[
+                    ("System.AssignedTo", json!("")),
+                    ("System.State", json!("New")),
+                ],
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn board_columns_list_names_in_board_order() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))

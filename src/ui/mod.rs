@@ -235,7 +235,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         }) => {
             let name = match field {
                 WorkItemField::State => "State",
-                WorkItemField::UnassignState => "State (unassigning)",
+                WorkItemField::UnassignState => "Unassign — new state",
                 WorkItemField::Priority => "Priority",
                 WorkItemField::Iteration => "Sprint",
             };
