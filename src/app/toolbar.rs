@@ -1,7 +1,7 @@
 use super::{Action, App, Detail, Panel, Popup, Retry, Screen, SetupStep};
 
 /// Every action the toolbar can show, in display order.
-const TOOLBAR: [Action; 33] = [
+const TOOLBAR: [Action; 34] = [
     Action::Down,
     Action::Up,
     Action::Toggle,
@@ -29,6 +29,7 @@ const TOOLBAR: [Action; 33] = [
     Action::PrActions,
     Action::NewWorkItem,
     Action::Zoom,
+    Action::DiffMode,
     Action::SprintBoard,
     Action::Reload,
     Action::ChangeToken,
@@ -174,6 +175,10 @@ impl App {
             Action::Sort => !is_build && self.focus != Panel::Builds,
             Action::Filter => item.is_some() || self.focus == Panel::Builds,
             Action::Search => self.focus.index().is_some(),
+            Action::DiffMode => self
+                .files
+                .as_ref()
+                .is_some_and(|files| files.diff.is_some()),
             _ => false,
         }
     }

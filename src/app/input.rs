@@ -225,6 +225,7 @@ impl App {
             | Action::PrActions
             | Action::SwitchProject
             | Action::Zoom
+            | Action::DiffMode
             | Action::Top
             | Action::Bottom
             | Action::PageDown
@@ -295,6 +296,7 @@ impl App {
             },
             Action::NewWorkItem => self.new_work_item(),
             Action::Zoom => self.zoomed = !self.zoomed,
+            Action::DiffMode => self.toggle_diff_mode(),
             Action::Errors => self.popup = Some(Popup::Errors { first: 0 }),
             Action::FocusLeft | Action::FocusRight | Action::FocusUp | Action::FocusDown => {
                 if matches!(self.screen, Screen::Main) {

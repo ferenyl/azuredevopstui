@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 
 use crate::api::{ChangedFile, PullRequestChanges};
@@ -117,6 +119,19 @@ impl App {
                 result,
             }
         });
+    }
+
+    /// Switches between the changed hunks and the full file, and remembers the choice.
+    pub(super) fn toggle_diff_mode(&mut self) {
+        let Some(config) = &mut self.config else {
+            return;
+        };
+        let mode = config.diff_mode.toggled();
+        let result = Arc::make_mut(config).update(|config| config.diff_mode = mode);
+        self.detail_scroll = 0;
+        if let Err(err) = result {
+            self.report_error(err);
+        }
     }
 
     /// Back from a diff to the file list; false when no diff is shown.
@@ -292,10 +307,13 @@ mod tests {
         let mut app = on_files_tab();
         app.files.as_mut().unwrap().diff = Some((1, None));
         let diff = || {
-            Ok(FileDiff::Lines(vec![DiffLine {
-                kind: DiffLineKind::Added,
-                text: "x".into(),
-            }]))
+            Ok(FileDiff::Text {
+                changes: vec![DiffLine {
+                    kind: DiffLineKind::Added,
+                    text: "x".into(),
+                }],
+                full: Vec::new(),
+            })
         };
 
         app.diff_loaded(1, 0, diff());
@@ -305,7 +323,7 @@ mod tests {
         app.diff_loaded(1, 1, diff());
         assert!(matches!(
             app.files.as_ref().unwrap().diff,
-            Some((1, Some(FileDiff::Lines(_))))
+            Some((1, Some(FileDiff::Text { .. })))
         ));
     }
 

@@ -36,6 +36,7 @@ pub enum Action {
     PrActions,
     SwitchProject,
     Zoom,
+    DiffMode,
     Top,
     Bottom,
     PageDown,
@@ -103,13 +104,14 @@ pub const HELP: [(&str, &[Action]); 4] = [
             Action::PrevThread,
             Action::ThreadStatus,
             Action::PrActions,
+            Action::DiffMode,
         ],
     ),
 ];
 
 impl Action {
     /// Every action that can be bound in the config's `keys`; `Toggle` (`space`) is fixed.
-    pub const ALL: [Self; 51] = [
+    pub const ALL: [Self; 52] = [
         Self::Quit,
         Self::Cancel,
         Self::Up,
@@ -145,6 +147,7 @@ impl Action {
         Self::PrActions,
         Self::SwitchProject,
         Self::Zoom,
+        Self::DiffMode,
         Self::Top,
         Self::Bottom,
         Self::PageDown,
@@ -202,6 +205,7 @@ impl Action {
             Self::PrActions => "pr_actions",
             Self::SwitchProject => "switch_project",
             Self::Zoom => "zoom",
+            Self::DiffMode => "diff_mode",
             Self::Top => "top",
             Self::Bottom => "bottom",
             Self::PageDown => "page_down",
@@ -284,6 +288,7 @@ impl Action {
             Self::PrActions => "actions",
             Self::SwitchProject => "change project",
             Self::Zoom => "zoom",
+            Self::DiffMode => "full file/changes",
             Self::Top => "top/bottom",
             Self::Bottom => "bottom",
             Self::PageDown => "page down/up",

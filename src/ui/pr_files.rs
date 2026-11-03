@@ -85,16 +85,17 @@ fn diff_lines(
     width: u16,
 ) -> Vec<Line<'static>> {
     let theme = &app.theme;
+    let mode = app.config.as_ref().map(|c| c.diff_mode).unwrap_or_default();
     let mut lines = vec![heading(app, &file.path, width)];
     let diff = match diff {
         None => return [lines, loading(app)].concat(),
         Some(FileDiff::Skipped) => {
             return [lines, empty(app, "Binary or too large to show")].concat();
         }
-        Some(FileDiff::Lines(diff)) if diff.is_empty() => {
+        Some(diff) if diff.lines(mode).is_empty() => {
             return [lines, empty(app, "No content changes")].concat();
         }
-        Some(FileDiff::Lines(diff)) => diff,
+        Some(diff) => diff.lines(mode),
     };
     lines.extend(diff.iter().map(|line| {
         let (sign, color) = match line.kind {

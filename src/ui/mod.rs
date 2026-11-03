@@ -1763,7 +1763,13 @@ mod tests {
             "fn main() {\n    new();\n}\n",
         );
 
-        let screen = screen(&files_app(Some((0, Some(FileDiff::Lines(diff))))));
+        let screen = screen(&files_app(Some((
+            0,
+            Some(FileDiff::Text {
+                changes: diff,
+                full: Vec::new(),
+            }),
+        ))));
 
         assert!(screen.contains("▍/src/main.rs"));
         assert!(screen.contains("@@ -1,3 +1,3 @@"));

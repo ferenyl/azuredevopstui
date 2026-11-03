@@ -463,6 +463,7 @@ An older single `config.json` that holds everything still loads. The next save s
 | `notify.quiet_hours` | not set | Local time range, `{ "start": "22:00", "end": "07:00" }` (`HH:MM`, may span midnight). Nothing is notified during it, and entries that arrive then are not notified afterwards. |
 | `sort.pull_requests` | `"newest"` | Sort order for both PR lists. |
 | `sort.work_items` | `"priority"` | Sort order for both work item lists. |
+| `diff_mode` | `"changes"` | How a PR file diff is shown: `"changes"` for the changed hunks, `"full"` for the whole file with the changes inline. Toggled with `d` and written by the app. |
 | `theme` | `mocha` | Color preset: `mocha`, `light` or `terminal`. See [Colors](#colors). |
 | `colors` | none | Overrides for single colors of the preset. See [Colors](#colors). |
 | `layout.left_percent` | `25` | Width of the left column in percent of the screen, from 15 to 60. It is never narrower than 32 columns, up to half the screen. |
@@ -562,6 +563,7 @@ The table lists the Mocha values.
 | `z` | Zoom: the focused box fills the left column, or the detail panel fills the screen. `z` again or `esc` restores. On short terminals only the focused box in the left column is expanded; the others show just their title |
 | `tab` / `shift+tab` | Next or previous detail tab |
 | `S` | Choose the sort order for the focused list |
+| `d` | In a PR file diff, switch between the changed hunks and the full file; the choice is saved |
 | `f` | Choose which work item types are shown; on a PR, filter others' PRs; on pipelines, filter runs by pipeline, branch or run number |
 | `/` | Search the focused list (case-insensitive, matches the number, title and more) or a setup list of organizations, projects, teams or columns. Type to filter, `enter` keeps the filter, `esc` clears it |
 | `space` | Tick or untick an item in the type list |
@@ -635,7 +637,7 @@ A key is a character (`"q"`, `"G"`, `"?"`) or a name (`enter`, `esc`, `tab`, `sh
 | `prev_link` | `L` | `errors` | `E` |
 | `change_token` | `T` | `switch_project` | `P` |
 | `help` | `?` | `new_work_item` | `n` |
-| `board` | `b` | | |
+| `board` | `b` | `diff_mode` | `d` |
 
 ## Mouse
 
