@@ -3,12 +3,16 @@
 use similar::{ChangeTag, TextDiff};
 
 use crate::api::FileContent;
+use crate::config::DiffMode;
 
 const CONTEXT_LINES: usize = 3;
 
 #[derive(Debug)]
 pub enum FileDiff {
-    Lines(Vec<DiffLine>),
+    Text {
+        changes: Vec<DiffLine>,
+        full: Vec<DiffLine>,
+    },
     /// One side is binary or too large to diff.
     Skipped,
 }
@@ -16,8 +20,25 @@ pub enum FileDiff {
 impl FileDiff {
     pub fn of(old: FileContent, new: FileContent) -> Self {
         match (old, new) {
-            (FileContent::Text(old), FileContent::Text(new)) => Self::Lines(unified(&old, &new)),
+            (FileContent::Text(old), FileContent::Text(new)) => {
+                let (old, new) = (normalize(&old), normalize(&new));
+                Self::Text {
+                    changes: unified(&old, &new),
+                    full: full(&old, &new),
+                }
+            }
             _ => Self::Skipped,
+        }
+    }
+
+    /// The lines to show in `mode`; empty when the files are the same.
+    pub fn lines(&self, mode: DiffMode) -> &[DiffLine] {
+        match self {
+            Self::Text { changes, full } => match mode {
+                DiffMode::Changes => changes,
+                DiffMode::Full => full,
+            },
+            Self::Skipped => &[],
         }
     }
 }
@@ -36,6 +57,26 @@ pub enum DiffLineKind {
     Removed,
 }
 
+/// Line endings as `\n`, so a CRLF and an LF version of a line are the same line.
+fn normalize(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn diff_line(change: similar::Change<&str>) -> DiffLine {
+    let kind = match change.tag() {
+        ChangeTag::Equal => DiffLineKind::Context,
+        ChangeTag::Insert => DiffLineKind::Added,
+        ChangeTag::Delete => DiffLineKind::Removed,
+    };
+    DiffLine {
+        kind,
+        text: change
+            .value()
+            .trim_end_matches(['\n', '\r'])
+            .replace('\t', "    "),
+    }
+}
+
 /// Unified hunks with three lines of context, without the file headers.
 pub fn unified(old: &str, new: &str) -> Vec<DiffLine> {
     let diff = TextDiff::from_lines(old, new);
@@ -49,22 +90,18 @@ pub fn unified(old: &str, new: &str) -> Vec<DiffLine> {
             kind: DiffLineKind::Hunk,
             text: hunk.header().to_string(),
         });
-        for change in hunk.iter_changes() {
-            let kind = match change.tag() {
-                ChangeTag::Equal => DiffLineKind::Context,
-                ChangeTag::Insert => DiffLineKind::Added,
-                ChangeTag::Delete => DiffLineKind::Removed,
-            };
-            lines.push(DiffLine {
-                kind,
-                text: change
-                    .value()
-                    .trim_end_matches(['\n', '\r'])
-                    .replace('\t', "    "),
-            });
-        }
+        lines.extend(hunk.iter_changes().map(diff_line));
     }
     lines
+}
+
+/// Every line of both files with the changes marked; empty when nothing changed.
+fn full(old: &str, new: &str) -> Vec<DiffLine> {
+    let diff = TextDiff::from_lines(old, new);
+    if diff.ratio() == 1.0 {
+        return Vec::new();
+    }
+    diff.iter_all_changes().map(diff_line).collect()
 }
 
 #[cfg(test)]
@@ -153,6 +190,8 @@ mod tests {
             FileDiff::of(FileContent::Skipped, text()),
             FileDiff::Skipped
         ));
-        assert!(matches!(FileDiff::of(text(), text()), FileDiff::Lines(lines) if lines.is_empty()));
+        assert!(
+            matches!(FileDiff::of(text(), text()), FileDiff::Text { changes, full } if changes.is_empty() && full.is_empty())
+        );
     }
 }

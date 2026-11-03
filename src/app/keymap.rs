@@ -302,6 +302,7 @@ fn defaults(action: Action) -> Vec<KeyBinding> {
         Action::PrActions => &["e"],
         Action::SwitchProject => &["P"],
         Action::Zoom => &["z"],
+        Action::DiffMode => &["d"],
         Action::Top => &["g"],
         Action::Bottom => &["G"],
         Action::PageDown => &["pgdn"],

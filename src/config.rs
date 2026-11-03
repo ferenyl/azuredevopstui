@@ -94,6 +94,9 @@ pub struct Config {
     pub clipboard_command: Option<String>,
     #[serde(default)]
     pub layout: LayoutConfig,
+    /// How a file diff in a pull request is shown.
+    #[serde(default)]
+    pub diff_mode: DiffMode,
     /// Capture the mouse for clicks and the wheel; off leaves it to the terminal.
     #[serde(default = "default_true")]
     pub mouse: bool,
@@ -209,6 +212,24 @@ pub struct OtherPrsFilter {
     pub creators: Vec<String>,
     pub show_approved: bool,
     pub show_drafts: bool,
+}
+
+/// `Changes` shows the changed hunks, `Full` the whole file with the changes inline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffMode {
+    #[default]
+    Changes,
+    Full,
+}
+
+impl DiffMode {
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Changes => Self::Full,
+            Self::Full => Self::Changes,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -333,6 +354,7 @@ impl Config {
             editor: None,
             clipboard_command: None,
             layout: LayoutConfig::default(),
+            diff_mode: DiffMode::default(),
             mouse: true,
             keys: BTreeMap::new(),
         }
