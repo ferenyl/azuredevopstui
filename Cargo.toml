@@ -28,7 +28,7 @@ ratatui-image = { version = "11", default-features = false, features = ["crosste
 reqwest = { version = "0.13.5", features = ["json"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-similar = { version = "2.7.0", default-features = false, features = ["text"] }
+similar = { version = "3.2.1", default-features = false, features = ["text"] }
 tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros", "time", "process", "sync"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

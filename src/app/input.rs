@@ -279,7 +279,7 @@ impl App {
             Action::Toggle => {}
             Action::NextTab | Action::PrevTab => self.switch_tab(action == Action::NextTab),
             Action::AssignToMe => self.assign_to_me(),
-            Action::ChangeColumn => self.change_column(false),
+            Action::ChangeColumn => self.change_column(),
             Action::Complete => self.complete(),
             Action::Unassign => self.unassign(),
             Action::Tag => self.tag(),

@@ -183,8 +183,12 @@ impl App {
                 Ok(description) => self.open_description_editor(pr, description),
                 Err(err) => self.report_error(err),
             },
-            Message::WorkItemStates { item, result } => match result {
-                Ok(states) => self.open_field_picker(item, WorkItemField::State, states, None),
+            Message::WorkItemStates {
+                item,
+                field,
+                result,
+            } => match result {
+                Ok(states) => self.open_field_picker(item, field, states, None),
                 Err(err) => self.report_error(err),
             },
             Message::WorkItemSprints { item, result } => match result {
@@ -290,13 +294,9 @@ impl App {
                     }
                 }
             }
-            Message::Board {
-                item,
-                unassign,
-                result,
-            } => match result {
+            Message::Board { item, result } => match result {
                 Ok(board) => {
-                    self.open_column_picker(item, &board, unassign);
+                    self.open_column_picker(item, &board);
                     self.board = Some(board);
                 }
                 Err(err) => self.report_error(err),

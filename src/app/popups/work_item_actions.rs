@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crossterm::event::KeyEvent;
 use serde_json::{Value, json};
 
-use crate::api::{IdentityRef, Person, WorkItem};
+use crate::api::{Board, IdentityRef, Person, WorkItem};
 use crate::app::loads::Load;
 use crate::app::message::Message;
 use crate::app::{
@@ -20,6 +20,8 @@ pub(in crate::app) enum WorkItemChange {
     Title(String),
     /// A unique name; empty unassigns.
     AssignTo(String),
+    /// Clears the assignee, and sets the state when given.
+    Unassign(Option<String>),
     Priority(u8),
     Iteration(String),
 }
@@ -28,6 +30,7 @@ impl WorkItemChange {
     /// The field reference name and its new value.
     fn field(&self) -> (&'static str, Value) {
         match self {
+            Self::Unassign(_) => ("System.AssignedTo", json!("")),
             Self::State(state) => ("System.State", json!(state)),
             Self::Title(title) => ("System.Title", json!(title)),
             Self::AssignTo(name) => ("System.AssignedTo", json!(name)),
@@ -81,15 +84,7 @@ impl App {
             | WorkItemAction::Comment
             | WorkItemAction::OpenInBrowser
             | WorkItemAction::CopyLink => {}
-            WorkItemAction::ChangeState => {
-                let Some(api) = self.api() else {
-                    return;
-                };
-                self.spawn(async move {
-                    let result = api.work_item_states(&item.fields.work_item_type).await;
-                    Message::WorkItemStates { item, result }
-                });
-            }
+            WorkItemAction::ChangeState => self.change_state(item, WorkItemField::State),
             WorkItemAction::EditTitle => {
                 let text = TextInput::new(item.fields.title.clone());
                 self.popup = Some(Popup::Text {
@@ -165,11 +160,15 @@ impl App {
         let Some(value) = selection.current() else {
             return;
         };
-        if field.value(&item).as_deref() == Some(value) {
+        let unchanged = field.value(&item).as_deref() == Some(value);
+        if unchanged && field != WorkItemField::UnassignState {
             return;
         }
         let change = match field {
             WorkItemField::State => WorkItemChange::State(value.into()),
+            WorkItemField::UnassignState => {
+                WorkItemChange::Unassign((!unchanged).then(|| value.into()))
+            }
             WorkItemField::Priority => match value.parse() {
                 Ok(priority) => WorkItemChange::Priority(priority),
                 Err(_) => return,
@@ -273,6 +272,7 @@ impl App {
         let label = match &change {
             WorkItemChange::State(state) => format!("moving #{id} to {state}"),
             WorkItemChange::Title(_) => format!("renaming #{id}"),
+            WorkItemChange::Unassign(_) => format!("unassigning #{id}"),
             WorkItemChange::AssignTo(name) if name.is_empty() => format!("unassigning #{id}"),
             WorkItemChange::AssignTo(_) => format!("assigning #{id}"),
             WorkItemChange::Priority(priority) => format!("setting priority {priority} on #{id}"),
@@ -281,9 +281,35 @@ impl App {
                 format!("moving #{id} to {sprint}")
             }
         };
+        let kind = item.fields.work_item_type.clone();
+        let current = (
+            item.fields.board_column.clone(),
+            item.fields.board_column_done.unwrap_or(false),
+        );
+        let board = self.board.clone();
+        let sets_state = matches!(
+            change,
+            WorkItemChange::State(_) | WorkItemChange::Unassign(Some(_))
+        );
         self.spawn_action(label, async move {
+            let board = match board {
+                Some(board) => Some(board),
+                None if sets_state => api.board().await.ok(),
+                None => None,
+            };
             let result = match change {
                 WorkItemChange::AssignTo(name) => api.assign_work_item(id, &name).await,
+                WorkItemChange::State(state) => {
+                    let fields = state_fields(board.as_ref(), &kind, &state, &current);
+                    api.update_work_item(id, &fields).await
+                }
+                WorkItemChange::Unassign(state) => {
+                    let mut fields = vec![WorkItemChange::Unassign(None).field()];
+                    if let Some(state) = state {
+                        fields.extend(state_fields(board.as_ref(), &kind, &state, &current));
+                    }
+                    api.update_work_item(id, &fields).await
+                }
                 change => api.update_work_item(id, &[change.field()]).await,
             };
             Message::WorkItemUpdated {
@@ -292,6 +318,19 @@ impl App {
                 result,
             }
         });
+    }
+}
+
+/// The state, and the board column and doing/done flag that go with it when the board is known.
+fn state_fields<'a>(
+    board: Option<&'a Board>,
+    kind: &str,
+    state: &str,
+    current: &(Option<String>, bool),
+) -> Vec<(&'a str, Value)> {
+    match board {
+        Some(board) => board.state_fields(kind, state, (current.0.as_deref(), current.1)),
+        None => vec![WorkItemChange::State(state.into()).field()],
     }
 }
 
@@ -421,6 +460,7 @@ mod tests {
 
         app.handle_message(Message::WorkItemStates {
             item,
+            field: WorkItemField::State,
             result: Ok(vec!["New".into(), "Active".into(), "Resolved".into()]),
         });
 

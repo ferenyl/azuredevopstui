@@ -39,7 +39,7 @@ Built with [ratatui](https://ratatui.rs). Catppuccin Mocha is the default theme.
   - Assign a work item to yourself.
   - Press `e` on a work item to change its state, title, assignee, priority or sprint, or to add a child task. The current value is preselected and keeping it sends nothing.
   - Create a work item with `n`: type, then title. It is assigned to you in the shown sprint.
-  - Unassign yourself from a work item and pick its new board column in the same step.
+  - Unassign yourself from a work item and pick its new state (of its own type) in the same step.
   - Complete one of your PRs once it shows `✔`, or set auto-complete on one that is not ready yet (and cancel it again). You pick a merge strategy among the ones the branch policies allow, and choose whether to delete the source branch, transition linked work items, bypass branch policies (asks for confirmation) and the merge commit message. The last strategy and the first two toggles are remembered in the config. The overview shows who set auto-complete. `esc` cancels without completing.
   - Vote on any PR with `v`: approve, approve with suggestions, wait for author, reject or reset your vote. Your current vote is preselected and `esc` cancels. The inbox entry "needs your vote" goes away once you voted.
   - Press `e` on a PR for its actions: abandon (asks `y` / `n` first) or reactivate, publish a draft or mark a PR as draft, edit the title or description, add or remove a reviewer, and link a work item.
@@ -571,7 +571,7 @@ The table lists the Mocha values.
 | `b` | Show or hide the sprint board in the detail panel: all items of the sprint as lanes, one per board column. `esc` or `enter` on an item also closes it. See [Sprint](#sprint) |
 | `s` | Move a work item to another board column |
 | `a` | Assign a work item to yourself |
-| `u` | Unassign yourself from a work item: pick the new column, then `enter`. `esc` cancels and nothing changes |
+| `u` | Unassign yourself from a work item: pick the new state of its type, then `enter`. `esc` cancels and nothing changes |
 | `t` | Edit tags on any work item: type to search, `tab` checks or unchecks the highlighted tag (`[x]`), `enter` saves all checked tags in one change. `enter` without `tab` adds the highlighted tag or removes it if it is already set. A tag that does not exist is created |
 | `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels, asking first when there is text. Edit with `←` `→` `↑` `↓`, `home` / `end` (line), `ctrl+home` / `ctrl+end` (text), `ctrl+←` / `ctrl+→` or `alt+b` / `alt+f` (word), `ctrl+w` or `alt+backspace` (delete word). `ctrl+e` edits the text in `$EDITOR` |
 | `]` / `[` | Select the next or previous comment thread on a PR's Comments tab |
