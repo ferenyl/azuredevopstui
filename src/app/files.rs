@@ -127,7 +127,10 @@ impl App {
             return;
         };
         let mode = config.diff_mode.toggled();
-        let result = Arc::make_mut(config).update(|config| config.diff_mode = mode);
+        let config = Arc::make_mut(config);
+        let result = config.update(|config| config.diff_mode = mode);
+        // A failed save must leave the same in-memory mode whichever way update ran.
+        config.diff_mode = mode;
         self.detail_scroll = 0;
         if let Err(err) = result {
             self.report_error(err);
