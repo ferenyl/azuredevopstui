@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crossterm::event::KeyEvent;
 use serde_json::{Value, json};
 
-use crate::api::{IdentityRef, Person, WorkItem};
+use crate::api::{Board, IdentityRef, Person, WorkItem};
 use crate::app::loads::Load;
 use crate::app::message::Message;
 use crate::app::{
@@ -281,12 +281,33 @@ impl App {
                 format!("moving #{id} to {sprint}")
             }
         };
+        let kind = item.fields.work_item_type.clone();
+        let current = (
+            item.fields.board_column.clone(),
+            item.fields.board_column_done.unwrap_or(false),
+        );
+        let board = self.board.clone();
+        let sets_state = matches!(
+            change,
+            WorkItemChange::State(_) | WorkItemChange::Unassign(Some(_))
+        );
         self.spawn_action(label, async move {
+            let board = match board {
+                Some(board) => Some(board),
+                None if sets_state => api.board().await.ok(),
+                None => None,
+            };
             let result = match change {
                 WorkItemChange::AssignTo(name) => api.assign_work_item(id, &name).await,
+                WorkItemChange::State(state) => {
+                    let fields = state_fields(board.as_ref(), &kind, &state, &current);
+                    api.update_work_item(id, &fields).await
+                }
                 WorkItemChange::Unassign(state) => {
                     let mut fields = vec![WorkItemChange::Unassign(None).field()];
-                    fields.extend(state.map(|state| WorkItemChange::State(state).field()));
+                    if let Some(state) = state {
+                        fields.extend(state_fields(board.as_ref(), &kind, &state, &current));
+                    }
                     api.update_work_item(id, &fields).await
                 }
                 change => api.update_work_item(id, &[change.field()]).await,
@@ -297,6 +318,19 @@ impl App {
                 result,
             }
         });
+    }
+}
+
+/// The state, and the board column and doing/done flag that go with it when the board is known.
+fn state_fields<'a>(
+    board: Option<&'a Board>,
+    kind: &str,
+    state: &str,
+    current: &(Option<String>, bool),
+) -> Vec<(&'a str, Value)> {
+    match board {
+        Some(board) => board.state_fields(kind, state, (current.0.as_deref(), current.1)),
+        None => vec![WorkItemChange::State(state.into()).field()],
     }
 }
 

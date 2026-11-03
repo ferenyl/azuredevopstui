@@ -166,6 +166,30 @@ impl Board {
         }
         Some(targets)
     }
+
+    /// Fields that put an item in `state` and on the matching board position: its current
+    /// column and doing/done half when that maps to the state, else the first column that does.
+    /// Only the state when the type is not on the board or no column maps to it.
+    pub fn state_fields(
+        &self,
+        work_item_type: &str,
+        state: &str,
+        current: (Option<&str>, bool),
+    ) -> Vec<(&str, Value)> {
+        let targets: Vec<ColumnTarget> = self
+            .targets(work_item_type)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|target| target.state == state)
+            .collect();
+        let kept = targets
+            .iter()
+            .position(|t| Some(t.column.as_str()) == current.0 && t.done == current.1);
+        match targets.get(kept.unwrap_or(0)) {
+            Some(target) => column_fields(self, target).into(),
+            None => vec![("System.State", json!(state))],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -208,6 +232,47 @@ mod tests {
         assert_eq!(targets[0].label, "New");
         assert!(!targets[0].done);
         assert_eq!(targets[0].state, "New");
+    }
+
+    #[test]
+    fn state_fields_keep_the_current_split_half() {
+        let board = board(vec![
+            column("New", false, &[("User Story", "New")]),
+            column("Active", true, &[("User Story", "Active")]),
+        ]);
+
+        let fields = board.state_fields("User Story", "Active", (Some("Active"), true));
+
+        assert_eq!(
+            fields,
+            vec![
+                ("System.State", json!("Active")),
+                ("WEF_X_Kanban.Column", json!("Active")),
+                ("WEF_X_Kanban.Column.Done", json!(true)),
+            ]
+        );
+    }
+
+    #[test]
+    fn state_fields_pick_the_doing_half_of_the_first_matching_column() {
+        let board = board(vec![
+            column("New", false, &[("User Story", "New")]),
+            column("Active", true, &[("User Story", "Active")]),
+        ]);
+
+        let fields = board.state_fields("User Story", "Active", (Some("New"), false));
+
+        assert_eq!(fields[1], ("WEF_X_Kanban.Column", json!("Active")));
+        assert_eq!(fields[2], ("WEF_X_Kanban.Column.Done", json!(false)));
+    }
+
+    #[test]
+    fn state_fields_are_only_the_state_when_no_column_maps_to_it() {
+        let board = board(vec![column("New", false, &[("User Story", "New")])]);
+
+        let fields = board.state_fields("User Story", "Resolved", (None, false));
+
+        assert_eq!(fields, vec![("System.State", json!("Resolved"))]);
     }
 
     #[test]

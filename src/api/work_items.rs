@@ -819,7 +819,7 @@ fn hidden_types(categories: Vec<WorkItemTypeCategory>) -> Vec<String> {
         .collect()
 }
 
-/// Names of states in a closed category, sorted and deduplicated.
+/// Names of states in any of the given categories, sorted and deduplicated.
 fn state_names(states: &[WorkItemState], categories: &[&str]) -> Vec<String> {
     let mut names: Vec<String> = states
         .iter()
