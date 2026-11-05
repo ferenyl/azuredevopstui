@@ -342,6 +342,8 @@ pub struct Comment {
     pub published_date: Option<String>,
     #[serde(default)]
     pub is_deleted: bool,
+    #[serde(default)]
+    pub users_liked: Vec<IdentityRef>,
 }
 
 #[derive(Deserialize)]

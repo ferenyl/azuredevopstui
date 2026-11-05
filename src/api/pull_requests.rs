@@ -805,6 +805,14 @@ fn allowed_merge_strategies(policies: &[PolicyEvaluation]) -> Vec<MergeStrategy>
 /// What waits on the user in someone else's PR, from its raw threads.
 fn review_signals(pr: &PullRequest, threads: &[Thread], user_id: &str) -> ReviewSignals {
     let is_me = |comment: &Comment| comment.author.id.eq_ignore_ascii_case(user_id);
+    // Answered or liked by the user.
+    let handled = |comment: &Comment| {
+        is_me(comment)
+            || comment
+                .users_liked
+                .iter()
+                .any(|user| user.id.eq_ignore_ascii_case(user_id))
+    };
     let latest = |kind: &str, by_me: bool| {
         threads
             .iter()
@@ -832,7 +840,23 @@ fn review_signals(pr: &PullRequest, threads: &[Thread], user_id: &str) -> Review
         (Some(pushed), Some(voted)) => compare_timestamps(pushed, voted).is_gt(),
         _ => false,
     };
-    if my_vote.is_some_and(|vote| vote != 0) && pushed_after_vote {
+    let is_open = |thread: &Thread| matches!(thread.status.as_deref(), Some("active" | "pending"));
+    let my_threads: Vec<&Thread> = threads
+        .iter()
+        .filter(|thread| !thread.is_deleted)
+        .filter(|thread| {
+            thread
+                .comments
+                .iter()
+                .find(|comment| {
+                    !comment.is_deleted && comment.comment_type.as_deref() != Some("system")
+                })
+                .is_some_and(is_me)
+        })
+        .collect();
+    let all_mine_resolved =
+        !my_threads.is_empty() && !my_threads.iter().any(|thread| is_open(thread));
+    if my_vote.is_some_and(|vote| vote != 0) && pushed_after_vote && !all_mine_resolved {
         signals.changed_since_vote = true;
         waiting.push(pushed);
     }
@@ -851,11 +875,11 @@ fn review_signals(pr: &PullRequest, threads: &[Thread], user_id: &str) -> Review
         let (Some(first), Some(last)) = (comments.first(), comments.last()) else {
             continue;
         };
-        if is_me(first) && !is_me(last) {
+        if is_me(first) && !handled(last) {
             signals.replies += 1;
             waiting.push(last.published_date.clone());
         }
-        let last_mine = comments.iter().rposition(|comment| is_me(comment));
+        let last_mine = comments.iter().rposition(|comment| handled(comment));
         let unanswered = comments.iter().enumerate().find(|(index, comment)| {
             !is_me(comment)
                 && last_mine.is_none_or(|mine| mine < *index)
