@@ -121,6 +121,7 @@ impl App {
         if self.show_help {
             match action {
                 Action::Cancel | Action::Help => self.show_help = false,
+                Action::NextTab | Action::PrevTab => self.help_icons = !self.help_icons,
                 Action::Quit => self.should_quit = true,
                 _ => {}
             }

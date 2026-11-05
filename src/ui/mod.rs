@@ -1,5 +1,6 @@
 mod build_detail;
 mod build_log;
+mod icons;
 pub mod layout;
 mod popup;
 mod pr_detail;
@@ -26,6 +27,7 @@ use crate::app::{
 };
 use crate::images::{ImageState, file_name, image_marker};
 use crate::rich_text::{Marks, RichText};
+use icons::Icon;
 
 const LABEL_WIDTH: usize = 13;
 
@@ -961,30 +963,42 @@ fn marker(text: String, color: Color) -> Span<'static> {
     )
 }
 
+/// `icon` as a marker, followed by `count` when it is counted.
+fn icon_marker(app: &App, icon: &Icon, count: usize) -> Span<'static> {
+    let text = if icon.counted {
+        format!("{}{count}", icon.symbol)
+    } else {
+        icon.symbol.to_string()
+    };
+    marker(text, icon.color(&app.theme))
+}
+
+/// Markers of the icons whose count is above zero.
+fn icon_spans(app: &App, icons: &[(Icon, usize)]) -> Vec<Span<'static>> {
+    icons
+        .iter()
+        .filter(|(_, count)| *count > 0)
+        .map(|(icon, count)| icon_marker(app, icon, *count))
+        .collect()
+}
+
 fn review_spans(app: &App, review: &ReviewSignals) -> Vec<Span<'static>> {
-    let theme = &app.theme;
-    let mut spans = Vec::new();
-    let mut push = |text: String, color: Color| spans.push(marker(text, color));
-    if review.needs_vote {
-        push("◉".into(), theme.pr_waiting);
-    }
-    if review.changed_since_vote {
-        push("↻".into(), theme.build_running);
-    }
-    if review.replies > 0 {
-        push(format!("↩{}", review.replies), theme.comment_author);
-    }
-    if review.mentions > 0 {
-        push(format!("@{}", review.mentions), theme.title);
-    }
-    spans
+    icon_spans(
+        app,
+        &[
+            (icons::NEEDS_VOTE, review.needs_vote.into()),
+            (icons::CHANGED_SINCE_VOTE, review.changed_since_vote.into()),
+            (icons::REPLIES, review.replies),
+            (icons::MENTIONS, review.mentions),
+        ],
+    )
 }
 
 fn inbox_line(app: &App, entry: &InboxEntry) -> Line<'static> {
     let theme = &app.theme;
     let muted = Style::new().fg(theme.muted);
     let mut spans = vec![if app.data.is_new(&entry.detail) {
-        marker("• ".into(), theme.title)
+        marker(format!("{} ", icons::NEW.symbol), icons::NEW.color(theme))
     } else {
         Span::raw("   ")
     }];
@@ -999,7 +1013,7 @@ fn inbox_line(app: &App, entry: &InboxEntry) -> Line<'static> {
                 format!("#{} ", item.id),
                 Style::new().fg(type_color(app, &item.fields.work_item_type)),
             ));
-            spans.push(marker("@ ".into(), theme.title));
+            spans.push(icon_marker(app, &icons::MENTIONED, 0));
             spans.push(Span::raw(item.fields.title.clone()));
         }
         Detail::Build(build) => {
@@ -1025,31 +1039,18 @@ fn age(date: &str) -> String {
 
 /// Compact markers for what needs attention, each followed by a space.
 fn signal_spans(app: &App, signals: &Signals) -> Vec<Span<'static>> {
-    let theme = &app.theme;
-    let mut spans = Vec::new();
-    let mut push = |text: String, color: Color| spans.push(marker(text, color));
-    if signals.unresolved > 0 {
-        push(format!("✎{}", signals.unresolved), theme.pr_waiting);
-    }
-    if signals.waiting {
-        push("◔".into(), theme.pr_waiting);
-    }
-    if signals.rejected {
-        push("⊘".into(), theme.pr_rejected);
-    }
-    if signals.failed_checks {
-        push("✖".into(), theme.build_failed);
-    }
-    if signals.conflicts {
-        push("⇄".into(), theme.error);
-    }
-    if signals.unlinked {
-        push("∅".into(), theme.pr_waiting);
-    }
-    if signals.ready {
-        push("✔".into(), theme.pr_approved);
-    }
-    spans
+    icon_spans(
+        app,
+        &[
+            (icons::UNRESOLVED, signals.unresolved),
+            (icons::WAITING, signals.waiting.into()),
+            (icons::REJECTED, signals.rejected.into()),
+            (icons::CHECKS_FAILED, signals.failed_checks.into()),
+            (icons::CONFLICTS, signals.conflicts.into()),
+            (icons::UNLINKED, signals.unlinked.into()),
+            (icons::READY, signals.ready.into()),
+        ],
+    )
 }
 
 fn work_item_line(app: &App, item: &WorkItem) -> Line<'static> {

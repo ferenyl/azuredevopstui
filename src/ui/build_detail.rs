@@ -2,7 +2,7 @@ use chrono::DateTime;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
-use super::{badge, branch, field, short_date};
+use super::{badge, branch, field, icons, short_date};
 use crate::api::Build;
 use crate::app::App;
 
@@ -59,17 +59,17 @@ pub fn line(app: &App, build: &Build) -> Line<'static> {
 }
 
 pub fn status(app: &App, build: &Build) -> (&'static str, &'static str, Color) {
-    let theme = &app.theme;
-    match (build.status.as_str(), build.result.as_deref()) {
-        ("inProgress", _) => ("⟳", "running", theme.build_running),
-        ("cancelling", _) => ("⟳", "cancelling", theme.muted),
-        ("completed", Some("succeeded")) => ("✔", "succeeded", theme.build_succeeded),
-        ("completed", Some("partiallySucceeded")) => ("◑", "partially succeeded", theme.pr_waiting),
-        ("completed", Some("failed")) => ("✖", "failed", theme.build_failed),
-        ("completed", Some("canceled")) => ("⊘", "canceled", theme.muted),
-        ("completed", _) => ("–", "completed", theme.muted),
-        _ => ("○", "queued", theme.muted),
-    }
+    let icon = match (build.status.as_str(), build.result.as_deref()) {
+        ("inProgress", _) => icons::RUNNING,
+        ("cancelling", _) => icons::CANCELLING,
+        ("completed", Some("succeeded")) => icons::SUCCEEDED,
+        ("completed", Some("partiallySucceeded")) => icons::PARTIALLY_SUCCEEDED,
+        ("completed", Some("failed")) => icons::FAILED,
+        ("completed", Some("canceled")) => icons::CANCELED,
+        ("completed", _) => icons::COMPLETED,
+        _ => icons::QUEUED,
+    };
+    (icon.symbol, icon.meaning, icon.color(&app.theme))
 }
 
 /// `7m 35s` between start and finish.

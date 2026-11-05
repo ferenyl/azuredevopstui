@@ -1,15 +1,20 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListState, Paragraph, Wrap};
 use unicode_width::UnicodeWidthChar;
 
+use super::icons::SECTIONS;
 use crate::app::{App, HELP, PickerHit, Selection, TextInput};
 
 const KEY_WIDTH: usize = 15;
 
 pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
+    if app.help_icons {
+        render_icons(frame, app, area);
+        return;
+    }
     let theme = &app.theme;
     let mut lines: Vec<Line> = Vec::new();
     for (heading, actions) in HELP {
@@ -34,8 +39,42 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
         }));
     }
     let area = centered(area, 44, lines.len() as u16 + 2);
+    render_help_block(frame, app, area, " Keys · tab: icons ", lines);
+}
+
+/// What the markers in the lists mean, by where they show.
+fn render_icons(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
+    let mut lines: Vec<Line> = Vec::new();
+    for (heading, icons) in SECTIONS {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        lines.push(Line::styled(
+            format!(" {heading}"),
+            Style::new().fg(theme.title),
+        ));
+        lines.extend(icons.iter().map(|icon| {
+            let symbol = format!("{}{}", icon.symbol, if icon.counted { "N" } else { "" });
+            Line::from(vec![
+                Span::styled(
+                    format!(" {symbol:<4}"),
+                    Style::new()
+                        .fg(icon.color(theme))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(icon.meaning),
+            ])
+        }));
+    }
+    let area = centered(area, 44, lines.len() as u16 + 2);
+    render_help_block(frame, app, area, " Icons · tab: keys ", lines);
+}
+
+fn render_help_block(frame: &mut Frame, app: &App, area: Rect, title: &str, lines: Vec<Line>) {
+    let theme = &app.theme;
     let block = Block::bordered()
-        .title(" Keys ")
+        .title(title.to_string())
         .title_style(Style::new().fg(theme.title))
         .border_style(Style::new().fg(theme.border_focused))
         .style(Style::new().bg(theme.background).fg(theme.foreground));
