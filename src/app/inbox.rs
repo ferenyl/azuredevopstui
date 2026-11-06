@@ -110,11 +110,16 @@ fn gained(old: &str, new: &str) -> bool {
         None => (part.to_string(), 0),
     };
     let parts = |status: &str| -> Vec<(String, usize)> {
-        status.split(", ").filter(|p| !p.is_empty()).map(split).collect()
+        status
+            .split(", ")
+            .filter(|p| !p.is_empty())
+            .map(split)
+            .collect()
     };
     let old = parts(old);
     parts(new).into_iter().any(|(label, count)| {
-        !old.iter().any(|(old_label, old_count)| *old_label == label && *old_count >= count)
+        !old.iter()
+            .any(|(old_label, old_count)| *old_label == label && *old_count >= count)
     })
 }
 
