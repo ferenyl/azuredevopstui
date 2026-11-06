@@ -28,8 +28,9 @@ impl App {
             .map(|entry| &entry.detail)
             .filter(|detail| {
                 let status = self.data.status(detail);
-                let changed =
-                    notified.insert(detail.key(), status.clone()).as_ref() != Some(&status);
+                let changed = notified
+                    .insert(detail.key(), status.clone())
+                    .is_none_or(|old| gained(&old, &status));
                 let enabled = match detail {
                     Detail::Build(_) => notify.builds,
                     Detail::WorkItem(_) => notify.mentions,
@@ -97,6 +98,24 @@ impl App {
             self.data.inbox_seen = Some(seen);
         }
     }
+}
+
+/// Whether `new` has a status part `old` lacks, or a count that grew; parts going away do not count.
+fn gained(old: &str, new: &str) -> bool {
+    let split = |part: &str| match part.split_once(' ') {
+        Some((count, label)) => match count.parse::<usize>() {
+            Ok(count) => (label.to_string(), count),
+            Err(_) => (part.to_string(), 0),
+        },
+        None => (part.to_string(), 0),
+    };
+    let parts = |status: &str| -> Vec<(String, usize)> {
+        status.split(", ").filter(|p| !p.is_empty()).map(split).collect()
+    };
+    let old = parts(old);
+    parts(new).into_iter().any(|(label, count)| {
+        !old.iter().any(|(old_label, old_count)| *old_label == label && *old_count >= count)
+    })
 }
 
 #[cfg(test)]

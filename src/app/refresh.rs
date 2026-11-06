@@ -80,6 +80,16 @@ impl App {
             });
         }
 
+        let signals: Vec<PullRequest> = self
+            .data
+            .my_prs()
+            .into_iter()
+            .flatten()
+            .filter(|pr| wanted(self, Load::Signals(pr.pull_request_id)))
+            .cloned()
+            .collect();
+        self.load_signals(&signals);
+
         if let Some(detail) = self.detail.clone()
             && wanted(self, Load::Detail)
         {
