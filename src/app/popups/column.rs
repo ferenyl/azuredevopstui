@@ -44,7 +44,7 @@ impl App {
             let result = api.move_work_item(id, &board, &target).await;
             Message::WorkItemUpdated {
                 id,
-                reload: &[Load::Sprint, Load::Mentions, Load::Detail],
+                reload: vec![Load::Sprint, Load::Mentions, Load::Detail],
                 result,
             }
         });

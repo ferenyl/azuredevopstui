@@ -220,22 +220,7 @@ impl ProjectApi {
             .expect("mention cache")
             .retain(|id, _| ids.contains(id));
         let results: Vec<Result<Option<Mention>>> = stream::iter(items)
-            .map(|item| async move {
-                if self.is_answered(&item) {
-                    return Ok(None);
-                }
-                let comments = self.comments(item.id).await.inspect_err(|err| {
-                    tracing::warn!(id = item.id, "skipped work item without comments: {err:#}");
-                })?;
-                let date = unanswered_mention(&comments.comments, user_id);
-                if date.is_none() {
-                    self.answered_mentions
-                        .lock()
-                        .expect("mention cache")
-                        .insert(item.id, item.fields.changed_date.clone());
-                }
-                Ok(date.map(|date| Mention { item, date }))
-            })
+            .map(|item| async move { self.check_mention(item, user_id).await })
             .buffered(MAX_CONCURRENT_REQUESTS)
             .collect()
             .await;
@@ -252,6 +237,47 @@ impl ProjectApi {
             items: mentions,
             failed,
         })
+    }
+
+    /// The mention of `item`, unless the user answered it. Remembers the answered ones.
+    async fn check_mention(&self, item: WorkItem, user_id: &str) -> Result<Option<Mention>> {
+        if self.is_answered(&item) {
+            return Ok(None);
+        }
+        let comments = self.comments(item.id).await.inspect_err(|err| {
+            tracing::warn!(id = item.id, "skipped work item without comments: {err:#}");
+        })?;
+        let date = unanswered_mention(&comments.comments, user_id);
+        if date.is_none() {
+            self.answered_mentions
+                .lock()
+                .expect("mention cache")
+                .insert(item.id, item.fields.changed_date.clone());
+        }
+        Ok(date.map(|date| Mention { item, date }))
+    }
+
+    /// The current version of one work item, `None` when it is gone.
+    #[allow(dead_code)] // wired up by the targeted refresh of single items
+    pub async fn work_item(&self, id: u32) -> Result<Option<WorkItem>> {
+        Ok(self.work_items_batch(&[id]).await?.into_iter().next())
+    }
+
+    /// Whether `item` still has an unanswered mention of the user; `None` when it is closed or
+    /// answered.
+    #[allow(dead_code)] // wired up by the targeted refresh of single items
+    pub async fn mention(&self, item: WorkItem, user_id: &str) -> Result<Option<Mention>> {
+        let closed = self
+            .state_names_of(&CLOSED_CATEGORIES, &DEFAULT_CLOSED_STATES)
+            .await;
+        if closed.contains(&item.fields.state) {
+            self.answered_mentions
+                .lock()
+                .expect("mention cache")
+                .remove(&item.id);
+            return Ok(None);
+        }
+        self.check_mention(item, user_id).await
     }
 
     pub async fn add_work_item_comment(&self, id: u32, text: &str) -> Result<()> {
@@ -411,6 +437,17 @@ impl ProjectApi {
     }
 
     async fn states_filter(&self, categories: &[&str], defaults: &[&str]) -> String {
+        let names: Vec<String> = self
+            .state_names_of(categories, defaults)
+            .await
+            .iter()
+            .map(|name| quote(name))
+            .collect();
+        format!("AND [System.State] NOT IN ({}) ", names.join(", "))
+    }
+
+    /// The states of `categories` over all types, or `defaults` when there are none.
+    async fn state_names_of(&self, categories: &[&str], defaults: &[&str]) -> Vec<String> {
         let names = match self.all_type_states().await {
             Ok(by_type) => {
                 let states: Vec<WorkItemState> = by_type.values().flatten().cloned().collect();
@@ -421,13 +458,11 @@ impl ProjectApi {
                 Vec::new()
             }
         };
-        let names = if names.is_empty() {
+        if names.is_empty() {
             defaults.iter().map(|name| (*name).to_string()).collect()
         } else {
             names
-        };
-        let names: Vec<String> = names.iter().map(|name| quote(name)).collect();
-        format!("AND [System.State] NOT IN ({}) ", names.join(", "))
+        }
     }
 
     /// The states of all visible types, by type name, cached per session.
@@ -1472,6 +1507,72 @@ mod tests {
 
         let names: Vec<_> = iterations.iter().map(|i| i.name.as_str()).collect();
         assert_eq!(names, ["New", "Old"]);
+    }
+
+    #[tokio::test]
+    async fn mention_is_none_once_answered() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/11/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalCount": 2,
+                "comments": [
+                    { "createdBy": { "id": "me-id", "displayName": "Me" },
+                      "createdDate": "2026-10-02T10:00:00Z", "text": "on it" },
+                    { "createdBy": { "id": "other", "displayName": "Bo" },
+                      "createdDate": "2026-10-01T10:00:00Z", "text": "ping @<me-id>" }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let item: WorkItem =
+            serde_json::from_value(work_item_json(11, "Answered", "Task", "Active")).unwrap();
+
+        assert!(client.mention(item, "me-id").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn mention_keeps_an_unanswered_item_and_skips_closed_ones() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/wit/workItems/10/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalCount": 1,
+                "comments": [{
+                    "createdBy": { "id": "other", "displayName": "Bo" },
+                    "createdDate": "2026-10-01T10:00:00Z",
+                    "text": "ping @<me-id>"
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let open: WorkItem =
+            serde_json::from_value(work_item_json(10, "Open", "Task", "Active")).unwrap();
+        let closed: WorkItem =
+            serde_json::from_value(work_item_json(10, "Closed", "Task", "Closed")).unwrap();
+
+        let mention = client.mention(open, "me-id").await.unwrap().unwrap();
+        assert_eq!(mention.date, "2026-10-01T10:00:00Z");
+        assert!(client.mention(closed, "me-id").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn work_item_fetches_one_item() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contoso/MyProject/_apis/wit/workitemsbatch"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [
+                work_item_json(10, "Item", "Task", "Active")
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        assert_eq!(client.work_item(10).await.unwrap().unwrap().id, 10);
     }
 
     #[tokio::test]

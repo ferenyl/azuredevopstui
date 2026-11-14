@@ -314,7 +314,7 @@ impl App {
             };
             Message::WorkItemUpdated {
                 id,
-                reload: &[Load::Sprint, Load::Mentions, Load::Detail],
+                reload: vec![Load::Sprint, Load::Mentions, Load::Detail],
                 result,
             }
         });

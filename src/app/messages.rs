@@ -457,7 +457,7 @@ mod tests {
             id,
             message: Box::new(Message::WorkItemUpdated {
                 id: 1,
-                reload: &[],
+                reload: vec![],
                 result,
             }),
         }

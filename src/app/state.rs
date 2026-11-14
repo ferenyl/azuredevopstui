@@ -977,6 +977,70 @@ impl Data {
         self.rebuild_inbox();
     }
 
+    /// Swaps in the fresh version of one PR, or drops it (with its signals) on `None`.
+    #[allow(dead_code)] // wired up by the targeted refresh of single items
+    pub fn replace_pr(&mut self, id: u32, pr: Option<PullRequest>) {
+        for prs in [&mut self.my_prs, &mut self.other_prs]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(index) = prs.iter().position(|pr| pr.pull_request_id == id) {
+                match pr {
+                    Some(pr) => prs[index] = pr,
+                    None => {
+                        prs.remove(index);
+                        self.pr_signals.remove(&id);
+                    }
+                }
+                break;
+            }
+        }
+        self.rebuild_inbox();
+    }
+
+    /// Swaps in the fresh version of one work item wherever it is listed.
+    #[allow(dead_code)] // wired up by the targeted refresh of single items
+    pub fn replace_work_item(&mut self, item: &WorkItem) {
+        for items in [
+            &mut self.my_work_items,
+            &mut self.ready_work_items,
+            &mut self.board_items,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Some(old) = items.iter_mut().find(|old| old.id == item.id) {
+                *old = item.clone();
+            }
+        }
+        if let Some(mention) = self
+            .mentions
+            .iter_mut()
+            .flatten()
+            .find(|mention| mention.item.id == item.id)
+        {
+            mention.item = item.clone();
+        }
+        self.rebuild_inbox();
+    }
+
+    /// Swaps in the fresh mention of a work item, or drops it on `None`. Only listed mentions
+    /// change: an action never creates one.
+    #[allow(dead_code)] // wired up by the targeted refresh of single items
+    pub fn set_mention(&mut self, id: u32, mention: Option<Mention>) {
+        if let Some(mentions) = &mut self.mentions
+            && let Some(index) = mentions.iter().position(|mention| mention.item.id == id)
+        {
+            match mention {
+                Some(mention) => mentions[index] = mention,
+                None => {
+                    mentions.remove(index);
+                }
+            }
+        }
+        self.rebuild_inbox();
+    }
+
     pub fn set_builds(&mut self, builds: Vec<Build>) {
         self.builds = Some(builds);
         self.rebuild_inbox();
@@ -1830,6 +1894,103 @@ mod tests {
 
         assert_eq!(data.inbox().len(), 1);
         data.set_mentions(Vec::new());
+        assert!(data.inbox().is_empty());
+    }
+
+    fn mention_of(id: u32, title: &str) -> Mention {
+        Mention {
+            item: work_item(id, title, "Bug", "Active"),
+            date: "2026-10-01T10:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn replacing_my_pr_keeps_its_signals_and_none_removes_it_from_the_inbox() {
+        let mut data = Data::default();
+        data.set_my_prs(vec![pull_request(1, "Mine", "me", "2026-10-01T10:00:00Z")]);
+        data.set_pr_signals(
+            1,
+            Signals {
+                waiting: true,
+                ..Signals::default()
+            },
+        );
+
+        data.replace_pr(
+            1,
+            Some(pull_request(1, "Renamed", "me", "2026-10-01T10:00:00Z")),
+        );
+        assert_eq!(data.my_prs().unwrap()[0].title, "Renamed");
+        assert_eq!(data.inbox().len(), 1);
+
+        data.replace_pr(1, None);
+        assert!(data.my_prs().unwrap().is_empty());
+        assert!(data.pr_signals().is_empty());
+        assert!(data.inbox().is_empty());
+    }
+
+    #[test]
+    fn replacing_an_other_pr_enters_and_leaves_the_inbox_by_its_review() {
+        let mut data = Data::default();
+        let mut waiting = pull_request(2, "Theirs", "u", "2026-10-01T10:00:00Z");
+        waiting.review.since = Some("2026-10-02T10:00:00Z".into());
+        data.set_other_prs(vec![
+            waiting,
+            pull_request(3, "Quiet", "u", "2026-10-01T10:00:00Z"),
+        ]);
+        assert_eq!(data.inbox().len(), 1);
+
+        data.replace_pr(
+            2,
+            Some(pull_request(2, "Theirs", "u", "2026-10-01T10:00:00Z")),
+        );
+        assert!(data.inbox().is_empty());
+
+        let mut waiting = pull_request(3, "Quiet", "u", "2026-10-01T10:00:00Z");
+        waiting.review.since = Some("2026-10-03T10:00:00Z".into());
+        data.replace_pr(3, Some(waiting));
+        assert_eq!(inbox_keys(&data).len(), 1);
+
+        data.replace_pr(3, None);
+        assert!(data.inbox().is_empty());
+        assert_eq!(ids_of_prs(data.other_prs().unwrap()), [2]);
+    }
+
+    #[test]
+    fn replacing_a_work_item_updates_every_list_and_the_mention() {
+        let mut data = data();
+        data.ready_work_items = Some(vec![work_item(10, "Story", "User Story", "Active")]);
+        data.set_mentions(vec![mention_of(10, "Story")]);
+
+        data.replace_work_item(&work_item(10, "Renamed", "User Story", "Active"));
+
+        assert_eq!(
+            data.my_work_items.as_ref().unwrap()[0].fields.title,
+            "Renamed"
+        );
+        assert_eq!(
+            data.ready_work_items.as_ref().unwrap()[0].fields.title,
+            "Renamed"
+        );
+        assert_eq!(data.inbox().len(), 1);
+        assert!(
+            data.detail(Panel::Inbox, 0)
+                .is_some_and(|detail| detail.search_text().contains("Renamed"))
+        );
+    }
+
+    #[test]
+    fn setting_a_mention_swaps_or_removes_it_and_never_adds_one() {
+        let mut data = Data::default();
+        data.set_mentions(vec![mention_of(20, "Mentioned")]);
+
+        data.set_mention(21, Some(mention_of(21, "Unlisted")));
+        assert_eq!(data.inbox().len(), 1);
+
+        data.set_mention(20, Some(mention_of(20, "Again")));
+        assert_eq!(data.inbox().len(), 1);
+
+        data.set_mention(20, None);
         assert!(data.inbox().is_empty());
     }
 

@@ -40,7 +40,7 @@ impl App {
             return;
         };
         self.error = None;
-        let full = loads.len() == ALL.len();
+        let full = ALL.iter().all(|load| loads.contains(load));
         if full {
             self.last_refresh = Instant::now();
             self.track_inbox();

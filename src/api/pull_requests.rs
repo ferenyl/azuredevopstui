@@ -247,6 +247,39 @@ impl ProjectApi {
         Ok(pr)
     }
 
+    /// The current version of `pr`, in any state.
+    #[allow(dead_code)] // wired up by the targeted refresh of single items
+    pub async fn refresh_pull_request(&self, pr: &PullRequest) -> Result<PullRequest> {
+        self.pull_request(
+            &pr.repository.project.id,
+            &pr.repository.id,
+            pr.pull_request_id,
+        )
+        .await
+    }
+
+    /// The current version of someone else's PR with fresh review signals. `None` when it is no
+    /// longer active or the user created it.
+    #[allow(dead_code)] // wired up by the targeted refresh of single items
+    pub async fn refresh_other_pull_request(
+        &self,
+        pr: &PullRequest,
+        user_id: &str,
+    ) -> Result<Option<PullRequest>> {
+        let mut fresh = self.refresh_pull_request(pr).await?;
+        self.reviews
+            .lock()
+            .expect("review cache")
+            .remove(&fresh.pull_request_id);
+        if fresh.status != "active" || fresh.created_by.id == user_id {
+            return Ok(None);
+        }
+        let (approved, review) = self.review(&fresh, user_id, Instant::now()).await?;
+        fresh.approved = approved;
+        fresh.review = review;
+        Ok(Some(fresh))
+    }
+
     /// Merge strategies the target branch policies allow.
     pub async fn merge_strategies(&self, pr: &PullRequest) -> Result<Vec<MergeStrategy>> {
         let policies = self.policy_evaluations(pr).await?;
@@ -967,6 +1000,124 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
             .mount(server)
             .await;
+    }
+
+    const REPO_PR_PATH: &str = "/contoso/project-id/_apis/git/repositories/repo-id/pullRequests";
+
+    async fn mount_pull_request(server: &MockServer, value: Value) {
+        let id = value["pullRequestId"].as_u64().unwrap();
+        Mock::given(method("GET"))
+            .and(path(format!("{REPO_PR_PATH}/{id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(value))
+            .mount(server)
+            .await;
+    }
+
+    async fn mount_no_policies(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path("/contoso/project-id/_apis/policy/evaluations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "value": [] })))
+            .mount(server)
+            .await;
+    }
+
+    fn my_reply_thread(liked: bool) -> Value {
+        let liked_by = if liked {
+            json!([{ "id": "me", "displayName": "Me" }])
+        } else {
+            json!([])
+        };
+        json!({
+            "id": 1,
+            "status": "active",
+            "comments": [
+                { "author": { "id": "me", "displayName": "Me" }, "content": "Why?",
+                  "commentType": "text", "publishedDate": "2026-10-01T10:00:00Z" },
+                { "author": { "id": "other", "displayName": "Bo" }, "content": "Because",
+                  "commentType": "text", "publishedDate": "2026-10-02T10:00:00Z",
+                  "usersLiked": liked_by }
+            ]
+        })
+    }
+
+    #[tokio::test]
+    async fn refreshing_an_inactive_pull_request_gives_none() {
+        let server = MockServer::start().await;
+        let mut abandoned = pull_request_json(1, "Gone", "other", "2026-10-01T10:00:00Z");
+        abandoned["status"] = json!("abandoned");
+        mount_pull_request(&server, abandoned).await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(1, "Gone", "other", "2026-10-01T10:00:00Z");
+
+        let refreshed = client.refresh_other_pull_request(&pr, "me").await.unwrap();
+
+        assert!(refreshed.is_none());
+    }
+
+    #[tokio::test]
+    async fn refreshing_the_users_own_pull_request_gives_none() {
+        let server = MockServer::start().await;
+        mount_pull_request(
+            &server,
+            pull_request_json(1, "Mine", "me", "2026-10-01T10:00:00Z"),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(1, "Mine", "other", "2026-10-01T10:00:00Z");
+
+        assert!(
+            client
+                .refresh_other_pull_request(&pr, "me")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn refreshing_a_pull_request_reloads_its_threads_past_the_cache() {
+        let server = MockServer::start().await;
+        mount_pull_request(
+            &server,
+            pull_request_json(1, "Theirs", "other", "2026-10-01T10:00:00Z"),
+        )
+        .await;
+        mount_no_policies(&server).await;
+        Mock::given(method("GET"))
+            .and(path(format!("{REPO_PR_PATH}/1/threads")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "value": [my_reply_thread(false)] })),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("{REPO_PR_PATH}/1/threads")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "value": [my_reply_thread(true)] })),
+            )
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(1, "Theirs", "other", "2026-10-01T10:00:00Z");
+
+        let before = client
+            .refresh_other_pull_request(&pr, "me")
+            .await
+            .unwrap()
+            .unwrap();
+        let after = client
+            .refresh_other_pull_request(&pr, "me")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(before.review.replies, 1);
+        assert!(before.review.since.is_some());
+        assert_eq!(after.review.replies, 0);
+        assert!(after.review.since.is_none());
     }
 
     #[test]
