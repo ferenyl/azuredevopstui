@@ -87,7 +87,7 @@ impl App {
             if let Load::PullRequest(id) = load
                 && wanted(self, *load)
             {
-                self.load_pull_request(*id);
+                self.load_pull_request(*id, loads);
             }
         }
 
@@ -95,7 +95,7 @@ impl App {
             if let Load::WorkItem(id) = load
                 && wanted(self, *load)
             {
-                self.load_work_item(*id);
+                self.load_work_item(*id, loads);
             }
         }
 
@@ -340,7 +340,7 @@ impl App {
     }
 
     /// Fetches one work item again, and its mention when it is listed in the inbox.
-    fn load_work_item(&mut self, id: u32) {
+    fn load_work_item(&mut self, id: u32, loads: &[Load]) {
         let (Some(api), Some(user)) = (self.api(), self.user.clone()) else {
             return;
         };
@@ -351,7 +351,7 @@ impl App {
         // A list response in flight may predate the change and overwrite the fresh item.
         let restart: Vec<Load> = [Load::Sprint, Load::Mentions]
             .into_iter()
-            .filter(|load| self.loads.is_loading(*load))
+            .filter(|load| self.loads.is_loading(*load) && !loads.contains(load))
             .collect();
         self.spawn_load(Load::WorkItem(id), async move {
             let result = async {
@@ -374,7 +374,7 @@ impl App {
     }
 
     /// Fetches one PR again, and checks it against the inbox when it arrives.
-    fn load_pull_request(&mut self, id: u32) {
+    fn load_pull_request(&mut self, id: u32, loads: &[Load]) {
         let (Some(api), Some(user)) = (self.api(), self.user.clone()) else {
             return;
         };
@@ -411,15 +411,20 @@ impl App {
         } else {
             Load::OtherPullRequests
         };
-        let restart_list = self.loads.is_loading(list);
+        let restart_list = self.loads.is_loading(list) && !loads.contains(&list);
         let user_id = user.id.clone();
+        let filter = self
+            .config
+            .as_ref()
+            .map(|config| config.other_prs_filter.clone())
+            .unwrap_or_default();
         self.spawn_load(Load::PullRequest(id), async move {
             let result = if mine {
                 api.refresh_pull_request(&pr)
                     .await
                     .map(|fresh| (fresh.status == "active").then_some(fresh))
             } else {
-                api.refresh_other_pull_request(&pr, &user_id).await
+                api.refresh_other_pull_request(&pr, &user_id, &filter).await
             };
             Message::PullRequestRefreshed { id, mine, result }
         });

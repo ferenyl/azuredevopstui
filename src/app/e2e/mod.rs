@@ -21,6 +21,7 @@ mod navigation;
 mod notifications;
 mod pipeline_actions;
 mod pipeline_logs;
+mod refresh_races;
 mod scroll;
 mod search;
 mod tags;

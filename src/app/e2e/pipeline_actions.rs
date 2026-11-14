@@ -312,6 +312,44 @@ async fn rerunning_the_open_run_moves_the_detail_to_the_new_run() {
 }
 
 #[tokio::test]
+async fn queueing_on_another_branch_keeps_the_detail_on_the_open_run() {
+    let mut harness = with_build("completed").await;
+    expect_queued_run(
+        &harness,
+        json!({ "definition": { "id": 7 }, "sourceBranch": "refs/heads/release" }),
+        queued_run("refs/heads/release"),
+    )
+    .await;
+    harness.press(KeyCode::Enter);
+    harness.settle().await;
+    open_menu(&mut harness).await;
+    harness.press(KeyCode::Char('j'));
+    harness.press(KeyCode::Enter);
+    wait_for_popup(&mut harness, |p| matches!(p, Popup::Text { .. })).await;
+    for _ in 0.."feature/101".len() {
+        harness.press(KeyCode::Backspace);
+    }
+    harness.type_text("release");
+    harness.press(KeyCode::Enter);
+    harness.wait_for_text("Queue orders-ci on release?").await;
+    harness.press(KeyCode::Char('y'));
+    harness.settle().await;
+
+    // The old run stays listed, and the open detail still shows it.
+    let mut listed = listed_ids(&harness);
+    listed.sort_unstable();
+    assert_eq!(listed, [501, 502]);
+    assert!(
+        harness
+            .app
+            .detail
+            .as_ref()
+            .is_some_and(|detail| detail.is_build(501))
+    );
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
 async fn refreshing_still_lists_the_pipeline_runs() {
     let mut harness = with_build("completed").await;
     let before = harness.ado.received("GET", "/build/builds").await;

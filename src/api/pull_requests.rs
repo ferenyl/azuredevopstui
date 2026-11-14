@@ -258,11 +258,13 @@ impl ProjectApi {
     }
 
     /// The current version of someone else's PR with fresh review signals. `None` when it is no
-    /// longer active or the user created it.
+    /// longer active, the user created it, or it no longer matches the reviewer and creator
+    /// `filter` of the list.
     pub async fn refresh_other_pull_request(
         &self,
         pr: &PullRequest,
         user_id: &str,
+        filter: &OtherPrsFilter,
     ) -> Result<Option<PullRequest>> {
         let mut fresh = self.refresh_pull_request(pr).await?;
         self.reviews
@@ -272,10 +274,33 @@ impl ProjectApi {
         if fresh.status != "active" || fresh.created_by.id == user_id {
             return Ok(None);
         }
+        if !self.matches_filter(&fresh, filter).await? {
+            return Ok(None);
+        }
         let (approved, review) = self.review(&fresh, user_id, Instant::now()).await?;
         fresh.approved = approved;
         fresh.review = review;
         Ok(Some(fresh))
+    }
+
+    /// Whether `pr` is still one the reviewer and creator `filter` would list.
+    async fn matches_filter(&self, pr: &PullRequest, filter: &OtherPrsFilter) -> Result<bool> {
+        if filter.reviewers.is_empty() && filter.creators.is_empty() {
+            return Ok(true);
+        }
+        for name in &filter.reviewers {
+            let id = self.identity_id(name).await?;
+            if pr.reviewers.iter().any(|r| r.id.eq_ignore_ascii_case(&id)) {
+                return Ok(true);
+            }
+        }
+        for name in &filter.creators {
+            let id = self.identity_id(name).await?;
+            if pr.created_by.id.eq_ignore_ascii_case(&id) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Merge strategies the target branch policies allow.
@@ -1047,7 +1072,10 @@ mod tests {
         let client = ProjectApi::with_base_url(&server.uri());
         let pr = pull_request(1, "Gone", "other", "2026-10-01T10:00:00Z");
 
-        let refreshed = client.refresh_other_pull_request(&pr, "me").await.unwrap();
+        let refreshed = client
+            .refresh_other_pull_request(&pr, "me", &OtherPrsFilter::default())
+            .await
+            .unwrap();
 
         assert!(refreshed.is_none());
     }
@@ -1065,11 +1093,70 @@ mod tests {
 
         assert!(
             client
-                .refresh_other_pull_request(&pr, "me")
+                .refresh_other_pull_request(&pr, "me", &OtherPrsFilter::default())
                 .await
                 .unwrap()
                 .is_none()
         );
+    }
+
+    async fn mount_group_identity(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path("/contoso/_apis/identities"))
+            .and(query_param("filterValue", "[MyProject]\\Developers"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "value": [{ "id": "group-id" }] })),
+            )
+            .mount(server)
+            .await;
+    }
+
+    fn filtered_by_reviewer() -> OtherPrsFilter {
+        OtherPrsFilter {
+            reviewers: vec!["[MyProject]\\Developers".into()],
+            ..OtherPrsFilter::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn refreshing_drops_a_pull_request_the_reviewer_filter_no_longer_matches() {
+        let server = MockServer::start().await;
+        mount_group_identity(&server).await;
+        mount_pull_request(
+            &server,
+            pull_request_json(1, "Theirs", "other", "2026-10-01T10:00:00Z"),
+        )
+        .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(1, "Theirs", "other", "2026-10-01T10:00:00Z");
+
+        let refreshed = client
+            .refresh_other_pull_request(&pr, "me", &filtered_by_reviewer())
+            .await
+            .unwrap();
+
+        assert!(refreshed.is_none());
+    }
+
+    #[tokio::test]
+    async fn refreshing_keeps_a_pull_request_the_reviewer_filter_still_matches() {
+        let server = MockServer::start().await;
+        mount_group_identity(&server).await;
+        let mut json = pull_request_json(1, "Theirs", "other", "2026-10-01T10:00:00Z");
+        json["reviewers"] = json!([{ "id": "GROUP-ID", "displayName": "Developers", "vote": 0 }]);
+        mount_pull_request(&server, json).await;
+        mount_no_policies(&server).await;
+        mount_empty_threads(&server).await;
+        let client = ProjectApi::with_base_url(&server.uri());
+        let pr = pull_request(1, "Theirs", "other", "2026-10-01T10:00:00Z");
+
+        let refreshed = client
+            .refresh_other_pull_request(&pr, "me", &filtered_by_reviewer())
+            .await
+            .unwrap();
+
+        assert!(refreshed.is_some());
     }
 
     #[tokio::test]
@@ -1102,12 +1189,12 @@ mod tests {
         let pr = pull_request(1, "Theirs", "other", "2026-10-01T10:00:00Z");
 
         let before = client
-            .refresh_other_pull_request(&pr, "me")
+            .refresh_other_pull_request(&pr, "me", &OtherPrsFilter::default())
             .await
             .unwrap()
             .unwrap();
         let after = client
-            .refresh_other_pull_request(&pr, "me")
+            .refresh_other_pull_request(&pr, "me", &OtherPrsFilter::default())
             .await
             .unwrap()
             .unwrap();

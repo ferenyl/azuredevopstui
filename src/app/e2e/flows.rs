@@ -594,7 +594,12 @@ pub(super) fn assert_refetches_only_pull_request(requests: &[String], id: u32) {
             .any(|r| r.starts_with("GET ") && r.ends_with(&single)),
         "{id}: {requests:?}"
     );
-    assert_only_requests_to(requests, &[], &["git/pullrequests", "builds", "wiql"]);
+    // The list of PRs ends in `pullrequests`; a single PR is `pullRequests/{id}`.
+    assert!(
+        requests.iter().all(|r| !r.ends_with("/git/pullrequests")),
+        "{requests:?}"
+    );
+    assert_only_requests_to(requests, &[], &["builds", "wiql"]);
 }
 
 /// Answers the others' PRs list with `prs` instead of its fixture.
@@ -832,7 +837,7 @@ async fn tagging_with_the_item_open_reloads_only_its_detail() {
     );
     for other in ["pullrequests", "builds", "iterations", "wiql"] {
         assert!(
-            requests.iter().all(|r| !r.contains(other)),
+            requests.iter().all(|r| !r.to_lowercase().contains(other)),
             "{other}: {requests:?}"
         );
     }
@@ -851,7 +856,7 @@ async fn commenting_reloads_only_the_work_item() {
     assert_eq!(count(&requests, "workitemsbatch"), 1, "{requests:?}");
     for other in ["pullrequests", "builds", "iterations", "policy", "wiql"] {
         assert!(
-            requests.iter().all(|r| !r.contains(other)),
+            requests.iter().all(|r| !r.to_lowercase().contains(other)),
             "{other}: {requests:?}"
         );
     }
@@ -897,7 +902,7 @@ pub(super) fn assert_only_requests_to(requests: &[String], touched: &[&str], unt
     }
     for other in untouched {
         assert!(
-            requests.iter().all(|r| !r.contains(other)),
+            requests.iter().all(|r| !r.to_lowercase().contains(other)),
             "{other}: {requests:?}"
         );
     }
@@ -1206,7 +1211,7 @@ async fn commenting_on_a_mentioned_item_drops_it_with_one_comments_fetch() {
     assert_eq!(count(&requests, "workitemsbatch"), 1, "{requests:?}");
     for other in ["wiql", "pullrequests", "builds", "policy"] {
         assert!(
-            requests.iter().all(|r| !r.contains(other)),
+            requests.iter().all(|r| !r.to_lowercase().contains(other)),
             "{other}: {requests:?}"
         );
     }

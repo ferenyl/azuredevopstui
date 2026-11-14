@@ -111,6 +111,21 @@ fn markdown_comment(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_pull_request_change_reloads_only_that_pull_request_and_the_detail() {
+        use crate::app::loads::Load;
+        use crate::app::test_helpers::app;
+        use crate::test_support::pull_request;
+
+        let app = app();
+        let pr = pull_request(7, "Fix", "me", "2026-10-01T10:00:00Z");
+
+        assert_eq!(
+            app.reload_after_pr_change(&pr),
+            [Load::PullRequest(7), Load::Detail]
+        );
+    }
+
     use crossterm::event::KeyCode;
 
     use crate::app::test_helpers::{app, press};

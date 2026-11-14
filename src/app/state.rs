@@ -1022,6 +1022,21 @@ impl Data {
         self.rebuild_inbox();
     }
 
+    /// Drops a work item that no longer exists from every list.
+    pub fn remove_work_item(&mut self, id: u32) {
+        for items in [
+            &mut self.my_work_items,
+            &mut self.ready_work_items,
+            &mut self.board_items,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            items.retain(|item| item.id != id);
+        }
+        self.set_mention(id, None);
+    }
+
     pub fn mentions(&self) -> Option<&[Mention]> {
         self.mentions.as_deref()
     }
@@ -1054,7 +1069,10 @@ impl Data {
             return;
         };
         let key = |build: &Build| (build.definition.id, build.source_branch.clone());
-        match builds.iter().position(|old| key(old) == key(&build)) {
+        let by_id = builds.iter().position(|old| old.id == build.id);
+        match by_id.or_else(|| builds.iter().position(|old| key(old) == key(&build))) {
+            // A newer run of the same pipeline and branch stays: this one is out of date.
+            Some(index) if builds[index].id > build.id => return,
             Some(index) => builds[index] = build,
             None => builds.push(build),
         }
@@ -2038,6 +2056,74 @@ mod tests {
 
         let ids: Vec<u32> = data.shown_builds().unwrap().iter().map(|b| b.id).collect();
         assert_eq!(ids, [3, 2]);
+        assert!(data.inbox().is_empty());
+    }
+
+    #[test]
+    fn an_older_run_does_not_replace_a_newer_run_of_the_same_branch() {
+        let mut data = Data::default();
+        data.set_builds(vec![build_on(
+            5,
+            7,
+            "refs/heads/main",
+            "succeeded",
+            "2026-10-05T10:00:00Z",
+        )]);
+
+        // A cancelled run that was refreshed after a newer one was queued.
+        data.replace_build(build_on(
+            4,
+            7,
+            "refs/heads/main",
+            "canceled",
+            "2026-10-04T10:00:00Z",
+        ));
+
+        let ids: Vec<u32> = data.shown_builds().unwrap().iter().map(|b| b.id).collect();
+        assert_eq!(ids, [5]);
+    }
+
+    #[test]
+    fn a_refreshed_run_is_found_by_its_id() {
+        let mut data = Data::default();
+        data.set_builds(vec![build_on(
+            4,
+            7,
+            "refs/heads/main",
+            "failed",
+            "2026-10-04T10:00:00Z",
+        )]);
+
+        data.replace_build(build_on(
+            4,
+            7,
+            "refs/heads/main",
+            "canceled",
+            "2026-10-04T10:00:00Z",
+        ));
+
+        let builds = data.shown_builds().unwrap();
+        assert_eq!(builds.len(), 1);
+        assert_eq!(builds[0].result.as_deref(), Some("canceled"));
+    }
+
+    #[test]
+    fn removing_a_work_item_drops_it_from_every_list_and_the_inbox() {
+        let mut data = data();
+        data.ready_work_items = Some(vec![work_item(10, "Story", "User Story", "Active")]);
+        data.set_mentions(vec![mention_of(10, "Story")]);
+        assert_eq!(data.inbox().len(), 1);
+
+        data.remove_work_item(10);
+
+        assert!(
+            data.my_work_items
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|i| i.id != 10)
+        );
+        assert!(data.ready_work_items.as_ref().unwrap().is_empty());
         assert!(data.inbox().is_empty());
     }
 

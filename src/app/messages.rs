@@ -281,7 +281,7 @@ impl App {
                     }
                     match (item, mention) {
                         (_, Some(mention)) => self.data.set_mention(id, mention),
-                        (None, None) => self.data.set_mention(id, None),
+                        (None, None) => self.data.remove_work_item(id),
                         (Some(_), None) => {}
                     }
                 }
@@ -291,7 +291,15 @@ impl App {
                 Ok(Some(new)) => {
                     tracing::info!(id, "pipeline run queued");
                     self.data.replace_build(new.clone());
-                    let shown = self.detail.as_ref().is_some_and(|d| d.is_build(id));
+                    // Only the run that was acted on is replaced: another branch adds a row.
+                    let shown = match &self.detail {
+                        Some(super::Detail::Build(old)) => {
+                            old.id == id
+                                && old.definition.id == new.definition.id
+                                && old.source_branch == new.source_branch
+                        }
+                        _ => false,
+                    };
                     let mut loads = Vec::new();
                     if shown {
                         // The timeline follows the new run.
@@ -311,6 +319,10 @@ impl App {
                     let mut loads = vec![Load::Build(id)];
                     if self.detail.as_ref().is_some_and(|d| d.is_build(id)) {
                         loads.push(Load::Detail);
+                    }
+                    // A list response in flight may predate the cancel.
+                    if self.loads.is_loading(Load::Builds) {
+                        loads.push(Load::Builds);
                     }
                     self.reload_only(&loads);
                 }
