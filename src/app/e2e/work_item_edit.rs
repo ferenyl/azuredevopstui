@@ -62,15 +62,17 @@ async fn reload_detail_with(harness: &Harness, changes: Value) {
         .await;
 }
 
-/// Serves my work items with `changes` to 301 once the sprint reloads.
+/// Serves 301 with `changes` once it is fetched again on its own.
 async fn reload_mine_with(harness: &Harness, changes: Value) {
+    let mut mine = mine_with(changes);
+    mine["value"].as_array_mut().expect("items").truncate(1);
     harness
         .ado
         .expect(
             Mock::given(method("POST"))
                 .and(path(BATCH))
-                .and(body_string_contains("\"ids\":[301,302]")),
-            ResponseTemplate::new(200).set_body_json(mine_with(changes)),
+                .and(body_string_contains("\"ids\":[301]")),
+            ResponseTemplate::new(200).set_body_json(mine),
             1..,
         )
         .await;

@@ -998,7 +998,6 @@ impl Data {
     }
 
     /// Swaps in the fresh version of one work item wherever it is listed.
-    #[allow(dead_code)] // wired up by the targeted refresh of single items
     pub fn replace_work_item(&mut self, item: &WorkItem) {
         for items in [
             &mut self.my_work_items,
@@ -1023,9 +1022,12 @@ impl Data {
         self.rebuild_inbox();
     }
 
+    pub fn mentions(&self) -> Option<&[Mention]> {
+        self.mentions.as_deref()
+    }
+
     /// Swaps in the fresh mention of a work item, or drops it on `None`. Only listed mentions
     /// change: an action never creates one.
-    #[allow(dead_code)] // wired up by the targeted refresh of single items
     pub fn set_mention(&mut self, id: u32, mention: Option<Mention>) {
         if let Some(mentions) = &mut self.mentions
             && let Some(index) = mentions.iter().position(|mention| mention.item.id == id)

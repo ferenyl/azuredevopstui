@@ -27,6 +27,15 @@ pub(in crate::app) enum WorkItemChange {
 }
 
 impl WorkItemChange {
+    /// The work item data to load again. Whether the item still belongs to the sprint lists depends
+    /// on rules only the server evaluates, so those load again unless the change cannot move it.
+    pub(in crate::app) fn reload(&self, id: u32) -> Vec<Load> {
+        match self {
+            Self::Title(_) | Self::Priority(_) => vec![Load::WorkItem(id), Load::Detail],
+            _ => vec![Load::WorkItem(id), Load::Sprint, Load::Detail],
+        }
+    }
+
     /// The field reference name and its new value.
     fn field(&self) -> (&'static str, Value) {
         match self {
@@ -287,6 +296,7 @@ impl App {
             item.fields.board_column_done.unwrap_or(false),
         );
         let board = self.board.clone();
+        let reload = change.reload(id);
         let sets_state = matches!(
             change,
             WorkItemChange::State(_) | WorkItemChange::Unassign(Some(_))
@@ -312,11 +322,7 @@ impl App {
                 }
                 change => api.update_work_item(id, &[change.field()]).await,
             };
-            Message::WorkItemUpdated {
-                id,
-                reload: vec![Load::Sprint, Load::Mentions, Load::Detail],
-                result,
-            }
+            Message::WorkItemUpdated { id, reload, result }
         });
     }
 }
@@ -357,10 +363,33 @@ impl AssigneePicker {
 
 #[cfg(test)]
 mod tests {
+    use super::WorkItemChange;
+    use crate::app::loads::Load;
+
+    #[test]
+    fn a_work_item_change_reloads_only_work_item_data() {
+        let changes = [
+            WorkItemChange::State("Closed".into()),
+            WorkItemChange::Title("x".into()),
+            WorkItemChange::AssignTo("me".into()),
+            WorkItemChange::Unassign(None),
+            WorkItemChange::Priority(1),
+            WorkItemChange::Iteration("p".into()),
+        ];
+        for change in changes {
+            let reload = change.reload(7);
+            assert!(reload.contains(&Load::WorkItem(7)), "{reload:?}");
+            assert!(
+                reload
+                    .iter()
+                    .all(|load| matches!(load, Load::WorkItem(7) | Load::Sprint | Load::Detail)),
+                "{reload:?}"
+            );
+        }
+    }
     use crossterm::event::KeyCode;
     use serde_json::json;
 
-    use super::WorkItemChange;
     use crate::api::Person;
     use crate::app::message::Message;
     use crate::app::test_helpers::{app, assign_first_item_to, ctrl, press};

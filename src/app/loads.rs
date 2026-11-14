@@ -17,7 +17,6 @@ pub enum Load {
     /// One pull request, after a change to it.
     PullRequest(u32),
     /// One work item, after a change to it.
-    #[allow(dead_code)] // wired up by the targeted refresh of work items
     WorkItem(u32),
     Files,
     Diff,

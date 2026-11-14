@@ -274,6 +274,19 @@ impl App {
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::WorkItemRefreshed { id, result } => match result {
+                Ok((item, mention)) => {
+                    if let Some(item) = &item {
+                        self.data.replace_work_item(item);
+                    }
+                    match (item, mention) {
+                        (_, Some(mention)) => self.data.set_mention(id, mention),
+                        (None, None) => self.data.set_mention(id, None),
+                        (Some(_), None) => {}
+                    }
+                }
+                Err(err) => self.report_error(err),
+            },
             Message::BuildUpdated { id, result } => match result {
                 Ok(()) => {
                     tracing::info!(id, "pipeline run updated");

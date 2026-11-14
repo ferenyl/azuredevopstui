@@ -258,14 +258,12 @@ impl ProjectApi {
     }
 
     /// The current version of one work item, `None` when it is gone.
-    #[allow(dead_code)] // wired up by the targeted refresh of single items
     pub async fn work_item(&self, id: u32) -> Result<Option<WorkItem>> {
         Ok(self.work_items_batch(&[id]).await?.into_iter().next())
     }
 
     /// Whether `item` still has an unanswered mention of the user; `None` when it is closed or
     /// answered.
-    #[allow(dead_code)] // wired up by the targeted refresh of single items
     pub async fn mention(&self, item: WorkItem, user_id: &str) -> Result<Option<Mention>> {
         let closed = self
             .state_names_of(&CLOSED_CATEGORIES, &DEFAULT_CLOSED_STATES)

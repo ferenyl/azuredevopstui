@@ -150,7 +150,7 @@ impl App {
             let result = api.assign_work_item(id, &assignee).await;
             Message::WorkItemUpdated {
                 id,
-                reload: vec![Load::Sprint, Load::Mentions, Load::Detail],
+                reload: vec![Load::WorkItem(id), Load::Sprint, Load::Detail],
                 result,
             }
         });

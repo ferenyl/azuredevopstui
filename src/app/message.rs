@@ -109,6 +109,12 @@ pub enum Message {
         mine: bool,
         result: Result<Option<PullRequest>>,
     },
+    /// The fresh version of one work item. The mention is checked only for a listed mention:
+    /// `None` when it was not, `Some(None)` when it is answered or closed.
+    WorkItemRefreshed {
+        id: u32,
+        result: Result<(Option<WorkItem>, Option<Option<Mention>>)>,
+    },
     /// A pipeline run was queued or cancelled.
     BuildUpdated {
         id: u32,

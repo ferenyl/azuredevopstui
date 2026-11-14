@@ -79,6 +79,14 @@ impl App {
             }
         }
 
+        for load in loads {
+            if let Load::WorkItem(id) = load
+                && wanted(self, *load)
+            {
+                self.load_work_item(*id);
+            }
+        }
+
         if wanted(self, Load::OtherPullRequests) {
             self.spawn_load(Load::OtherPullRequests, async move {
                 Message::OtherPullRequests(
@@ -316,6 +324,40 @@ impl App {
                 };
                 Message::Image { url, result }
             });
+        }
+    }
+
+    /// Fetches one work item again, and its mention when it is listed in the inbox.
+    fn load_work_item(&mut self, id: u32) {
+        let (Some(api), Some(user)) = (self.api(), self.user.clone()) else {
+            return;
+        };
+        let mentioned = self
+            .data
+            .mentions()
+            .is_some_and(|mentions| mentions.iter().any(|mention| mention.item.id == id));
+        // A list response in flight may predate the change and overwrite the fresh item.
+        let restart: Vec<Load> = [Load::Sprint, Load::Mentions]
+            .into_iter()
+            .filter(|load| self.loads.is_loading(*load))
+            .collect();
+        self.spawn_load(Load::WorkItem(id), async move {
+            let result = async {
+                let Some(item) = api.work_item(id).await? else {
+                    return Ok((None, None));
+                };
+                let mention = if mentioned {
+                    Some(api.mention(item.clone(), &user.id).await?)
+                } else {
+                    None
+                };
+                Ok((Some(item), mention))
+            }
+            .await;
+            Message::WorkItemRefreshed { id, result }
+        });
+        if !restart.is_empty() {
+            self.reload_only(&restart);
         }
     }
 

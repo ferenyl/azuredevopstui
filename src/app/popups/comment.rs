@@ -49,7 +49,7 @@ impl App {
             let result = api.add_work_item_comment(id, &text).await;
             Message::WorkItemUpdated {
                 id,
-                reload: vec![Load::Mentions, Load::Detail],
+                reload: vec![Load::WorkItem(id), Load::Detail],
                 result,
             }
         });
