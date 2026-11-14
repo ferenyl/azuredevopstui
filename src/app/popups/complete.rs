@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::api::{CompletionOptions, PullRequest};
-use crate::app::loads::Load;
 use crate::app::message::Message;
 use crate::app::{App, CompletePicker, CompleteRow, ConfirmAction, Popup, Selection, TextInput};
 use crate::config::MergeStrategy;
@@ -122,17 +121,12 @@ impl App {
         } else {
             format!("completing !{}", pr.pull_request_id)
         };
+        let reload = self.reload_after_pr_change(&pr);
         self.spawn_action(label, async move {
-            let (result, reload) = if auto_complete {
-                (
-                    api.set_auto_complete(&pr, &user_id, &options).await,
-                    vec![Load::MyPullRequests, Load::Detail],
-                )
+            let result = if auto_complete {
+                api.set_auto_complete(&pr, &user_id, &options).await
             } else {
-                (
-                    api.complete_pull_request(&pr, &options).await,
-                    vec![Load::MyPullRequests, Load::OtherPullRequests, Load::Detail],
-                )
+                api.complete_pull_request(&pr, &options).await
             };
             Message::PullRequestUpdated {
                 id: pr.pull_request_id,
@@ -146,12 +140,13 @@ impl App {
         let Some(api) = self.api() else {
             return;
         };
+        let reload = self.reload_after_pr_change(&pr);
         let label = format!("cancelling auto-complete on !{}", pr.pull_request_id);
         self.spawn_action(label, async move {
             let result = api.cancel_auto_complete(&pr).await;
             Message::PullRequestUpdated {
                 id: pr.pull_request_id,
-                reload: vec![Load::MyPullRequests, Load::Detail],
+                reload,
                 result,
             }
         });

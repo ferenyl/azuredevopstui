@@ -565,6 +565,38 @@ pub(super) fn fixture_pull_requests(file: &str) -> Vec<serde_json::Value> {
         .clone()
 }
 
+/// The PR of a single-PR fixture such as `pr-101.json`.
+pub(super) fn fixture_pull_request(file: &str) -> serde_json::Value {
+    let content = std::fs::read_to_string(format!("{FIXTURES}/{file}")).expect("fixture");
+    let mut fixture: serde_json::Value = serde_json::from_str(&content).expect("fixture json");
+    fixture["body"].take()
+}
+
+/// Answers the single-PR request of `target` with `pr` instead of its fixture.
+pub(super) async fn answer_pull_request(harness: &Harness, target: &str, pr: serde_json::Value) {
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET")).and(path(target)),
+            ResponseTemplate::new(200).set_body_json(pr),
+            1..,
+        )
+        .await;
+}
+
+/// After a change to PR `id` only that PR is fetched again: no list of PRs, and nothing of work
+/// items (except the linked ones of an open detail), sprints or builds.
+pub(super) fn assert_refetches_only_pull_request(requests: &[String], id: u32) {
+    let single = format!("/pullRequests/{id}");
+    assert!(
+        requests
+            .iter()
+            .any(|r| r.starts_with("GET ") && r.ends_with(&single)),
+        "{id}: {requests:?}"
+    );
+    assert_only_requests_to(requests, &[], &["git/pullrequests", "builds", "wiql"]);
+}
+
 /// Answers the others' PRs list with `prs` instead of its fixture.
 async fn other_pull_requests(harness: &Harness, prs: Vec<serde_json::Value>, times: u64) {
     harness
@@ -945,14 +977,18 @@ async fn completing_a_pull_request_reloads_only_the_pull_requests() {
     harness.press(KeyCode::Char('c'));
     wait_for_popup(&mut harness, |p| matches!(p, Popup::Complete(_))).await;
 
+    let mut completed = fixture_pull_request("pr-101.json");
+    completed["status"] = "completed".into();
+    answer_pull_request(&harness, PR_101, completed).await;
+
     let requests = requests_after_confirming(&mut harness).await;
 
     assert!(requests.contains(&format!("PATCH {PR_101}")));
-    assert_only_requests_to(
-        &requests,
-        &["pullrequests"],
-        &["builds", "wiql", "workitemsbatch"],
-    );
+    assert_refetches_only_pull_request(&requests, 101);
+    assert_only_requests_to(&requests, &[], &["workitemsbatch"]);
+    let listed = harness.app.data.my_prs().unwrap_or_default();
+    assert!(listed.iter().all(|pr| pr.pull_request_id != 101));
+    assert!(!harness.app.data.pr_signals().contains_key(&101));
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 

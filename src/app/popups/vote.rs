@@ -1,5 +1,4 @@
 use crate::api::PullRequest;
-use crate::app::loads::Load;
 use crate::app::message::Message;
 use crate::app::{App, Detail, Popup, Selection};
 
@@ -39,12 +38,13 @@ impl App {
             return;
         };
         let user_id = user.id.clone();
+        let reload = self.reload_after_pr_change(&pr);
         let label = format!("voting on !{}", pr.pull_request_id);
         self.spawn_action(label, async move {
             let result = api.vote(&pr, &user_id, vote).await;
             Message::PullRequestUpdated {
                 id: pr.pull_request_id,
-                reload: vec![Load::MyPullRequests, Load::OtherPullRequests, Load::Detail],
+                reload,
                 result,
             }
         });

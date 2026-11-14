@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use tokio::task::AbortHandle;
 
 /// A request whose response replaces one part of the shown data.
-#[allow(dead_code)] // wired up by the targeted refresh of single items
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Load {
     MyPullRequests,
@@ -18,6 +17,7 @@ pub enum Load {
     /// One pull request, after a change to it.
     PullRequest(u32),
     /// One work item, after a change to it.
+    #[allow(dead_code)] // wired up by the targeted refresh of work items
     WorkItem(u32),
     Files,
     Diff,

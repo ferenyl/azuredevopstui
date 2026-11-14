@@ -1,5 +1,4 @@
 use crate::api::{PolicyEvaluation, PullRequest};
-use crate::app::loads::Load;
 use crate::app::message::Message;
 use crate::app::{
     App, ConfirmAction, Detail, DetailInfo, Popup, PrAction, Selection, TextInput, TextTarget,
@@ -246,7 +245,7 @@ impl App {
         let Some(api) = self.api() else {
             return;
         };
-        let reload = vec![Load::MyPullRequests, Load::OtherPullRequests, Load::Detail];
+        let reload = self.reload_after_pr_change(&pr);
         let number = pr.pull_request_id;
         let label = match &change {
             PrChange::Abandon => format!("abandoning !{number}"),

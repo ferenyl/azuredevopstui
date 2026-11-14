@@ -64,7 +64,7 @@ impl App {
             return;
         };
         let parent = thread_id.map(|thread_id| self.first_comment_id(thread_id));
-        let reload = self.reload_after_thread_change(&pr);
+        let reload = self.reload_after_pr_change(&pr);
         let label = if thread_id.is_some() {
             format!("replying on !{}", pr.pull_request_id)
         } else {
@@ -83,18 +83,10 @@ impl App {
         });
     }
 
-    /// What to load again after a thread changed: the detail, and the markers of the PR.
-    pub(in crate::app) fn reload_after_thread_change(&self, pr: &PullRequest) -> Vec<Load> {
-        let mine = self
-            .user
-            .as_ref()
-            .is_some_and(|user| user.id.eq_ignore_ascii_case(&pr.created_by.id));
-        let markers = if mine {
-            Load::Signals(pr.pull_request_id)
-        } else {
-            Load::OtherPullRequests
-        };
-        vec![Load::Detail, markers]
+    /// What to load again after a change to `pr`: only that PR, which also checks the inbox again,
+    /// and the detail.
+    pub(in crate::app) fn reload_after_pr_change(&self, pr: &PullRequest) -> Vec<Load> {
+        vec![Load::PullRequest(pr.pull_request_id), Load::Detail]
     }
 
     /// Id of the first comment of a thread in the shown detail; replies hang under it.

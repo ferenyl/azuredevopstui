@@ -248,7 +248,6 @@ impl ProjectApi {
     }
 
     /// The current version of `pr`, in any state.
-    #[allow(dead_code)] // wired up by the targeted refresh of single items
     pub async fn refresh_pull_request(&self, pr: &PullRequest) -> Result<PullRequest> {
         self.pull_request(
             &pr.repository.project.id,
@@ -260,7 +259,6 @@ impl ProjectApi {
 
     /// The current version of someone else's PR with fresh review signals. `None` when it is no
     /// longer active or the user created it.
-    #[allow(dead_code)] // wired up by the targeted refresh of single items
     pub async fn refresh_other_pull_request(
         &self,
         pr: &PullRequest,

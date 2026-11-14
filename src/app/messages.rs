@@ -265,6 +265,15 @@ impl App {
                 }
                 Err(err) => self.report_error(err),
             },
+            Message::PullRequestRefreshed { id, mine, result } => match result {
+                Ok(pr) => {
+                    self.data.replace_pr(id, pr.clone());
+                    if let (true, Some(pr)) = (mine, pr) {
+                        self.load_signals(&[pr]);
+                    }
+                }
+                Err(err) => self.report_error(err),
+            },
             Message::BuildUpdated { id, result } => match result {
                 Ok(()) => {
                     tracing::info!(id, "pipeline run updated");

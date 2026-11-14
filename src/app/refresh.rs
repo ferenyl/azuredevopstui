@@ -71,6 +71,14 @@ impl App {
             });
         }
 
+        for load in loads {
+            if let Load::PullRequest(id) = load
+                && wanted(self, *load)
+            {
+                self.load_pull_request(*id);
+            }
+        }
+
         if wanted(self, Load::OtherPullRequests) {
             self.spawn_load(Load::OtherPullRequests, async move {
                 Message::OtherPullRequests(
@@ -308,6 +316,61 @@ impl App {
                 };
                 Message::Image { url, result }
             });
+        }
+    }
+
+    /// Fetches one PR again, and checks it against the inbox when it arrives.
+    fn load_pull_request(&mut self, id: u32) {
+        let (Some(api), Some(user)) = (self.api(), self.user.clone()) else {
+            return;
+        };
+        let find = |prs: Option<&[PullRequest]>| {
+            prs.into_iter()
+                .flatten()
+                .find(|pr| pr.pull_request_id == id)
+                .cloned()
+        };
+        let (listed, mine) = match (find(self.data.my_prs()), find(self.data.other_prs())) {
+            (Some(pr), _) => (Some(pr), true),
+            (None, Some(pr)) => (Some(pr), false),
+            (None, None) => (None, false),
+        };
+        let Some(pr) = listed else {
+            // Not in a list, like a reactivated PR: only the list can bring it back.
+            let shown = match &self.detail {
+                Some(Detail::PullRequest(pr)) if pr.pull_request_id == id => Some(pr.clone()),
+                _ => None,
+            };
+            if let Some(pr) = shown {
+                let mine = user.id.eq_ignore_ascii_case(&pr.created_by.id);
+                self.reload_only(&[if mine {
+                    Load::MyPullRequests
+                } else {
+                    Load::OtherPullRequests
+                }]);
+            }
+            return;
+        };
+        // A list response in flight may predate the change and overwrite the fresh PR.
+        let list = if mine {
+            Load::MyPullRequests
+        } else {
+            Load::OtherPullRequests
+        };
+        let restart_list = self.loads.is_loading(list);
+        let user_id = user.id.clone();
+        self.spawn_load(Load::PullRequest(id), async move {
+            let result = if mine {
+                api.refresh_pull_request(&pr)
+                    .await
+                    .map(|fresh| (fresh.status == "active").then_some(fresh))
+            } else {
+                api.refresh_other_pull_request(&pr, &user_id).await
+            };
+            Message::PullRequestRefreshed { id, mine, result }
+        });
+        if restart_list {
+            self.reload_only(&[list]);
         }
     }
 

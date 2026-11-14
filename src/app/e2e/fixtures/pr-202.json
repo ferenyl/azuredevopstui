@@ -1,0 +1,35 @@
+{
+  "method": "GET",
+  "path": "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/202",
+  "body": {
+    "pullRequestId": 202,
+    "title": "Fix login redirect",
+    "createdBy": {
+      "id": "other-id",
+      "displayName": "Olle Other"
+    },
+    "repository": {
+      "id": "repo-api",
+      "name": "orders-api",
+      "project": {
+        "id": "project-fabrikam",
+        "name": "Fabrikam"
+      }
+    },
+    "status": "active",
+    "sourceRefName": "refs/heads/feature/202",
+    "targetRefName": "refs/heads/main",
+    "creationDate": "2026-10-19T09:00:00Z",
+    "mergeStatus": "succeeded",
+    "lastMergeSourceCommit": {
+      "commitId": "c202"
+    },
+    "reviewers": [
+      {
+        "displayName": "Anna Reviewer",
+        "vote": 0,
+        "isRequired": true
+      }
+    ]
+  }
+}

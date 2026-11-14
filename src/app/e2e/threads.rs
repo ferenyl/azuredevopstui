@@ -5,7 +5,8 @@ use wiremock::{Mock, ResponseTemplate};
 
 use super::Harness;
 use super::flows::{
-    PR_101, assert_only_requests_to, connected, requests_after_confirming, select, wait_for_popup,
+    PR_101, assert_only_requests_to, assert_refetches_only_pull_request, connected,
+    requests_after_confirming, select, wait_for_popup,
 };
 use crate::app::{DetailInfo, DetailTab, Panel, Popup};
 
@@ -133,7 +134,7 @@ async fn m_without_a_selected_thread_starts_a_new_thread() {
 }
 
 #[tokio::test]
-async fn new_thread_on_someone_elses_pull_request_reloads_the_other_pull_requests() {
+async fn new_thread_on_someone_elses_pull_request_reloads_only_that_pull_request() {
     let mut harness = connected().await;
     expect_post(&harness, &format!("{PR_303}/threads"), r#""content":"Nit""#).await;
     open_comments(&mut harness, Panel::OtherPrs, 303).await;
@@ -147,7 +148,7 @@ async fn new_thread_on_someone_elses_pull_request_reloads_the_other_pull_request
         requests.contains(&format!("POST {PR_303}/threads")),
         "{requests:?}"
     );
-    assert_only_requests_to(&requests, &["git/pullrequests"], &["builds", "wiql"]);
+    assert_refetches_only_pull_request(&requests, 303);
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 
@@ -192,6 +193,87 @@ async fn resolving_a_thread_patches_its_status_and_shows_it_resolved() {
     );
     let screen = harness.screen();
     assert!(screen.contains("resolved"), "{screen}");
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+const PR_202: &str = "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/202";
+
+/// Thread 5 of PR 202 that I started, with a reply of Olle's and, once `answered`, mine under it.
+fn my_thread_on_202(answered: bool) -> Value {
+    let comment = |id: u32, author: &str, name: &str, date: &str| {
+        json!({
+            "id": id,
+            "author": { "id": author, "displayName": name },
+            "content": format!("comment {id}"),
+            "publishedDate": date,
+            "commentType": "text"
+        })
+    };
+    let mut comments = vec![
+        comment(1, "me-id", "Mona Me", "2026-10-22T10:00:00Z"),
+        comment(2, "other-id", "Olle Other", "2026-10-23T10:00:00Z"),
+    ];
+    if answered {
+        comments.push(comment(3, "me-id", "Mona Me", "2026-10-24T10:00:00Z"));
+    }
+    json!({ "value": [{ "id": 5, "status": "active", "comments": comments }] })
+}
+
+#[tokio::test]
+async fn answering_a_reply_on_someone_elses_pull_request_leaves_the_inbox_without_a_list_query() {
+    let mut harness = Harness::new().await;
+    let threads = Mock::given(method("GET")).and(path(format!("{PR_202}/threads")));
+    // The list refresh and the opened detail read the thread unanswered, the reloads answered.
+    harness
+        .ado
+        .expect_first(
+            Mock::given(method("GET")).and(path(format!("{PR_202}/threads"))),
+            ResponseTemplate::new(200).set_body_json(my_thread_on_202(false)),
+            2,
+        )
+        .await;
+    harness
+        .ado
+        .expect(
+            threads,
+            ResponseTemplate::new(200).set_body_json(my_thread_on_202(true)),
+            1..,
+        )
+        .await;
+    expect_post(
+        &harness,
+        &format!("{PR_202}/threads/5/comments"),
+        r#""content":"Done""#,
+    )
+    .await;
+    harness.connect().await;
+    let in_inbox = |harness: &Harness| {
+        harness
+            .app
+            .data
+            .inbox()
+            .iter()
+            .any(|entry| entry.detail.key() == "!202")
+    };
+    assert!(in_inbox(&harness));
+    open_comments(&mut harness, Panel::OtherPrs, 202).await;
+    harness.press(KeyCode::Char(']'));
+    harness.press(KeyCode::Char('m'));
+    wait_for_popup(&mut harness, |p| matches!(p, Popup::Text { .. })).await;
+    harness.type_text("Done");
+
+    let requests = requests_after_confirming(&mut harness).await;
+
+    assert!(
+        requests.contains(&format!("POST {PR_202}/threads/5/comments")),
+        "{requests:?}"
+    );
+    assert_refetches_only_pull_request(&requests, 202);
+    assert!(!in_inbox(&harness));
+    assert!(harness.app.data.other_prs().is_some_and(|prs| {
+        prs.iter()
+            .any(|pr| pr.pull_request_id == 202 && pr.review.since.is_none())
+    }));
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 

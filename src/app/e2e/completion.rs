@@ -5,8 +5,8 @@ use wiremock::{Mock, ResponseTemplate};
 
 use super::Harness;
 use super::flows::{
-    MY_PRS, PR_101, assert_only_requests_to, connected, fixture_pull_requests, mark_ready, select,
-    wait_for_popup,
+    MY_PRS, PR_101, answer_pull_request, assert_refetches_only_pull_request, connected,
+    fixture_pull_request, fixture_pull_requests, mark_ready, select, wait_for_popup,
 };
 use crate::app::{CompleteRow, Panel, Popup};
 
@@ -17,17 +17,11 @@ fn my_prs_with_auto_complete() -> Value {
     json!({ "value": prs })
 }
 
-async fn answer_my_prs_with_auto_complete(harness: &Harness) {
-    harness
-        .ado
-        .expect_first(
-            Mock::given(method("GET"))
-                .and(path(MY_PRS))
-                .and(query_param("searchCriteria.creatorId", "me-id")),
-            ResponseTemplate::new(200).set_body_json(my_prs_with_auto_complete()),
-            1,
-        )
-        .await;
+/// PR 101 as the single-PR request answers once auto-complete is set.
+async fn answer_pr_101_with_auto_complete(harness: &Harness) {
+    let mut pr = fixture_pull_request("pr-101.json");
+    pr["autoCompleteSetBy"] = json!({ "id": "me-id", "displayName": "Mona Me" });
+    answer_pull_request(harness, PR_101, pr).await;
 }
 
 /// Answers a `PATCH` of PR 101 whose body contains all `parts` and asserts it is sent once.
@@ -89,11 +83,11 @@ async fn auto_complete_is_set_on_a_pull_request_that_is_not_ready() {
         ],
     )
     .await;
-    answer_my_prs_with_auto_complete(&harness).await;
     select(&mut harness, Panel::MyPrs, 101);
     harness.press(KeyCode::Enter);
     open_popup(&mut harness).await;
     assert!(harness.screen().contains("[x] Set auto-complete"));
+    answer_pr_101_with_auto_complete(&harness).await;
 
     let requests = confirm(&mut harness).await;
 
@@ -101,7 +95,7 @@ async fn auto_complete_is_set_on_a_pull_request_that_is_not_ready() {
         requests.contains(&format!("PATCH {PR_101}")),
         "{requests:?}"
     );
-    assert_only_requests_to(&requests, &["pullrequests"], &["builds", "wiql"]);
+    assert_refetches_only_pull_request(&requests, 101);
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
     assert!(
         harness.screen().contains("set by Mona Me"),
@@ -171,7 +165,7 @@ async fn auto_complete_is_cancelled_with_the_empty_identity() {
         requests.contains(&format!("PATCH {PR_101}")),
         "{requests:?}"
     );
-    assert_only_requests_to(&requests, &["pullrequests"], &["builds", "wiql"]);
+    assert_refetches_only_pull_request(&requests, 101);
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
     assert!(!harness.screen().contains("set by Mona Me"));
 }

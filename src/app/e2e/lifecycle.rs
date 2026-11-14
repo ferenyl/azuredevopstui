@@ -5,8 +5,8 @@ use wiremock::{Mock, ResponseTemplate};
 
 use super::Harness;
 use super::flows::{
-    MY_PRS, PR_101, assert_only_requests_to, connected, expect_patch, fixture_pull_requests,
-    requests_after_confirming, select, wait_for_popup,
+    MY_PRS, PR_101, answer_pull_request, assert_only_requests_to, connected, expect_patch,
+    fixture_pull_request, fixture_pull_requests, requests_after_confirming, select, wait_for_popup,
 };
 use crate::app::{Panel, Popup};
 
@@ -51,11 +51,18 @@ async fn pick_action(harness: &mut Harness, label: &str) {
     harness.press(KeyCode::Enter);
 }
 
+/// Only PR 101 is fetched again: no PR list, and nothing of work items or builds.
 fn assert_reloads_only_the_pull_requests(requests: &[String]) {
+    assert!(
+        requests
+            .iter()
+            .any(|r| r.starts_with("GET ") && r.ends_with("/pullRequests/101")),
+        "{requests:?}"
+    );
     assert_only_requests_to(
         requests,
-        &["git/pullrequests"],
-        &["builds", "wiql", "workitemsbatch"],
+        &[],
+        &["git/pullrequests", "builds", "wiql", "workitemsbatch"],
     );
 }
 
@@ -86,6 +93,9 @@ async fn the_menu_lists_the_actions_of_an_active_pull_request() {
 async fn abandoning_needs_a_confirmation_and_patches_the_status() {
     let mut harness = connected().await;
     expect_patch(&harness, PR_101, r#""status":"abandoned""#).await;
+    let mut abandoned = fixture_pull_request("pr-101.json");
+    abandoned["status"] = "abandoned".into();
+    answer_pull_request(&harness, PR_101, abandoned).await;
     pick_action(&mut harness, "Abandon").await;
     wait_for_popup(&mut harness, |p| matches!(p, Popup::Confirm { .. })).await;
     assert!(harness.screen().contains("Abandon !101"));
@@ -102,6 +112,8 @@ async fn abandoning_needs_a_confirmation_and_patches_the_status() {
         "{requests:?}"
     );
     assert_reloads_only_the_pull_requests(&requests);
+    let listed = harness.app.data.my_prs().unwrap_or_default();
+    assert!(listed.iter().all(|pr| pr.pull_request_id != 101));
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 
@@ -324,8 +336,8 @@ async fn linking_a_work_item_adds_an_artifact_link_and_reloads_only_the_pull_req
     );
     assert_only_requests_to(
         &requests,
-        &["git/pullrequests", "workitems/301"],
-        &["builds", "wiql"],
+        &["pullRequests/101", "workitems/301"],
+        &["git/pullrequests", "builds", "wiql"],
     );
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }

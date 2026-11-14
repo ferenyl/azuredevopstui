@@ -978,7 +978,6 @@ impl Data {
     }
 
     /// Swaps in the fresh version of one PR, or drops it (with its signals) on `None`.
-    #[allow(dead_code)] // wired up by the targeted refresh of single items
     pub fn replace_pr(&mut self, id: u32, pr: Option<PullRequest>) {
         for prs in [&mut self.my_prs, &mut self.other_prs]
             .into_iter()

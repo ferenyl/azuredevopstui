@@ -101,6 +101,14 @@ pub enum Message {
         reload: Vec<Load>,
         result: Result<()>,
     },
+    /// The fresh version of one PR; `None` when it is gone from the lists (no longer active, or
+    /// not someone else's).
+    PullRequestRefreshed {
+        id: u32,
+        /// Created by the user, so its markers load again too.
+        mine: bool,
+        result: Result<Option<PullRequest>>,
+    },
     /// A pipeline run was queued or cancelled.
     BuildUpdated {
         id: u32,

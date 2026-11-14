@@ -1,15 +1,17 @@
 use crossterm::event::KeyCode;
 use serde_json::{Value, json};
-use wiremock::matchers::{body_string_contains, method, path, query_param};
+use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, ResponseTemplate};
 
 use super::Harness;
 use super::flows::{
-    MY_PRS, PR_101, assert_only_requests_to, connected, fixture_pull_requests, select,
-    wait_for_popup,
+    MY_PRS, PR_101, answer_pull_request, assert_only_requests_to,
+    assert_refetches_only_pull_request, connected, fixture_pull_request, fixture_pull_requests,
+    select, wait_for_popup,
 };
 use crate::app::{Panel, Popup};
 
+const PR_202: &str = "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/202";
 const PR_202_REVIEWER: &str =
     "/contoso/project-fabrikam/_apis/git/repositories/repo-api/pullRequests/202/reviewers/me-id";
 
@@ -28,23 +30,10 @@ fn others_with_vote_on_202(vote: i32) -> Value {
     json!({ "value": prs })
 }
 
-fn my_pr_with_vote(vote: i32) -> Value {
-    let mut prs = fixture_pull_requests("pull-requests-mine.json");
-    prs[0]["reviewers"] = json!([reviewer(vote)]);
-    json!({ "value": prs })
-}
-
-async fn answer_my_prs_with_vote(harness: &Harness, vote: i32) {
-    harness
-        .ado
-        .expect_first(
-            Mock::given(method("GET"))
-                .and(path(MY_PRS))
-                .and(query_param("searchCriteria.creatorId", "me-id")),
-            ResponseTemplate::new(200).set_body_json(my_pr_with_vote(vote)),
-            1,
-        )
-        .await;
+async fn answer_pr_101_with_vote(harness: &Harness, vote: i32) {
+    let mut pr = fixture_pull_request("pr-101.json");
+    pr["reviewers"] = json!([reviewer(vote)]);
+    answer_pull_request(harness, PR_101, pr).await;
 }
 
 async fn expect_vote(harness: &Harness, target: &str, vote: i32) {
@@ -83,7 +72,7 @@ async fn all_five_votes_are_sent_and_shown_in_the_detail() {
         let mut harness = Harness::new().await;
         expect_vote(&harness, &format!("{PR_101}/reviewers/me-id"), vote).await;
         harness.connect().await;
-        answer_my_prs_with_vote(&harness, vote).await;
+        answer_pr_101_with_vote(&harness, vote).await;
         select(&mut harness, Panel::MyPrs, 101);
         harness.press(KeyCode::Enter);
         harness.press(KeyCode::Char('v'));
@@ -112,18 +101,16 @@ async fn all_five_votes_are_sent_and_shown_in_the_detail() {
 #[tokio::test]
 async fn voting_drops_the_pull_request_from_the_inbox() {
     let mut harness = Harness::new().await;
-    for (vote, times) in [(0, 1), (10, 1)] {
-        harness
-            .ado
-            .expect_first(
-                Mock::given(method("GET")).and(path(MY_PRS)).and(
-                    wiremock::matchers::query_param_is_missing("searchCriteria.creatorId"),
-                ),
-                ResponseTemplate::new(200).set_body_json(others_with_vote_on_202(vote)),
-                times,
-            )
-            .await;
-    }
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET")).and(path(MY_PRS)).and(
+                wiremock::matchers::query_param_is_missing("searchCriteria.creatorId"),
+            ),
+            ResponseTemplate::new(200).set_body_json(others_with_vote_on_202(0)),
+            1,
+        )
+        .await;
     expect_vote(&harness, PR_202_REVIEWER, 10).await;
     harness.connect().await;
     assert!(inbox_keys(&harness).contains(&"!202".to_string()));
@@ -138,6 +125,12 @@ async fn voting_drops_the_pull_request_from_the_inbox() {
     for _ in 0..4 {
         harness.press(KeyCode::Char('k'));
     }
+    let voted = others_with_vote_on_202(10)["value"]
+        .as_array()
+        .and_then(|prs| prs.iter().find(|pr| pr["pullRequestId"] == 202))
+        .cloned()
+        .unwrap();
+    answer_pull_request(&harness, PR_202, voted).await;
     let before = harness.ado.requests().await.len();
 
     harness.press(KeyCode::Enter);
@@ -148,11 +141,8 @@ async fn voting_drops_the_pull_request_from_the_inbox() {
         requests.contains(&format!("PUT {PR_202_REVIEWER}")),
         "{requests:?}"
     );
-    assert_only_requests_to(
-        &requests,
-        &["git/pullrequests"],
-        &["builds", "wiql", "workitemsbatch"],
-    );
+    assert_refetches_only_pull_request(&requests, 202);
+    assert_only_requests_to(&requests, &[], &["workitemsbatch"]);
     assert!(!inbox_keys(&harness).contains(&"!202".to_string()));
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
