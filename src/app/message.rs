@@ -115,11 +115,13 @@ pub enum Message {
         id: u32,
         result: Result<(Option<WorkItem>, Option<Option<Mention>>)>,
     },
-    /// A pipeline run was queued or cancelled.
+    /// A pipeline run was queued (with the new run) or cancelled (`None`).
     BuildUpdated {
         id: u32,
-        result: Result<()>,
+        result: Result<Option<Build>>,
     },
+    /// The fresh version of one pipeline run.
+    BuildRefreshed(Result<Build>),
     /// The full description of `pr`, which the lists cut off.
     PrDescription {
         pr: Box<PullRequest>,

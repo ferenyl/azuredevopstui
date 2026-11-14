@@ -40,17 +40,42 @@ async fn with_build(status: &str) -> Harness {
     harness
 }
 
+/// The run that queueing answers with: a new run, 502, on `branch`.
+fn queued_run(branch: &str) -> Value {
+    let mut run = build("notStarted");
+    run["id"] = json!(502);
+    run["buildNumber"] = json!("20261020.2");
+    run["sourceBranch"] = json!(branch);
+    run["queueTime"] = json!("2026-10-21T09:30:00Z");
+    run
+}
+
 async fn expect_queued(harness: &Harness, body: Value) {
+    expect_queued_run(harness, body, queued_run("refs/heads/feature/101")).await;
+}
+
+async fn expect_queued_run(harness: &Harness, body: Value, run: Value) {
     harness
         .ado
         .expect(
             Mock::given(method("POST"))
                 .and(path(BUILDS))
                 .and(body_partial_json(body)),
-            ResponseTemplate::new(200).set_body_json(build("notStarted")),
+            ResponseTemplate::new(200).set_body_json(run),
             1,
         )
         .await;
+}
+
+fn listed_ids(harness: &Harness) -> Vec<u32> {
+    harness
+        .app
+        .data
+        .shown_builds()
+        .unwrap_or_default()
+        .iter()
+        .map(|build| build.id)
+        .collect()
 }
 
 async fn open_menu(harness: &mut Harness) {
@@ -82,18 +107,22 @@ async fn rerunning_queues_the_same_branch_and_commit_after_confirming() {
     harness.settle().await;
 
     assert_eq!(harness.ado.received("POST", "/build/builds").await, 1);
-    assert!(harness.ado.received("GET", "/build/builds").await > before);
+    // The new run replaces the old row without a list query.
+    assert_eq!(harness.ado.received("GET", "/build/builds").await, before);
+    assert_eq!(listed_ids(&harness), [502]);
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 
 #[tokio::test]
 async fn queueing_asks_for_a_branch_and_confirms() {
     let mut harness = with_build("completed").await;
-    expect_queued(
+    expect_queued_run(
         &harness,
         json!({ "definition": { "id": 7 }, "sourceBranch": "refs/heads/release" }),
+        queued_run("refs/heads/release"),
     )
     .await;
+    let before = harness.ado.received("GET", "/build/builds").await;
     open_menu(&mut harness).await;
     harness.press(KeyCode::Char('j'));
     harness.press(KeyCode::Enter);
@@ -109,6 +138,7 @@ async fn queueing_asks_for_a_branch_and_confirms() {
     harness.settle().await;
 
     assert_eq!(harness.ado.received("POST", "/build/builds").await, 1);
+    assert_eq!(harness.ado.received("GET", "/build/builds").await, before);
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 
@@ -125,6 +155,15 @@ async fn cancelling_a_running_build_patches_its_status() {
             1,
         )
         .await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET")).and(path(BUILD_501)),
+            ResponseTemplate::new(200).set_body_json(build("cancelling")),
+            1,
+        )
+        .await;
+    let before = harness.ado.received("GET", "/build/builds").await;
     open_menu(&mut harness).await;
     harness.press(KeyCode::Char('j'));
     harness.press(KeyCode::Char('j'));
@@ -135,6 +174,10 @@ async fn cancelling_a_running_build_patches_its_status() {
     harness.settle().await;
 
     assert_eq!(harness.ado.received("PATCH", "/builds/501").await, 1);
+    // Only the cancelled run is fetched again, not the list.
+    assert_eq!(harness.ado.received("GET", "/builds/501").await, 1);
+    assert_eq!(harness.ado.received("GET", "/build/builds").await, before);
+    assert_eq!(listed_ids(&harness), [501]);
     assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
 }
 
@@ -184,4 +227,97 @@ async fn a_failed_queue_shows_the_error_without_reloading() {
     harness.settle().await;
 
     assert_eq!(harness.ado.received("GET", "/build/builds").await, before);
+}
+
+/// Connects with build 501 failed, which puts it in the inbox.
+async fn with_failed_build() -> Harness {
+    let mut failed = build("completed");
+    failed["result"] = json!("failed");
+    failed["finishTime"] = json!("2026-10-20T09:40:00Z");
+    let mut harness = Harness::new().await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET")).and(path(BUILDS)),
+            ResponseTemplate::new(200).set_body_json(json!({ "value": [failed] })),
+            1..,
+        )
+        .await;
+    harness.connect().await;
+    harness.wait_for_text("orders-ci").await;
+    harness.app.focus = Panel::Builds;
+    harness
+}
+
+fn inbox_has_build(harness: &Harness) -> bool {
+    harness
+        .app
+        .data
+        .inbox()
+        .iter()
+        .any(|entry| matches!(&entry.detail, crate::app::Detail::Build(_)))
+}
+
+#[tokio::test]
+async fn rerunning_a_failed_run_takes_it_out_of_the_inbox_without_a_list_query() {
+    let mut harness = with_failed_build().await;
+    assert!(inbox_has_build(&harness));
+    expect_queued(&harness, json!({ "definition": { "id": 7 } })).await;
+    let before = harness.ado.requests().await.len();
+    open_menu(&mut harness).await;
+    harness.press(KeyCode::Enter);
+    harness.press(KeyCode::Char('y'));
+    harness.settle().await;
+
+    let requests = harness.ado.requests().await.split_off(before);
+    assert!(!inbox_has_build(&harness));
+    assert_eq!(listed_ids(&harness), [502]);
+    assert!(
+        requests
+            .iter()
+            .all(|r| !r.starts_with("GET ") && !r.contains("pullRequests") && !r.contains("wiql")),
+        "{requests:?}"
+    );
+}
+
+#[tokio::test]
+async fn rerunning_the_open_run_moves_the_detail_to_the_new_run() {
+    let mut harness = with_build("completed").await;
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET"))
+                .and(path("/contoso/Fabrikam/_apis/build/builds/502/timeline")),
+            ResponseTemplate::new(200).set_body_json(json!({ "records": [] })),
+            1..,
+        )
+        .await;
+    expect_queued(&harness, json!({ "definition": { "id": 7 } })).await;
+    harness.press(KeyCode::Enter);
+    harness.settle().await;
+    open_menu(&mut harness).await;
+    harness.press(KeyCode::Enter);
+    harness.press(KeyCode::Char('y'));
+    harness.settle().await;
+
+    assert!(
+        harness
+            .app
+            .detail
+            .as_ref()
+            .is_some_and(|detail| detail.is_build(502))
+    );
+    assert_eq!(harness.ado.received("GET", "/builds/502/timeline").await, 1);
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn refreshing_still_lists_the_pipeline_runs() {
+    let mut harness = with_build("completed").await;
+    let before = harness.ado.received("GET", "/build/builds").await;
+
+    harness.press(KeyCode::Char('r'));
+    harness.settle().await;
+
+    assert!(harness.ado.received("GET", "/build/builds").await > before);
 }

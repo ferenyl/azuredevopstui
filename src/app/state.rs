@@ -6,7 +6,7 @@ use super::text_input::TextInput;
 use crate::api::{
     Build, ColumnTarget, CompletionOptions, Iteration, Mention, Person, PolicyEvaluation,
     PullRequest, PullRequestChecks, PullRequestDetails, TimelineRow, WorkItem, WorkItemDetails,
-    compare_timestamps, is_approved, is_reviewer_policy,
+    compare_builds, compare_timestamps, is_approved, is_reviewer_policy,
 };
 use crate::config::{MergeStrategy, PrSort, SortConfig, WorkItemSort};
 
@@ -1047,6 +1047,21 @@ impl Data {
         self.rebuild_inbox();
     }
 
+    /// Swaps in the fresh version of a run, found by pipeline and branch, or lists a run on a new
+    /// branch.
+    pub fn replace_build(&mut self, build: Build) {
+        let Some(builds) = &mut self.builds else {
+            return;
+        };
+        let key = |build: &Build| (build.definition.id, build.source_branch.clone());
+        match builds.iter().position(|old| key(old) == key(&build)) {
+            Some(index) => builds[index] = build,
+            None => builds.push(build),
+        }
+        builds.sort_by(compare_builds);
+        self.rebuild_inbox();
+    }
+
     pub fn set_mentions(&mut self, mentions: Vec<Mention>) {
         self.mentions = Some(mentions);
         self.rebuild_inbox();
@@ -1993,6 +2008,61 @@ mod tests {
 
         data.set_mention(20, None);
         assert!(data.inbox().is_empty());
+    }
+
+    fn build_on(id: u32, definition: u32, branch: &str, result: &str, queued: &str) -> Build {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "buildNumber": format!("n{id}"), "status": "completed", "result": result,
+            "definition": { "id": definition, "name": "ci" },
+            "sourceBranch": branch, "queueTime": queued, "finishTime": queued,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_rerun_replaces_the_failed_run_and_leaves_the_inbox() {
+        let mut data = Data::default();
+        data.set_builds(vec![
+            build_on(1, 7, "refs/heads/main", "failed", "2026-10-01T10:00:00Z"),
+            build_on(2, 8, "refs/heads/main", "succeeded", "2026-10-02T10:00:00Z"),
+        ]);
+        assert_eq!(data.inbox().len(), 1);
+
+        data.replace_build(build_on(
+            3,
+            7,
+            "refs/heads/main",
+            "succeeded",
+            "2026-10-03T10:00:00Z",
+        ));
+
+        let ids: Vec<u32> = data.shown_builds().unwrap().iter().map(|b| b.id).collect();
+        assert_eq!(ids, [3, 2]);
+        assert!(data.inbox().is_empty());
+    }
+
+    #[test]
+    fn a_run_on_a_new_branch_is_inserted_and_a_failing_one_enters_the_inbox() {
+        let mut data = Data::default();
+        data.set_builds(vec![build_on(
+            1,
+            7,
+            "refs/heads/main",
+            "succeeded",
+            "2026-10-01T10:00:00Z",
+        )]);
+
+        data.replace_build(build_on(
+            2,
+            7,
+            "refs/heads/release",
+            "failed",
+            "2026-10-02T10:00:00Z",
+        ));
+
+        let ids: Vec<u32> = data.shown_builds().unwrap().iter().map(|b| b.id).collect();
+        assert_eq!(ids, [2, 1]);
+        assert_eq!(data.inbox().len(), 1);
     }
 
     #[test]

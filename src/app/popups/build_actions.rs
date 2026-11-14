@@ -96,12 +96,12 @@ impl App {
                         build.source_version.as_deref(),
                     )
                     .await
-                    .map(|_| ()),
+                    .map(Some),
                 BuildChange::Queue(branch) => api
                     .queue_build(build.definition.id, &branch, None)
                     .await
-                    .map(|_| ()),
-                BuildChange::Cancel => api.cancel_build(build.id).await,
+                    .map(Some),
+                BuildChange::Cancel => api.cancel_build(build.id).await.map(|()| None),
             };
             Message::BuildUpdated {
                 id: build.id,

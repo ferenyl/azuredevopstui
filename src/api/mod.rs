@@ -6,7 +6,7 @@ mod pull_requests;
 mod work_items;
 
 pub use boards::ColumnTarget;
-pub use builds::{TimelineRow, timeline_rows};
+pub use builds::{TimelineRow, compare_builds, timeline_rows};
 #[cfg(test)]
 pub use models::DetailComment;
 pub use models::{

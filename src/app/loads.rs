@@ -18,6 +18,8 @@ pub enum Load {
     PullRequest(u32),
     /// One work item, after a change to it.
     WorkItem(u32),
+    /// One pipeline run, after a change to it.
+    Build(u32),
     Files,
     Diff,
     Log,

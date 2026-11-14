@@ -112,15 +112,26 @@ impl ProjectApi {
                     .unwrap_or(build)
             })
             .collect();
-        builds.sort_by(|a, b| {
-            b.failed()
-                .cmp(&a.failed())
-                .then_with(|| match (&b.queue_time, &a.queue_time) {
-                    (Some(b), Some(a)) => compare_timestamps(b, a),
-                    (b, a) => b.is_some().cmp(&a.is_some()),
-                })
-        });
+        builds.sort_by(compare_builds);
         Ok(builds)
+    }
+
+    /// One pipeline run.
+    pub async fn build(&self, id: u32) -> Result<Build> {
+        self.client
+            .get(
+                &self.client.urls.dev_azure,
+                &[
+                    &self.organization,
+                    &self.project,
+                    "_apis",
+                    "build",
+                    "builds",
+                    &id.to_string(),
+                ],
+                &[],
+            )
+            .await
     }
 
     /// Queues a run of the pipeline; with `source_version` it builds that commit.
@@ -312,6 +323,16 @@ fn push_rows(
 fn last_lines(text: &str, count: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     lines[lines.len().saturating_sub(count)..].join("\n")
+}
+
+/// Failed runs first, then the newest.
+pub fn compare_builds(a: &Build, b: &Build) -> std::cmp::Ordering {
+    b.failed()
+        .cmp(&a.failed())
+        .then_with(|| match (&b.queue_time, &a.queue_time) {
+            (Some(b), Some(a)) => compare_timestamps(b, a),
+            (b, a) => b.is_some().cmp(&a.is_some()),
+        })
 }
 
 /// Keeps the first build per pipeline and branch.
@@ -550,6 +571,28 @@ mod tests {
             .unwrap();
 
         assert_eq!((same.id, other.id), (5, 6));
+    }
+
+    #[tokio::test]
+    async fn one_build_is_fetched_by_id() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/contoso/MyProject/_apis/build/builds/9"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(build_json(
+                9,
+                7,
+                "refs/heads/main",
+                "completed",
+                "failed",
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ProjectApi::with_base_url(&server.uri());
+
+        let build = client.build(9).await.unwrap();
+
+        assert!(build.failed());
     }
 
     #[tokio::test]

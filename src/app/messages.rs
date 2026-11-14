@@ -288,10 +288,36 @@ impl App {
                 Err(err) => self.report_error(err),
             },
             Message::BuildUpdated { id, result } => match result {
-                Ok(()) => {
-                    tracing::info!(id, "pipeline run updated");
-                    self.reload_only(&[Load::Builds]);
+                Ok(Some(new)) => {
+                    tracing::info!(id, "pipeline run queued");
+                    self.data.replace_build(new.clone());
+                    let shown = self.detail.as_ref().is_some_and(|d| d.is_build(id));
+                    let mut loads = Vec::new();
+                    if shown {
+                        // The timeline follows the new run.
+                        self.detail = Some(super::Detail::Build(Box::new(new)));
+                        loads.push(Load::Detail);
+                    }
+                    // A list response in flight may predate the new run.
+                    if self.loads.is_loading(Load::Builds) {
+                        loads.push(Load::Builds);
+                    }
+                    if !loads.is_empty() {
+                        self.reload_only(&loads);
+                    }
                 }
+                Ok(None) => {
+                    tracing::info!(id, "pipeline run cancelled");
+                    let mut loads = vec![Load::Build(id)];
+                    if self.detail.as_ref().is_some_and(|d| d.is_build(id)) {
+                        loads.push(Load::Detail);
+                    }
+                    self.reload_only(&loads);
+                }
+                Err(err) => self.report_error(err),
+            },
+            Message::BuildRefreshed(result) => match result {
+                Ok(build) => self.data.replace_build(build),
                 Err(err) => self.report_error(err),
             },
             Message::Connected(Err(err)) => self.fail(err, Retry::Continue),
@@ -410,7 +436,7 @@ impl App {
             message,
             Message::WorkItemUpdated { result: Ok(()), .. }
                 | Message::PullRequestUpdated { result: Ok(()), .. }
-                | Message::BuildUpdated { result: Ok(()), .. }
+                | Message::BuildUpdated { result: Ok(_), .. }
         );
         self.handle_message(message);
         if let (true, Some(label)) = (succeeded, label) {

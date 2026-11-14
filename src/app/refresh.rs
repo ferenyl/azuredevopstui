@@ -64,6 +64,18 @@ impl App {
             });
         }
 
+        for load in loads {
+            if let Load::Build(id) = load
+                && wanted(self, *load)
+            {
+                let (a, id) = (api.clone(), *id);
+                self.spawn_load(
+                    *load,
+                    async move { Message::BuildRefreshed(a.build(id).await) },
+                );
+            }
+        }
+
         if wanted(self, Load::Mentions) {
             let (a, user_id) = (api.clone(), user.id.clone());
             self.spawn_load(Load::Mentions, async move {
