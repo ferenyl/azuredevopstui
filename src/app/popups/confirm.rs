@@ -39,6 +39,7 @@ impl App {
 
     /// Closes the open popup. A text popup with text asks first; declining that brings it back.
     pub(super) fn cancel_popup(&mut self) {
+        self.mentions.picker = None;
         self.popup = match self.popup.take() {
             Some(Popup::Text { target, text }) if !text.as_str().is_empty() => {
                 Some(Popup::Confirm {

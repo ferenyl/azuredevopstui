@@ -1,5 +1,6 @@
 mod boards;
 mod builds;
+mod members;
 mod models;
 mod projects;
 mod pull_requests;
@@ -11,7 +12,7 @@ pub use builds::{TimelineRow, compare_builds, timeline_rows};
 pub use models::DetailComment;
 pub use models::{
     Board, Build, ChangeKind, ChangedFile, CommentsPage, CurrentUser, FileContent, IdentityRef,
-    Iteration, Link, LinkTarget, Mention, Partial, Person, PolicyEvaluation, PullRequest,
+    Iteration, Link, LinkTarget, Member, Mention, Partial, Person, PolicyEvaluation, PullRequest,
     PullRequestChanges, PullRequestChecks, PullRequestDetails, ReviewSignals, SprintWorkItems,
     THREAD_STATUSES, Thread, TimelineRecord, WorkItem, WorkItemDetails, thread_status_label,
 };
@@ -386,6 +387,10 @@ pub struct ProjectApi {
     default_area: Arc<OnceCell<String>>,
     /// The team's members, fetched once per session.
     team_members: Arc<OnceCell<Vec<Person>>>,
+    /// Active people on the project's teams, fetched once per session.
+    project_members: Arc<OnceCell<Vec<models::Member>>>,
+    /// Names of mentioned people who are on no team, by lowercase id; `None` when not found.
+    identity_names: Arc<Mutex<HashMap<String, Option<String>>>>,
     /// Identity ids of the names in the PR filter, resolved once per session.
     identities: Arc<Mutex<HashMap<String, String>>>,
     /// Review signals of others' PRs by id, reused while a PR is unchanged.
@@ -420,6 +425,8 @@ impl ProjectApi {
             type_states: Arc::default(),
             default_area: Arc::default(),
             team_members: Arc::default(),
+            project_members: Arc::default(),
+            identity_names: Arc::default(),
             identities: Arc::default(),
             reviews: Arc::default(),
             answered_mentions: Arc::default(),

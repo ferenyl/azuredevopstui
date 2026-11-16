@@ -173,8 +173,35 @@ impl ProjectApi {
             repro_steps: rich_text("Microsoft.VSTS.TCM.ReproSteps", fields.repro_steps),
             comment_count: comments.total_count,
             comments_continuation: comments.continuation_token,
-            comments: detail_comments(comments.comments),
+            comments: self.detail_comments(comments.comments).await,
         })
+    }
+
+    /// Markdown comments show their `@<id>` mentions as names; HTML ones already have them.
+    async fn detail_comments(&self, comments: Vec<WorkItemComment>) -> Vec<DetailComment> {
+        let names = self
+            .mention_names(
+                comments
+                    .iter()
+                    .filter(|comment| is_markdown(comment.format.as_deref()))
+                    .map(|comment| comment.text.as_str()),
+            )
+            .await;
+        comments
+            .into_iter()
+            .map(|comment| {
+                let text = if is_markdown(comment.format.as_deref()) {
+                    names.apply(&comment.text)
+                } else {
+                    std::borrow::Cow::Borrowed(comment.text.as_str())
+                };
+                DetailComment {
+                    text: to_rich_text(&text, comment.format.as_deref()),
+                    author: comment.created_by.display_name,
+                    date: comment.created_date,
+                }
+            })
+            .collect()
     }
 
     /// The page of comments older than the one `token` came from.
@@ -183,7 +210,7 @@ impl ProjectApi {
             .comments_page(id, OLDER_COMMENTS_PAGE, Some(token))
             .await?;
         Ok(CommentsPage {
-            comments: detail_comments(list.comments),
+            comments: self.detail_comments(list.comments).await,
             continuation_token: list.continuation_token,
         })
     }
@@ -864,19 +891,12 @@ fn state_names(states: &[WorkItemState], categories: &[&str]) -> Vec<String> {
     names
 }
 
-fn detail_comments(comments: Vec<WorkItemComment>) -> Vec<DetailComment> {
-    comments
-        .into_iter()
-        .map(|comment| DetailComment {
-            author: comment.created_by.display_name,
-            date: comment.created_date,
-            text: to_rich_text(&comment.text, comment.format.as_deref()),
-        })
-        .collect()
+fn is_markdown(format: Option<&str>) -> bool {
+    format.is_some_and(|format| format.eq_ignore_ascii_case("markdown"))
 }
 
 fn to_rich_text(value: &str, format: Option<&str>) -> RichText {
-    if format.is_some_and(|format| format.eq_ignore_ascii_case("markdown")) {
+    if is_markdown(format) {
         RichText::from_markdown(value)
     } else {
         RichText::from_html(value)

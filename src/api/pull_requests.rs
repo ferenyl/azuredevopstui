@@ -6,6 +6,7 @@ use futures::{StreamExt, stream};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use super::members::MentionNames;
 use super::models::{
     ChangeKind, ChangedFile, Comment, FileContent, GitItem, Identity, IterationChanges,
     ListResponse, Partial, Person, PolicyEvaluation, PullRequest, PullRequestChanges,
@@ -179,13 +180,20 @@ impl ProjectApi {
             .iter()
             .filter_map(|item| item.id.parse().ok())
             .collect();
+        let names = self
+            .mention_names(
+                full.description
+                    .as_deref()
+                    .into_iter()
+                    .chain(thread_texts(&threads)),
+            )
+            .await;
 
         Ok(PullRequestDetails {
-            description: full
-                .description
-                .as_deref()
-                .map(|description| RichText::from_markdown(&markdown_images(description))),
-            threads: visible_threads(threads),
+            description: full.description.as_deref().map(|description| {
+                RichText::from_markdown(&markdown_images(&names.apply(description)))
+            }),
+            threads: visible_threads(threads, &names),
             statuses: latest_statuses(statuses.value),
             policies,
             work_items: self.work_items_batch(&ids).await?,
@@ -211,8 +219,9 @@ impl ProjectApi {
             self.client
                 .get(&self.client.urls.dev_azure, &work_items_path, &[]),
         )?;
+        let names = self.mention_names(thread_texts(&threads)).await;
         Ok(PullRequestChecks {
-            threads: visible_threads(threads),
+            threads: visible_threads(threads, &names),
             statuses: latest_statuses(statuses.value),
             policies,
             has_work_items: !work_items.value.is_empty(),
@@ -956,8 +965,16 @@ fn review_signals(pr: &PullRequest, threads: &[Thread], user_id: &str) -> Review
     signals
 }
 
-/// Threads with their deleted and system comments removed; empty threads are dropped.
-fn visible_threads(threads: Vec<Thread>) -> Vec<Thread> {
+fn thread_texts(threads: &[Thread]) -> impl Iterator<Item = &str> {
+    threads
+        .iter()
+        .flat_map(|thread| &thread.comments)
+        .filter_map(|comment| comment.content.as_deref())
+}
+
+/// Threads with their deleted and system comments removed; empty threads are dropped. Mentions
+/// show as names in the rendered text; `content` keeps the ids.
+fn visible_threads(threads: Vec<Thread>, names: &MentionNames) -> Vec<Thread> {
     threads
         .into_iter()
         .filter(|thread| !thread.is_deleted)
@@ -967,8 +984,8 @@ fn visible_threads(threads: Vec<Thread>) -> Vec<Thread> {
             });
             for comment in &mut thread.comments {
                 comment.content = comment.content.as_deref().map(markdown_images);
-                comment.text =
-                    RichText::from_markdown(comment.content.as_deref().unwrap_or_default());
+                let content = comment.content.as_deref().unwrap_or_default();
+                comment.text = RichText::from_markdown(&names.apply(content));
             }
             thread
         })
@@ -1333,7 +1350,7 @@ mod tests {
             thread(json!({ "isDeleted": true, "comments": [comment("Gone", "text", false)] })),
         ];
 
-        let threads = visible_threads(threads);
+        let threads = visible_threads(threads, &MentionNames::default());
 
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].comments.len(), 1);

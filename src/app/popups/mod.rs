@@ -87,6 +87,9 @@ impl App {
         if self.is_confirm_open() {
             return self.handle_confirm_key(key);
         }
+        if self.handle_mention_key(key) {
+            return true;
+        }
         match &mut self.popup {
             Some(Popup::Complete(picker)) if picker.row() == CompleteRow::Message => {
                 picker.message.handle_key(key, false)
@@ -99,7 +102,11 @@ impl App {
                     self.edit_request = Some(text.as_str().to_string());
                     return true;
                 }
-                text.handle_key(key, true)
+                let taken = text.handle_key(key, true);
+                if taken {
+                    self.update_mentions();
+                }
+                taken
             }
             Some(Popup::BuildFilter { text }) => text.handle_key(key, false),
             _ => false,

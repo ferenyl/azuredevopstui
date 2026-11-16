@@ -167,7 +167,8 @@ pub fn render(frame: &mut Frame, app: &App) {
                 }
             };
             let title = format!("{title} · shift/alt+enter: new line ");
-            popup::render_text_input(frame, app, &title, text, main);
+            let input = popup::render_text_input(frame, app, &title, text, main);
+            popup::render_mentions(frame, app, input, main);
         }
         Some(Popup::BuildFilter { text }) => {
             popup::render_text_input(frame, app, " Filter pipelines ", text, main);

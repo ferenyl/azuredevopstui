@@ -4,9 +4,11 @@
   "body": {
     "value": [
       {
+        "id": "web-id",
         "name": "Web"
       },
       {
+        "id": "mobile-id",
         "name": "Mobile"
       }
     ]

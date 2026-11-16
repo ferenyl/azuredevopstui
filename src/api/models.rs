@@ -141,6 +141,40 @@ pub struct TeamMember {
     pub identity: IdentityRef,
 }
 
+/// Someone who can be mentioned: an active person on one of the project's teams.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+    /// Identity id, written as `@<id>` to mention them.
+    pub id: String,
+    pub display_name: String,
+    /// Email or UPN.
+    pub unique_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct ProjectTeam {
+    pub id: String,
+}
+
+/// A team member as the members API lists it, with the flags that tell groups and removed people
+/// apart.
+#[derive(Deserialize)]
+pub struct ProjectTeamMember {
+    pub identity: MemberIdentity,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberIdentity {
+    pub id: String,
+    pub display_name: String,
+    pub unique_name: Option<String>,
+    #[serde(default)]
+    pub is_container: bool,
+    #[serde(default)]
+    pub inactive: bool,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamFieldValues {

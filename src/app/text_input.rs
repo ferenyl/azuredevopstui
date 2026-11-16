@@ -49,6 +49,12 @@ impl TextInput {
         self.cursor += text.len();
     }
 
+    /// Replaces the text from byte offset `start` up to the cursor with `with`.
+    pub fn replace_before_cursor(&mut self, start: usize, with: &str) {
+        self.text.replace_range(start..self.cursor, with);
+        self.cursor = start + with.len();
+    }
+
     pub fn backspace(&mut self) {
         if let Some(c) = self.text[..self.cursor].chars().next_back() {
             self.cursor -= c.len_utf8();

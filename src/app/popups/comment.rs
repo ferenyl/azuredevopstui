@@ -18,13 +18,19 @@ impl App {
             target,
             text: TextInput::default(),
         });
+        self.update_mentions();
     }
 
     pub(in crate::app) fn confirm_text(&mut self, target: TextTarget, text: &str) {
+        self.mentions.picker = None;
         match target {
-            TextTarget::WorkItemComment(id) => self.confirm_comment(id, text),
+            TextTarget::WorkItemComment(id) => {
+                let text = self.mentions.resolve(text);
+                self.confirm_comment(id, &text)
+            }
             TextTarget::PrThread { pr, thread_id } => {
-                self.confirm_thread_comment(pr, thread_id, text)
+                let text = self.mentions.resolve(text);
+                self.confirm_thread_comment(pr, thread_id, &text)
             }
             TextTarget::PrTitle(pr) => self.confirm_pr_title(pr, text),
             TextTarget::PrDescription(pr) => self.confirm_pr_description(pr, text),

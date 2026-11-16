@@ -420,6 +420,7 @@ impl App {
         let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
         if let Some(Popup::Text { text, .. }) = &mut self.popup {
             text.insert_str(&pasted);
+            self.update_mentions();
             return;
         }
         let line = pasted.lines().next().unwrap_or_default();

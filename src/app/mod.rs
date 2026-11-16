@@ -10,6 +10,7 @@ mod inbox;
 mod input;
 mod keymap;
 mod loads;
+mod mention;
 mod message;
 mod messages;
 mod mouse;
@@ -28,6 +29,7 @@ pub use activity::Activity;
 pub use build_log::BuildLog;
 pub use files::Files;
 pub use keymap::Keymap;
+pub use mention::Mentions;
 pub use mouse::{HitAreas, PanelHit, PickerHit};
 pub use setup::{Retry, Selection, SetupStep};
 pub use state::{
@@ -149,6 +151,8 @@ pub struct App {
     pub zoomed: bool,
     /// The left panel whose search is being typed, with its text.
     pub search: Option<(Panel, TextInput)>,
+    /// The project's members and the `@` suggestions of the comment being typed.
+    pub mentions: Mentions,
     /// Where panels, tabs and the open list were drawn last frame, for mouse hit testing.
     pub areas: RefCell<HitAreas>,
     /// Mutations in flight and the history of errors.
@@ -219,6 +223,7 @@ impl App {
             should_quit: false,
             zoomed: false,
             search: None,
+            mentions: Mentions::default(),
             areas: RefCell::default(),
             activity: Activity::default(),
         }
@@ -292,6 +297,7 @@ impl App {
     /// Rebuilds the project API after the client or the organization, project or team changes.
     fn sync_api(&mut self) {
         self.loads.cancel_all();
+        self.mentions.reset();
         self.api = match (&self.client, &self.config) {
             (Some(client), Some(config)) => Some(ProjectApi::new(client.clone(), config)),
             _ => None,

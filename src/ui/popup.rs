@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListState, Paragraph, Wrap};
 use unicode_width::UnicodeWidthChar;
@@ -225,7 +225,14 @@ fn scroll_to_cursor(cursor_row: usize, height: usize) -> u16 {
     (cursor_row + 1).saturating_sub(height) as u16
 }
 
-pub fn render_text_input(frame: &mut Frame, app: &App, title: &str, input: &TextInput, area: Rect) {
+/// Returns where the input was drawn.
+pub fn render_text_input(
+    frame: &mut Frame,
+    app: &App,
+    title: &str,
+    input: &TextInput,
+    area: Rect,
+) -> Rect {
     const WIDTH: u16 = 60;
     let theme = &app.theme;
     let (before, after) = input.split();
@@ -245,6 +252,51 @@ pub fn render_text_input(frame: &mut Frame, app: &App, title: &str, input: &Text
     let input = Paragraph::new(lines).block(block).scroll((scroll, 0));
     frame.render_widget(Clear, area);
     frame.render_widget(input, area);
+    area
+}
+
+/// The `@` suggestions under the comment `input`, or over it when there is no room below.
+pub fn render_mentions(frame: &mut Frame, app: &App, input: Rect, bounds: Rect) {
+    let Some(picker) = &app.mentions.picker else {
+        return;
+    };
+    let theme = &app.theme;
+    let rows: Vec<Line> = match &app.mentions.members {
+        None => vec![Line::from("Loading the project's people…").fg(theme.muted)],
+        Some(_) if picker.matches.is_empty() => return,
+        Some(_) => picker
+            .matches
+            .iter()
+            .map(|member| {
+                let email = (member.unique_name != member.display_name)
+                    .then(|| format!("  {}", member.unique_name));
+                Line::from(vec![
+                    Span::raw(member.display_name.clone()),
+                    Span::raw(email.unwrap_or_default()).fg(theme.muted),
+                ])
+            })
+            .collect(),
+    };
+    let height = rows.len() as u16 + 2;
+    let y = if input.bottom() + height <= bounds.bottom() {
+        input.bottom()
+    } else {
+        input.y.saturating_sub(height).max(bounds.y)
+    };
+    let area = Rect::new(input.x, y, input.width, height).intersection(bounds);
+    let block = Block::bordered()
+        .title(" @ mention · tab/↑↓ choose · enter pick · esc close ")
+        .title_style(Style::new().fg(theme.title))
+        .border_style(Style::new().fg(theme.border_focused))
+        .style(Style::new().bg(theme.background).fg(theme.foreground));
+    let loading = app.mentions.members.is_none();
+    let list = List::new(rows)
+        .block(block)
+        .highlight_style(Style::new().bg(theme.selection_bg).fg(theme.selection_fg))
+        .highlight_symbol("> ");
+    let mut state = ListState::default().with_selected((!loading).then_some(picker.selected));
+    frame.render_widget(Clear, area);
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 #[cfg(test)]

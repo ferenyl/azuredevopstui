@@ -16,6 +16,7 @@ mod keymap;
 mod layout;
 mod lifecycle;
 mod links;
+mod mentions;
 mod mouse;
 mod navigation;
 mod notifications;

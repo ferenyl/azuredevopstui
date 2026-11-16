@@ -380,9 +380,9 @@ Create a PAT in Azure DevOps (*User settings → Personal access tokens*). Use *
 | Work item types, categories, states and tags | `wit/workitemtypes`, `wit/workitemtypecategories`, `wit/workitemtypes/{type}/states`, `wit/tags` | read | Work Items: Read |
 | Sprints, backlogs, boards and the team's area | `work/teamsettings/iterations`, `work/teamsettings/teamfieldvalues`, `work/backlogs`, `work/backlogconfiguration`, `work/boards` | read | Work Items: Read |
 | Create, edit, assign, move, tag and comment on work items | `wit/workitems` (POST, PATCH), `wit/workItems/{id}/comments` (POST) | write | Work Items: Read & Write (`vso.work_write`) |
-| Projects, teams and team members | `projects`, `projects/{project}/teams`, `projects/{project}/teams/{team}/members` | read | Project and Team: Read (`vso.project`) |
+| Projects, teams and team members, and the people to `@` mention (members of all the project's teams) | `projects`, `projects/{project}/teams`, `projects/{project}/teams/{team}/members` | read | Project and Team: Read (`vso.project`) |
 | Current user | `connectionData` | read | Project and Team: Read (any valid token works) |
-| Find people for reviewers, assignees and `other_prs_filter` | `vssps…/_apis/identities` | read | Identity: Read (`vso.identity`) |
+| Find people for reviewers, assignees and `other_prs_filter`, and names of mentioned people who are on no team | `vssps…/_apis/identities` | read | Identity: Read (`vso.identity`) |
 | List your organizations in the setup (optional, type the name instead) | `vssps…/_apis/profile/profiles/me`, `vssps…/_apis/accounts` | read | User Profile: Read (`vso.profile`) |
 
 Write scopes include the read scope of the same area.
@@ -573,7 +573,7 @@ The table lists the Mocha values.
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new state of its type, then `enter`. `esc` cancels and nothing changes |
 | `t` | Edit tags on any work item: type to search, `tab` checks or unchecks the highlighted tag (`[x]`), `enter` saves all checked tags in one change. `enter` without `tab` adds the highlighted tag or removes it if it is already set. A tag that does not exist is created |
-| `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels, asking first when there is text. Edit with `←` `→` `↑` `↓`, `home` / `end` (line), `ctrl+home` / `ctrl+end` (text), `ctrl+←` / `ctrl+→` or `alt+b` / `alt+f` (word), `ctrl+w` or `alt+backspace` (delete word). `ctrl+e` edits the text in `$EDITOR` |
+| `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels, asking first when there is text. Edit with `←` `→` `↑` `↓`, `home` / `end` (line), `ctrl+home` / `ctrl+end` (text), `ctrl+←` / `ctrl+→` or `alt+b` / `alt+f` (word), `ctrl+w` or `alt+backspace` (delete word). `ctrl+e` edits the text in `$EDITOR`. Type `@` and a name or email to mention someone: the list shows the active members of the project's teams (loaded once at startup); `tab` / `↑` `↓` choose, `enter` picks, `esc` closes the list. Picked names are sent as mentions, so the person is notified. Mentions in comments show as names |
 | `]` / `[` | Select the next or previous comment thread on a PR's Comments tab |
 | `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
 | `c` | Complete your PR or set auto-complete: pick the merge strategy, `space` ticks *Delete source branch*, *Transition linked work items*, *Set auto-complete* and *Bypass branch policies*, edit the merge commit message, then `enter`. A PR that is not ready starts with auto-complete ticked; if auto-complete is set, *Cancel auto-complete* is the last row. Bypassing asks `y` / `n` first. `esc` cancels and nothing is sent |

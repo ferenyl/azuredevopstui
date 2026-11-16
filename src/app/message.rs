@@ -149,6 +149,11 @@ pub enum Message {
         item: u32,
         result: Result<Vec<Person>>,
     },
+    /// The active members of `project`, for mentions.
+    ProjectMembers {
+        project: String,
+        result: Result<Vec<crate::api::Member>>,
+    },
     /// The types of the project, loaded once connected.
     ProjectWorkItemTypes(Result<Vec<String>>),
     /// The types of a child of `parent`.

@@ -112,6 +112,7 @@ impl App {
                 self.load_board();
                 self.work_item_types.clear();
                 self.load_project_work_item_types();
+                self.load_members();
                 self.refresh();
             }
             Message::MyPullRequests(result) => match result {
@@ -212,6 +213,9 @@ impl App {
                 Ok(people) => self.popup = Some(Popup::Assignee(AssigneePicker::new(item, people))),
                 Err(err) => self.report_error(err),
             },
+            Message::ProjectMembers { project, result } => {
+                self.handle_project_members(project, result)
+            }
             Message::TeamMembers { item, result } => match result {
                 Ok(people) => {
                     if let Some(Popup::Assignee(picker)) = &mut self.popup

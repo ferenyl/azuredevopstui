@@ -1,0 +1,30 @@
+{
+  "method": "GET",
+  "path": "/contoso/_apis/projects/Fabrikam/teams/web-id/members",
+  "body": {
+    "value": [
+      {
+        "identity": {
+          "id": "me-id",
+          "displayName": "Mona Me",
+          "uniqueName": "mona@contoso.com"
+        }
+      },
+      {
+        "identity": {
+          "id": "ann-id",
+          "displayName": "Ann Berg",
+          "uniqueName": "ann@contoso.com"
+        }
+      },
+      {
+        "identity": {
+          "id": "web-team-id",
+          "displayName": "[Fabrikam]\\Web Team",
+          "uniqueName": "vstfs:///Classification/TeamProject/web-team-id",
+          "isContainer": true
+        }
+      }
+    ]
+  }
+}
