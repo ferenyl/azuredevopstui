@@ -2,3 +2,4 @@
 /aur/*/*
 !/aur/*/PKGBUILD
 !/aur/*/.SRCINFO
+.trace-mcp
