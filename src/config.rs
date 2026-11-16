@@ -18,7 +18,7 @@ const COLORS_FILE: &str = "colors.json";
 const ORGANIZATIONS_DIR: &str = "organizations";
 
 /// Keys stored per organization in `organizations/<organization>.json`.
-const ORGANIZATION_KEYS: [&str; 11] = [
+const ORGANIZATION_KEYS: [&str; 12] = [
     "organization",
     "project",
     "team",
@@ -27,6 +27,7 @@ const ORGANIZATION_KEYS: [&str; 11] = [
     "default_sprint",
     "work_item_types",
     "other_prs_filter",
+    "mention_groups",
     "recent_tags",
     "merge_strategy",
     "completion",
@@ -52,6 +53,9 @@ pub struct Config {
     pub auth: AuthConfig,
     #[serde(default)]
     pub other_prs_filter: OtherPrsFilter,
+    /// Groups whose members are suggested for `@` mentions instead of the project's team members.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mention_groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready_column: Option<String>,
     /// Iteration path shown instead of the team's current sprint.
@@ -339,6 +343,7 @@ impl Config {
             browser_command: None,
             auth: AuthConfig::default(),
             other_prs_filter: OtherPrsFilter::default(),
+            mention_groups: Vec::new(),
             ready_column: None,
             default_sprint: None,
             work_item_types: Vec::new(),

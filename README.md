@@ -380,12 +380,14 @@ Create a PAT in Azure DevOps (*User settings → Personal access tokens*). Use *
 | Work item types, categories, states and tags | `wit/workitemtypes`, `wit/workitemtypecategories`, `wit/workitemtypes/{type}/states`, `wit/tags` | read | Work Items: Read |
 | Sprints, backlogs, boards and the team's area | `work/teamsettings/iterations`, `work/teamsettings/teamfieldvalues`, `work/backlogs`, `work/backlogconfiguration`, `work/boards` | read | Work Items: Read |
 | Create, edit, assign, move, tag and comment on work items | `wit/workitems` (POST, PATCH), `wit/workItems/{id}/comments` (POST) | write | Work Items: Read & Write (`vso.work_write`) |
-| Projects, teams and team members, and the people to `@` mention (members of all the project's teams) | `projects`, `projects/{project}/teams`, `projects/{project}/teams/{team}/members` | read | Project and Team: Read (`vso.project`) |
+| Projects, teams and team members; the project's teams for `@` mentions | `projects`, `projects/{project}/teams`, `projects/{project}/teams/{team}/members` | read | Project and Team: Read (`vso.project`) |
 | Current user | `connectionData` | read | Project and Team: Read (any valid token works) |
-| Find people for reviewers, assignees and `other_prs_filter`, and names of mentioned people who are on no team | `vssps…/_apis/identities` | read | Identity: Read (`vso.identity`) |
+| Find people for reviewers, assignees and `other_prs_filter`; the people to `@` mention: the members of the teams or of `mention_groups`, also through groups such as Entra ID groups; names of mentioned people | `vssps…/_apis/identities` | read | Identity: Read (`vso.identity`) |
 | List your organizations in the setup (optional, type the name instead) | `vssps…/_apis/profile/profiles/me`, `vssps…/_apis/accounts` | read | User Profile: Read (`vso.profile`) |
 
 Write scopes include the read scope of the same area.
+
+Identity: Read is listed under *Show all scopes* in the PAT dialog. Without it, `@` mentions only suggest the people directly on a team, not the members of groups on it, `mention_groups` cannot be used, and mentions of people on no team show as `@<id>`.
 
 **Read-only set** (browse, nothing can be changed): Code: Read, Work Items: Read, Build: Read, Project and Team: Read, Identity: Read and, optionally, User Profile: Read.
 
@@ -399,7 +401,7 @@ The config is split over three kinds of files in `$XDG_CONFIG_HOME/azuredevopstu
 
 - `config.json`: the general settings, and `organization`, which selects the organization file.
 - `colors.json`: `theme` and `colors`.
-- `organizations/<organization>.json`: one file per organization with `organization`, `project`, `team`, `auth`, `ready_column`, `default_sprint`, `work_item_types`, `other_prs_filter`, `recent_tags`, `merge_strategy` and `completion`.
+- `organizations/<organization>.json`: one file per organization with `organization`, `project`, `team`, `auth`, `ready_column`, `default_sprint`, `work_item_types`, `other_prs_filter`, `mention_groups`, `recent_tags`, `merge_strategy` and `completion`.
 
 An older single `config.json` that holds everything still loads. The next save splits it into the files above without losing values. The table below lists all keys, whichever file they live in; the example shows them as one object.
 
@@ -415,6 +417,7 @@ An older single `config.json` that holds everything still loads. The next save s
     "reviewers": ["[MyProject]\\Developers", "anna.andersson@example.com"],
     "creators": []
   },
+  "mention_groups": ["[MyProject]\\Developers"],
   "ready_column": "Ready",
   "default_sprint": "MyProject\\Sprint 42",
   "work_item_types": [],
@@ -449,6 +452,7 @@ An older single `config.json` that holds everything still loads. The next save s
 | `other_prs_filter.creators` | `[]` | Show PRs created by any of these users or groups. |
 | `other_prs_filter.show_approved` | `false` | Also show PRs whose reviewer policies are approved (set with `f`). |
 | `other_prs_filter.show_drafts` | `false` | Also show draft PRs (set with `f`). |
+| `mention_groups` | `[]` | Groups whose members are suggested for `@` mentions, instead of the members of the project's teams. See [Mentions](#mentions). |
 | `ready_column` | set by setup | The board column treated as *ready*. |
 | `default_sprint` | not set | Iteration path of the sprint shown at start instead of the team's current sprint, for example `"MyProject\\Sprint 42"`. See [Sprint](#sprint). |
 | `work_item_types` | `[]` | Work item types shown in *My work items* and *Ready*, for example `["User Story", "Bug"]`. An empty array shows all types. |
@@ -475,6 +479,14 @@ An older single `config.json` that holds everything still loads. The next save s
 When both arrays are empty, the list shows every active PR in the project, across all repositories, except your own.
 
 Entries can be users, given as email or display name, or groups, given as `[Project]\Group` (escape the backslash in JSON: `"[MyProject]\\Developers"`). Each entry is resolved through the identities API. A PR is shown if it matches any entry, and duplicates are removed.
+
+### Mentions
+
+Typing `@` in a comment suggests people to mention. By default they are the members of all the project's teams. When a team holds groups, such as an Entra ID group, the people in them are included, also through nested groups. Groups themselves and inactive accounts are left out, and an Entra ID group only lists the people who have signed in to Azure DevOps. The list is loaded once per session; restart the app to see changes.
+
+Set `mention_groups` to suggest the members of other groups instead, for example when the teams are not kept up to date. Groups are given like in the [Others' PRs filter](#others-prs-filter): `"[MyProject]\\Developers"` for an Azure DevOps group, or the name of an Entra ID group. When the name also matches people, the group is used. A group that is not found is skipped; when none is found, typing `@` shows the error.
+
+Both need the Identity: Read scope on a PAT (see [PAT scopes](#pat-scopes)).
 
 ### Pipelines filter
 
@@ -573,7 +585,7 @@ The table lists the Mocha values.
 | `a` | Assign a work item to yourself |
 | `u` | Unassign yourself from a work item: pick the new state of its type, then `enter`. `esc` cancels and nothing changes |
 | `t` | Edit tags on any work item: type to search, `tab` checks or unchecks the highlighted tag (`[x]`), `enter` saves all checked tags in one change. `enter` without `tab` adds the highlighted tag or removes it if it is already set. A tag that does not exist is created |
-| `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels, asking first when there is text. Edit with `←` `→` `↑` `↓`, `home` / `end` (line), `ctrl+home` / `ctrl+end` (text), `ctrl+←` / `ctrl+→` or `alt+b` / `alt+f` (word), `ctrl+w` or `alt+backspace` (delete word). `ctrl+e` edits the text in `$EDITOR`. Type `@` and a name or email to mention someone: the list shows the active members of the project's teams (loaded once at startup); `tab` / `↑` `↓` choose, `enter` picks, `esc` closes the list. Picked names are sent as mentions, so the person is notified. Mentions in comments show as names |
+| `m` | Comment on a work item, or on a PR: replies to the selected thread on the Comments tab, otherwise starts a new thread. Type the text, `shift+enter` or `alt+enter` for a new line, `enter` sends. `esc` cancels, asking first when there is text. Edit with `←` `→` `↑` `↓`, `home` / `end` (line), `ctrl+home` / `ctrl+end` (text), `ctrl+←` / `ctrl+→` or `alt+b` / `alt+f` (word), `ctrl+w` or `alt+backspace` (delete word). `ctrl+e` edits the text in `$EDITOR`. Type `@` and a name or email to mention someone: the list shows the active members of the project's teams, or of `mention_groups` (loaded once at startup, see [Mentions](#mentions)); `tab` / `↑` `↓` choose, `enter` picks, `esc` closes the list. Picked names are sent as mentions, so the person is notified. Mentions in comments show as names |
 | `]` / `[` | Select the next or previous comment thread on a PR's Comments tab |
 | `x` | Set the status of the selected thread: active, resolved, won't fix or closed, then `enter`. `esc` cancels and nothing is sent |
 | `c` | Complete your PR or set auto-complete: pick the merge strategy, `space` ticks *Delete source branch*, *Transition linked work items*, *Set auto-complete* and *Bypass branch policies*, edit the merge commit message, then `enter`. A PR that is not ready starts with auto-complete ticked; if auto-complete is set, *Cancel auto-complete* is the last row. Bypassing asks `y` / `n` first. `esc` cancels and nothing is sent |

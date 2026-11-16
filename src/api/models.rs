@@ -117,7 +117,22 @@ pub struct Identity {
     #[serde(default)]
     pub provider_display_name: String,
     #[serde(default)]
+    pub custom_display_name: Option<String>,
+    #[serde(default)]
     pub properties: UserProperties,
+    /// A group.
+    #[serde(default)]
+    pub is_container: bool,
+    /// Has a membership in some group of the organization.
+    #[serde(default = "active")]
+    pub is_active: bool,
+    /// The members of a group, with `queryMembership`.
+    #[serde(default)]
+    pub member_ids: Vec<String>,
+}
+
+fn active() -> bool {
+    true
 }
 
 /// Someone a work item can be assigned to; an empty `unique_name` means unassigned.

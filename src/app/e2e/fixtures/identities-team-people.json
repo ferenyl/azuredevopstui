@@ -1,0 +1,80 @@
+{
+  "method": "GET",
+  "path": "/contoso/_apis/identities",
+  "query": {
+    "identityIds": "ann-id,annika-id,devs-group-id,gone-id,me-id,olle-id",
+    "queryMembership": "None"
+  },
+  "body": {
+    "count": 6,
+    "value": [
+      {
+        "id": "ann-id",
+        "providerDisplayName": "Ann Berg",
+        "isActive": true,
+        "properties": {
+          "Account": {
+            "$type": "System.String",
+            "$value": "ann@contoso.com"
+          }
+        }
+      },
+      {
+        "id": "annika-id",
+        "providerDisplayName": "Annika Lund",
+        "isActive": true,
+        "properties": {
+          "Account": {
+            "$type": "System.String",
+            "$value": "annika@contoso.com"
+          }
+        }
+      },
+      {
+        "id": "devs-group-id",
+        "providerDisplayName": "[contoso]\\Developers (Entra ID)",
+        "isContainer": true,
+        "isActive": true,
+        "properties": {
+          "Account": {
+            "$type": "System.String",
+            "$value": "Developers"
+          }
+        }
+      },
+      {
+        "id": "gone-id",
+        "providerDisplayName": "Anna Gone",
+        "isActive": false,
+        "properties": {
+          "Account": {
+            "$type": "System.String",
+            "$value": "anna.gone@contoso.com"
+          }
+        }
+      },
+      {
+        "id": "me-id",
+        "providerDisplayName": "Mona Me",
+        "isActive": true,
+        "properties": {
+          "Account": {
+            "$type": "System.String",
+            "$value": "mona@contoso.com"
+          }
+        }
+      },
+      {
+        "id": "olle-id",
+        "providerDisplayName": "Olle Other",
+        "isActive": true,
+        "properties": {
+          "Account": {
+            "$type": "System.String",
+            "$value": "olle@contoso.com"
+          }
+        }
+      }
+    ]
+  }
+}

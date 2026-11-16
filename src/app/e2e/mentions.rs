@@ -78,29 +78,165 @@ async fn expect_post(harness: &Harness, target: &str, body_part: &str) {
         .await;
 }
 
-#[tokio::test]
-async fn members_of_every_team_are_loaded_once_at_startup() {
-    let mut harness = connected().await;
-    harness.settle().await;
-
-    assert_eq!(harness.ado.received("GET", WEB_MEMBERS).await, 1);
-    assert_eq!(harness.ado.received("GET", MOBILE_MEMBERS).await, 1);
+fn member_names(harness: &Harness) -> Vec<String> {
     let members = harness
         .app
         .mentions
         .members
         .clone()
         .expect("members loaded");
-    let names: Vec<_> = members.iter().map(|m| m.display_name.as_str()).collect();
-    assert_eq!(names, ["Ann Berg", "Annika Lund", "Mona Me"]);
+    members.into_iter().map(|m| m.display_name).collect()
+}
+
+#[tokio::test]
+async fn members_of_every_team_and_its_groups_are_loaded_once_at_startup() {
+    let mut harness = connected().await;
+    harness.settle().await;
+
+    // Olle is only on a team through a group; groups and inactive people are left out.
+    assert_eq!(
+        member_names(&harness),
+        ["Ann Berg", "Annika Lund", "Mona Me", "Olle Other"]
+    );
+    let identities = harness.ado.received("GET", "/_apis/identities").await;
+    assert_eq!(identities, 2, "expand the teams, then resolve their people");
+    assert_eq!(harness.ado.received("GET", WEB_MEMBERS).await, 0);
 
     comment_on_301(&mut harness).await;
-    harness.type_text("@a");
+    harness.type_text("@ol");
     wait_for_suggestions(&mut harness).await;
     harness.settle().await;
 
+    assert_eq!(suggested(&harness), ["Olle Other"]);
+    assert_eq!(
+        harness.ado.received("GET", "/_apis/identities").await,
+        identities
+    );
+}
+
+#[tokio::test]
+async fn without_identity_access_the_people_directly_on_the_teams_are_used() {
+    let mut harness = Harness::new().await;
+    harness
+        .ado
+        .fail("GET", "/contoso/_apis/identities", 403)
+        .await;
+    harness.connect().await;
+    harness.settle().await;
+
+    assert_eq!(
+        member_names(&harness),
+        ["Ann Berg", "Annika Lund", "Mona Me"]
+    );
     assert_eq!(harness.ado.received("GET", WEB_MEMBERS).await, 1);
-    assert_eq!(harness.ado.received("GET", "/_apis/identities").await, 0);
+    assert_eq!(harness.ado.received("GET", MOBILE_MEMBERS).await, 1);
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+fn identity(id: &str, name: &str, account: &str) -> serde_json::Value {
+    json!({
+        "id": id,
+        "providerDisplayName": name,
+        "properties": { "Account": { "$value": account } }
+    })
+}
+
+#[tokio::test]
+async fn mention_groups_replace_the_team_members() {
+    let mut harness = Harness::new().await;
+    let mut config = (*harness.config()).clone();
+    config.mention_groups = vec!["Developers".into(), "Nobody".into()];
+    harness.app.config = Some(std::sync::Arc::new(config));
+    harness.app.sync_api();
+    let identities = || Mock::given(method("GET")).and(path("/contoso/_apis/identities"));
+    let answer = |body| ResponseTemplate::new(200).set_body_json(body);
+    // A person matching the name is not taken for the group.
+    harness
+        .ado
+        .expect(
+            identities().and(query_param("filterValue", "Developers")),
+            answer(json!({ "value": [
+                identity("fan-id", "Developers Fan", "fan@contoso.com"),
+                {
+                    "id": "devs-id",
+                    "providerDisplayName": "[contoso]\\Developers",
+                    "isContainer": true
+                }
+            ]})),
+            1,
+        )
+        .await;
+    harness
+        .ado
+        .expect(
+            identities().and(query_param("filterValue", "Nobody")),
+            answer(json!({ "value": [] })),
+            1,
+        )
+        .await;
+    harness
+        .ado
+        .expect(
+            identities()
+                .and(query_param("identityIds", "devs-id"))
+                .and(query_param("queryMembership", "ExpandedDown")),
+            answer(json!({ "value": [{
+                "id": "devs-id",
+                "isContainer": true,
+                "memberIds": ["olle-id", "annika-id"]
+            }]})),
+            1,
+        )
+        .await;
+    harness
+        .ado
+        .expect(
+            identities()
+                .and(query_param("identityIds", "annika-id,olle-id"))
+                .and(query_param("queryMembership", "None")),
+            answer(json!({ "value": [
+                identity("annika-id", "Annika Lund", "annika@contoso.com"),
+                identity("olle-id", "Olle Other", "olle@contoso.com")
+            ]})),
+            1,
+        )
+        .await;
+
+    harness.connect().await;
+    harness.settle().await;
+
+    assert_eq!(member_names(&harness), ["Annika Lund", "Olle Other"]);
+    assert_eq!(harness.ado.received("GET", "/Fabrikam/teams").await, 0);
+    assert!(harness.app.error.is_none(), "{:?}", harness.app.error);
+}
+
+#[tokio::test]
+async fn unknown_mention_groups_show_an_error_when_typing_at() {
+    let mut harness = Harness::new().await;
+    let mut config = (*harness.config()).clone();
+    config.mention_groups = vec!["Nobody".into()];
+    harness.app.config = Some(std::sync::Arc::new(config));
+    harness.app.sync_api();
+    harness
+        .ado
+        .expect(
+            Mock::given(method("GET"))
+                .and(path("/contoso/_apis/identities"))
+                .and(query_param("filterValue", "Nobody")),
+            ResponseTemplate::new(200).set_body_json(json!({ "value": [] })),
+            2,
+        )
+        .await;
+    harness.connect().await;
+    harness.settle().await;
+    assert!(harness.app.error.is_none(), "quiet at startup");
+
+    comment_on_301(&mut harness).await;
+    harness.type_text("@a");
+    harness.wait_for(|app| app.error.is_some()).await;
+
+    let error = harness.app.error.clone().unwrap();
+    assert!(error.contains("group not found: Nobody"), "{error}");
 }
 
 #[tokio::test]
@@ -277,6 +413,8 @@ async fn mentions_in_pull_request_threads_show_names() {
         )
         .await;
     harness.connect().await;
+    harness.settle().await;
+    let at_startup = harness.ado.received("GET", "/_apis/identities").await;
     select(&mut harness, Panel::MyPrs, 101);
     harness.press(KeyCode::Enter);
     harness
@@ -288,5 +426,9 @@ async fn mentions_in_pull_request_threads_show_names() {
         .wait_for_text("@Ann Berg can you check this, @Mona Me?")
         .await;
 
-    assert_eq!(harness.ado.received("GET", "/_apis/identities").await, 0);
+    // Both are project members, so nobody is looked up.
+    assert_eq!(
+        harness.ado.received("GET", "/_apis/identities").await,
+        at_startup
+    );
 }

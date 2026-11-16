@@ -717,7 +717,7 @@ impl ProjectApi {
             .collect())
     }
 
-    async fn find_identities(&self, text: &str) -> Result<Vec<Identity>> {
+    pub(super) async fn find_identities(&self, text: &str) -> Result<Vec<Identity>> {
         let base = format!("{}/{}", self.client.urls.vssps_dev_azure, self.organization);
         let identities: ListResponse<Identity> = self
             .client

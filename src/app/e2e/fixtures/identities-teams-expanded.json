@@ -1,0 +1,38 @@
+{
+  "method": "GET",
+  "path": "/contoso/_apis/identities",
+  "query": {
+    "identityIds": "web-id,mobile-id",
+    "queryMembership": "ExpandedDown"
+  },
+  "body": {
+    "count": 2,
+    "value": [
+      {
+        "id": "web-id",
+        "providerDisplayName": "[Fabrikam]\\Web",
+        "isContainer": true,
+        "isActive": true,
+        "memberIds": [
+          "me-id",
+          "ann-id",
+          "devs-group-id"
+        ]
+      },
+      {
+        "id": "mobile-id",
+        "providerDisplayName": "[Fabrikam]\\Mobile",
+        "isContainer": true,
+        "isActive": true,
+        "memberIds": [
+          "ann-id",
+          "annika-id",
+          "gone-id",
+          "devs-group-id",
+          "olle-id",
+          "web-id"
+        ]
+      }
+    ]
+  }
+}

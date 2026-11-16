@@ -263,6 +263,9 @@ pub fn render_mentions(frame: &mut Frame, app: &App, input: Rect, bounds: Rect) 
     let theme = &app.theme;
     let rows: Vec<Line> = match &app.mentions.members {
         None => vec![Line::from("Loading the project's people…").fg(theme.muted)],
+        Some(members) if members.is_empty() => {
+            vec![Line::from("No people found on the project's teams").fg(theme.muted)]
+        }
         Some(_) if picker.matches.is_empty() => return,
         Some(_) => picker
             .matches
@@ -289,7 +292,7 @@ pub fn render_mentions(frame: &mut Frame, app: &App, input: Rect, bounds: Rect) 
         .title_style(Style::new().fg(theme.title))
         .border_style(Style::new().fg(theme.border_focused))
         .style(Style::new().bg(theme.background).fg(theme.foreground));
-    let loading = app.mentions.members.is_none();
+    let loading = app.mentions.members.as_ref().is_none_or(Vec::is_empty);
     let list = List::new(rows)
         .block(block)
         .highlight_style(Style::new().bg(theme.selection_bg).fg(theme.selection_fg))

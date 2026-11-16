@@ -387,6 +387,8 @@ pub struct ProjectApi {
     default_area: Arc<OnceCell<String>>,
     /// The team's members, fetched once per session.
     team_members: Arc<OnceCell<Vec<Person>>>,
+    /// Groups whose members are mentioned instead of the teams' members.
+    mention_groups: Arc<[String]>,
     /// Active people on the project's teams, fetched once per session.
     project_members: Arc<OnceCell<Vec<models::Member>>>,
     /// Names of mentioned people who are on no team, by lowercase id; `None` when not found.
@@ -401,7 +403,9 @@ pub struct ProjectApi {
 
 impl ProjectApi {
     pub fn new(client: AdoClient, config: &Config) -> Self {
-        Self::for_team(client, &config.organization, &config.project, &config.team)
+        let mut api = Self::for_team(client, &config.organization, &config.project, &config.team);
+        api.mention_groups = config.mention_groups.clone().into();
+        api
     }
 
     #[cfg(test)]
@@ -425,6 +429,7 @@ impl ProjectApi {
             type_states: Arc::default(),
             default_area: Arc::default(),
             team_members: Arc::default(),
+            mention_groups: Arc::from([]),
             project_members: Arc::default(),
             identity_names: Arc::default(),
             identities: Arc::default(),
